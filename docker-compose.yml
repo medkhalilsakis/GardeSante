@@ -1,0 +1,31 @@
+version: '3.9'
+
+services:
+
+  postgres:
+    image: postgres:16
+
+    restart: always
+
+    environment:
+      POSTGRES_USER: hospital_user
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: hospital_guard
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+
+    ports:
+      - "5000:5000"
+
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
