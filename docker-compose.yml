@@ -1,31 +1,101 @@
 version: '3.9'
 
 services:
-
+  # ============================================================
+  # PostgreSQL — Base de données principale
+  # ============================================================
   postgres:
-    image: postgres:16
-
-    restart: always
-
+    image: postgres:16-alpine
+    container_name: gardesante_db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: hospital_user
-      POSTGRES_PASSWORD: password123
-      POSTGRES_DB: hospital_guard
-
+      POSTGRES_USER: ${DB_USER:-hospital_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password123}
+      POSTGRES_DB: ${DB_NAME:-hospital_guard}
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5432:5432"
-
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-hospital_user} -d ${DB_NAME:-hospital_guard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gardesante_net
 
+  # ============================================================
+  # Backend — API Express.js + Socket.io
+  # ============================================================
   backend:
-    build: ./backend
-
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gardesante_api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 5000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-hospital_guard}
+      DB_USER: ${DB_USER:-hospital_user}
+      DB_PASSWORD: ${DB_PASSWORD:-password123}
+      JWT_SECRET: ${JWT_SECRET:-gardesante_jwt_secret_CHANGE_IN_PRODUCTION_min32chars}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-gardesante_refresh_secret_CHANGE_IN_PRODUCTION}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      SEED_DB: ${SEED_DB:-false}
     ports:
       - "5000:5000"
-
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - gardesante_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  # ============================================================
+  # Frontend — React + Vite (dev mode)
+  # ============================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    container_name: gardesante_web
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+      VITE_SOCKET_URL: http://localhost:5000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - gardesante_net
+
+# ============================================================
+# Volumes persistants
+# ============================================================
 volumes:
   postgres_data:
+    driver: local
+
+# ============================================================
+# Réseau interne
+# ============================================================
+networks:
+  gardesante_net:
+    driver: bridge
