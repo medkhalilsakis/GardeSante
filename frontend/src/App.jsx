@@ -1,23 +1,28 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
-import { useAuthStore } from './store';
+import { useAuthStore, useUIStore } from './store';
 import AppLayout from './components/layout/AppLayout';
 import './index.css';
 
-// Lazy load pages
-const LoginPage = lazy(() => import('./pages/auth/LoginPage'));
-const DashboardPage = lazy(() => import('./pages/dashboard/DashboardPage'));
-const SchedulesPage = lazy(() => import('./pages/schedules/SchedulesPage'));
-const ScheduleDetailPage = lazy(() => import('./pages/schedules/ScheduleDetailPage'));
-const ShiftsPage = lazy(() => import('./pages/shifts/ShiftsPage'));
-const AbsencesPage = lazy(() => import('./pages/absences/AbsencesPage'));
-const ReplacementsPage = lazy(() => import('./pages/replacements/ReplacementsPage'));
-const StatisticsPage = lazy(() => import('./pages/statistics/StatisticsPage'));
-const UsersPage = lazy(() => import('./pages/users/UsersPage'));
-const DepartmentsPage = lazy(() => import('./pages/departments/DepartmentsPage'));
-const SettingsPage = lazy(() => import('./pages/settings/SettingsPage'));
+const LoginPage                = lazy(() => import('./pages/auth/LoginPage'));
+const DashboardPage            = lazy(() => import('./pages/dashboard/DashboardPage'));
+const DirectorDashboard        = lazy(() => import('./pages/director/DirectorDashboard'));
+const SuperAdminDashboard      = lazy(() => import('./pages/superadmin/SuperAdminDashboard'));
+const SchedulesPage            = lazy(() => import('./pages/schedules/SchedulesPage'));
+const ScheduleDetailPage       = lazy(() => import('./pages/schedules/ScheduleDetailPage'));
+const ShiftsPage               = lazy(() => import('./pages/shifts/ShiftsPage'));
+const AbsencesPage             = lazy(() => import('./pages/absences/AbsencesPage'));
+const ReplacementsPage         = lazy(() => import('./pages/replacements/ReplacementsPage'));
+const StatisticsPage           = lazy(() => import('./pages/statistics/StatisticsPage'));
+const UsersPage                = lazy(() => import('./pages/users/UsersPage'));
+const DepartmentsPage          = lazy(() => import('./pages/departments/DepartmentsPage'));
+const SettingsPage             = lazy(() => import('./pages/settings/SettingsPage'));
+const ProfilePage              = lazy(() => import('./pages/profile/ProfilePage'));
+const ProfileRequestsAdminPage = lazy(() => import('./pages/profile/ProfileRequestsAdminPage'));
+const HistoryPage              = lazy(() => import('./pages/history/HistoryPage'));
+const ChefDeServiceDashboard   = lazy(() => import('./pages/schedules/ChefDeServiceDashboard'));
 
 // Query Client
 const queryClient = new QueryClient({
@@ -39,7 +44,7 @@ const PageLoader = () => (
     <div style={{ textAlign: 'center' }}>
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2"
         className="animate-spin" style={{ display: 'block', margin: '0 auto 16px' }}>
-        <path d="M21 12a9 9 0 11-6.219-8.56"/>
+        <path d="M21 12a9 9 0 11-6.219-8.56" />
       </svg>
       <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>Chargement...</p>
     </div>
@@ -58,7 +63,7 @@ function ProtectedRoute({ children, permission }) {
         padding: 40,
       }}>
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="2">
-          <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+          <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
         </svg>
         <p style={{ fontSize: 'var(--font-xl)', fontWeight: 700, color: 'var(--text-primary)' }}>Accès refusé</p>
         <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>Vous n'avez pas les permissions nécessaires pour accéder à cette page.</p>
@@ -69,6 +74,13 @@ function ProtectedRoute({ children, permission }) {
 }
 
 export default function App() {
+  const { theme } = useUIStore();
+
+  // Appliquer le thème persisté au chargement de l'app
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme || 'light');
+  }, [theme]);
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
@@ -88,6 +100,25 @@ export default function App() {
               <Route path="/dashboard" element={
                 <ProtectedRoute>
                   <DashboardPage />
+                </ProtectedRoute>
+              } />
+
+              {/* Super Admin — tableau de bord global */}
+              <Route path="/admin" element={
+                <ProtectedRoute>
+                  <SuperAdminDashboard />
+                </ProtectedRoute>
+              } />
+
+              {/* Dashboard Directeur — /director et /director/:section */}
+              <Route path="/director" element={
+                <ProtectedRoute>
+                  <DirectorDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/director/:section" element={
+                <ProtectedRoute>
+                  <DirectorDashboard />
                 </ProtectedRoute>
               } />
 
@@ -144,6 +175,36 @@ export default function App() {
                   <SettingsPage />
                 </ProtectedRoute>
               } />
+
+
+
+              {/* Historique — tous les utilisateurs */}
+              <Route path="/history" element={
+                <ProtectedRoute>
+                  <HistoryPage />
+                </ProtectedRoute>
+              } />
+
+              {/* Mon Profil */}
+              <Route path="/profile" element={
+                <ProtectedRoute>
+                  <ProfilePage />
+                </ProtectedRoute>
+              } />
+
+              {/* Super Admin — demandes de modification profil */}
+              <Route path="/admin/profile-requests" element={
+                <ProtectedRoute>
+                  <ProfileRequestsAdminPage />
+                </ProtectedRoute>
+              } />
+              {/* Chef de Service — tableau de bord planning */}
+              <Route path="/chef-de-service" element={
+                <ProtectedRoute>
+                  <ChefDeServiceDashboard />
+                </ProtectedRoute>
+              } />
+
             </Route>
 
             {/* 404 */}

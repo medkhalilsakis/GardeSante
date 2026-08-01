@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { statisticsAPI, shiftsAPI, schedulesAPI, replacementsAPI } from '../../api';
 import { useAuthStore } from '../../store';
 import { useTranslation, formatDate, getStatusBadgeClass, exportToPDF, exportToExcel } from '../../utils/helpers';
@@ -56,15 +57,28 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function DashboardPage() {
   const { user, hasPermission } = useAuthStore();
   const { t } = useTranslation();
-  const isManagement = ['super_admin', 'hospital_admin', 'director', 'general_supervisor'].includes(user?.roleCode);
+  const navigate = useNavigate();
+
+  const isManagement   = ['super_admin', 'hospital_admin', 'director', 'general_supervisor'].includes(user?.roleCode);
   const isDepartmentHead = user?.roleCode === 'department_head';
-  const isDoctor = ['senior_doctor', 'resident'].includes(user?.roleCode);
+  const isDoctor       = ['senior_doctor', 'resident'].includes(user?.roleCode);
+
+  // ── Redirections par rôle ──────────────────────────────────
+  useEffect(() => {
+    if (user?.roleCode === 'super_admin') navigate('/admin', { replace: true });
+    else if (user?.roleCode === 'director') navigate('/director', { replace: true });
+  }, [user?.roleCode]);
+
+  // ── Eviter de charger si on va être redirigé ──────────────
+  const willRedirect = user?.roleCode === 'super_admin' || user?.roleCode === 'director';
+
 
   // KPIs
   const { data: dashData, isLoading: loadingDash } = useQuery({
     queryKey: ['dashboard', user?.establishmentId],
     queryFn: () => statisticsAPI.getDashboard().then(r => r.data.data),
     refetchInterval: 30000,
+    enabled: !willRedirect,
   });
 
   // Gardes du jour
@@ -72,6 +86,7 @@ export default function DashboardPage() {
     queryKey: ['today-shifts'],
     queryFn: () => shiftsAPI.getToday().then(r => r.data.data),
     refetchInterval: 60000,
+    enabled: !willRedirect,
   });
 
   // Plannings en attente (pour les validateurs)

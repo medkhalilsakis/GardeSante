@@ -12,9 +12,8 @@ const requirePermission = (...permissionCodes) => {
     // Super admin a tous les droits
     if (req.user.isSuperAdmin) return next();
 
-    const hasPermission = permissionCodes.some(code =>
-      req.user.permissions.includes(code)
-    );
+    const userPermissions = Array.isArray(req.user.permissions) ? req.user.permissions : [];
+    const hasPermission = permissionCodes.some((code) => userPermissions.includes(code));
 
     if (!hasPermission) {
       return res.status(403).json({
@@ -83,15 +82,20 @@ const requireAdmin = requireRoleLevel(1);
  * à partir du token JWT (pour les non super-admins)
  */
 const injectEstablishment = (req, res, next) => {
-  if (req.user && !req.user.isSuperAdmin) {
-    // Forcer l'establishment de l'utilisateur authentifié
+  if (!req.user) return next();
+
+  if (req.user.isSuperAdmin) {
+    // Super admin : peut cibler n'importe quel établissement via query ou body
+    req.establishmentId = req.query?.establishmentId
+      || req.body?.establishmentId
+      || req.user.establishmentId;
+  } else {
+    // Utilisateur standard : son propre établissement uniquement
     req.establishmentId = req.user.establishmentId;
-  } else if (req.user && req.user.isSuperAdmin) {
-    // Super admin peut spécifier un establishment
-    req.establishmentId = req.query.establishmentId || req.body.establishmentId || req.user.establishmentId;
   }
   next();
 };
+
 
 module.exports = {
   requirePermission,

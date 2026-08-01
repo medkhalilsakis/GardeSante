@@ -50,18 +50,50 @@ io.on('connection', (socket) => {
 app.set('io', io);
 app.set('userSockets', userSockets);
 
-// Démarrage
+// Démarrage avec tentative de ports alternatifs en cas d'EADDRINUSE
 const start = async () => {
   try {
     await initializeDatabase();
-    server.listen(PORT, () => {
-      console.log(`\n🚀 GardeSante API démarrée sur le port ${PORT}`);
-      console.log(`📡 Socket.io actif`);
-      console.log(`🔗 http://localhost:${PORT}`);
-      console.log(`❤️  Health: http://localhost:${PORT}/health\n`);
+
+    const maxAttempts = 5;
+    let attempt = 0;
+    let listeningPort = Number(PORT);
+
+    const tryListen = () => new Promise((resolve, reject) => {
+      const onError = (err) => {
+        if (err.code === 'EADDRINUSE') {
+          server.removeListener('error', onError);
+          attempt += 1;
+          if (attempt >= maxAttempts) {
+            return reject(new Error(`Port ${listeningPort} en cours d'utilisation et tentative maximale atteinte`));
+          }
+          console.warn(`⚠️  Port ${listeningPort} occupé, tentative d'écoute sur le port ${listeningPort + 1}...`);
+          listeningPort += 1;
+          // Réessayer avec le port suivant
+          return tryListen().then(resolve).catch(reject);
+        }
+        // Erreur autre que EADDRINUSE
+        return reject(err);
+      };
+
+      server.once('error', onError);
+      server.once('listening', () => {
+        // Retirer le listener d'erreur une fois qu'on écoute
+        server.removeListener('error', onError);
+        resolve();
+      });
+
+      server.listen(listeningPort);
     });
+
+    await tryListen();
+    console.log(`\n🚀 GardeSante API démarrée sur le port ${listeningPort}`);
+    console.log(`📡 Socket.io actif`);
+    console.log(`🔗 http://localhost:${listeningPort}`);
+    console.log(`❤️  Health: http://localhost:${listeningPort}/health\n`);
+
   } catch (err) {
-    console.error('❌ Impossible de démarrer:', err.message);
+    console.error('❌ Impossible de démarrer:', err.message || err);
     process.exit(1);
   }
 };

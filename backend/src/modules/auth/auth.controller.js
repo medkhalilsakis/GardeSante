@@ -1,7 +1,8 @@
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const jwt    = require('jsonwebtoken');
 const { query } = require('../../config/database');
 const { JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN } = require('../../config/constants');
+const { log, getIp } = require('../history/history.controller');
 
 const generateTokens = (userId, roleCode, establishmentId) => {
   const payload = { userId, roleCode, establishmentId };
@@ -54,6 +55,18 @@ const login = async (req, res) => {
     [refreshToken, user.id]
   );
 
+  // Journaliser la connexion
+  log({
+    userId: user.id,
+    action: 'login',
+    category: 'auth',
+    description: `Connexion réussie depuis ${req.headers['user-agent']?.substring(0, 60) || 'inconnu'}`,
+    descriptionAr: 'تسجيل دخول ناجح',
+    ipAddress: getIp(req),
+    userAgent: req.headers['user-agent'],
+    severity: 'info',
+  });
+
   return res.json({
     success: true,
     message: 'Connexion réussie',
@@ -88,6 +101,15 @@ const login = async (req, res) => {
 };
 
 const logout = async (req, res) => {
+  log({
+    userId: req.user.id,
+    action: 'logout',
+    category: 'auth',
+    description: 'Déconnexion',
+    descriptionAr: 'تسجيل خروج',
+    ipAddress: getIp(req),
+    severity: 'info',
+  });
   await query('UPDATE users SET refresh_token = NULL WHERE id = $1', [req.user.id]);
   return res.json({ success: true, message: 'Déconnecté avec succès' });
 };

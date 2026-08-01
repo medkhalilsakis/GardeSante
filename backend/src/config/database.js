@@ -4,14 +4,14 @@ const fs = require('fs');
 require('dotenv').config();
 
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'hospital_guard',
-  user: process.env.DB_USER || 'hospital_user',
+  host:     process.env.DB_HOST     || 'localhost',
+  port:     parseInt(process.env.DB_PORT || '5432'),
+  database: process.env.DB_NAME     || 'hospital_guard',
+  user:     process.env.DB_USER     || 'hospital_user',
   password: process.env.DB_PASSWORD || 'password123',
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 5000,
 });
 
 pool.on('connect', () => {
@@ -21,11 +21,11 @@ pool.on('connect', () => {
 });
 
 pool.on('error', (err) => {
-  console.error('❌ PostgreSQL error:', err.message);
+  console.error('❌ PostgreSQL pool error:', err.message);
 });
 
 /**
- * Execute a query with optional parameters
+ * Execute a parameterised query
  */
 const query = async (text, params) => {
   const start = Date.now();
@@ -43,26 +43,19 @@ const query = async (text, params) => {
 };
 
 /**
- * Get a client from the pool for transactions
+ * Get a pooled client (for transactions)
  */
 const getClient = async () => {
   const client = await pool.connect();
   const originalQuery = client.query.bind(client);
   const release = client.release.bind(client);
-
-  // Wrap query to add logging
   client.query = (...args) => originalQuery(...args);
-
-  // Set timeout on release
-  client.release = () => {
-    release();
-  };
-
+  client.release = () => { release(); };
   return client;
 };
 
 /**
- * Execute multiple queries in a transaction
+ * Run callback inside a BEGIN/COMMIT transaction
  */
 const transaction = async (callback) => {
   const client = await getClient();
@@ -80,45 +73,78 @@ const transaction = async (callback) => {
 };
 
 /**
- * Initialize database - run migrations and optionally seeds
+ * Run a single SQL file against the pool, splitting on statement boundaries.
+ * Returns { ok: true } or { ok: false, error }.
+ */
+const runSqlFile = async (filePath) => {
+  const sql = fs.readFileSync(filePath, 'utf-8');
+  try {
+    await pool.query(sql);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err };
+  }
+};
+
+/**
+ * Initialize database
+ *  1. Run all migration files (idempotent schema — CREATE ... IF NOT EXISTS)
+ *  2. Always run seed files (idempotent data   — INSERT ... ON CONFLICT DO NOTHING)
  */
 const initializeDatabase = async () => {
-  const migrationsDir = path.join(__dirname, 'migrations');
-  const seedsDir = path.join(__dirname, 'seeds');
+  const migrationsDir = path.join(__dirname, '..', 'db', 'migrations');
+  const seedsDir      = path.join(__dirname, '..', 'db', 'seeds');
 
+  // ── Migrations ──────────────────────────────────────────────
   console.log('🔄 Running database migrations...');
 
-  const migrationFiles = fs.readdirSync(migrationsDir)
-    .filter(f => f.endsWith('.sql'))
-    .sort();
+  let migrationFiles = [];
+  try {
+    migrationFiles = fs.readdirSync(migrationsDir)
+      .filter(f => f.endsWith('.sql'))
+      .sort();
+  } catch (_) {
+    console.warn('  ⚠️  Migrations directory not found:', migrationsDir);
+  }
 
   for (const file of migrationFiles) {
-    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-    try {
-      await pool.query(sql);
+    const filePath = path.join(migrationsDir, file);
+    const { ok, error } = await runSqlFile(filePath);
+    if (ok) {
       console.log(`  ✅ Migration: ${file}`);
-    } catch (err) {
-      if (!err.message.includes('already exists')) {
-        console.error(`  ❌ Migration failed: ${file}`, err.message);
-        throw err;
-      }
+    } else if (
+      error.message.includes('already exists') ||
+      error.message.includes('existe déjà')   ||
+      error.code === '42P07' ||  // duplicate_table
+      error.code === '42710'     // duplicate_object
+    ) {
+      console.log(`  ♻️  Migration (schema already present): ${file}`);
+    } else {
+      console.error(`  ❌ Migration failed: ${file} — ${error.message}`);
+      throw error;
     }
   }
 
-  if (process.env.SEED_DB === 'true') {
-    console.log('🌱 Running seeds...');
-    const seedFiles = fs.readdirSync(seedsDir)
+  // ── Seeds (idempotent — ON CONFLICT DO NOTHING) ─────────────
+  console.log('🌱 Running seeds (idempotent)...');
+
+  let seedFiles = [];
+  try {
+    seedFiles = fs.readdirSync(seedsDir)
       .filter(f => f.endsWith('.sql'))
       .sort();
+  } catch (_) {
+    console.warn('  ⚠️  Seeds directory not found:', seedsDir);
+  }
 
-    for (const file of seedFiles) {
-      const sql = fs.readFileSync(path.join(seedsDir, file), 'utf-8');
-      try {
-        await pool.query(sql);
-        console.log(`  ✅ Seed: ${file}`);
-      } catch (err) {
-        console.warn(`  ⚠️  Seed warning (${file}):`, err.message.substring(0, 80));
-      }
+  for (const file of seedFiles) {
+    const filePath = path.join(seedsDir, file);
+    const { ok, error } = await runSqlFile(filePath);
+    if (ok) {
+      console.log(`  ✅ Seed: ${file}`);
+    } else {
+      // Seed errors are non-fatal warnings (data may already exist)
+      console.warn(`  ⚠️  Seed warning (${file}): ${error.message.substring(0, 120)}`);
     }
   }
 

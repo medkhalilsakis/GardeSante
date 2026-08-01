@@ -1,50 +1,98 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore, useUIStore } from '../../store';
 import { authAPI } from '../../api';
 import { useTranslation } from '../../utils/helpers';
 import toast from 'react-hot-toast';
+
+// Redirection selon le rôle
+function getDashboardByRole(roleCode) {
+  switch (roleCode) {
+    case 'super_admin':
+    case 'hospital_admin':
+      return '/dashboard';
+    case 'director':
+      return '/director';
+    case 'general_supervisor':
+      return '/schedules';
+    case 'department_head':
+    case 'service_supervisor':
+      return '/schedules';
+    default:
+      return '/dashboard';
+  }
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const { setAuth } = useAuthStore();
+  const [selectedDemo, setSelectedDemo] = useState(null);
+  const { setAuth, updateUser } = useAuthStore();
   const { language, setLanguage } = useUIStore();
   const navigate = useNavigate();
   const { t } = useTranslation();
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
+  // Fonction centrale de connexion — utilisée par le formulaire ET le clic démo
+  const doLogin = async (loginEmail, loginPassword) => {
     setLoading(true);
     try {
-      const res = await authAPI.login(email, password);
+      const res = await authAPI.login(loginEmail, loginPassword);
       const { user, accessToken, refreshToken } = res.data.data;
-      // Merge permissions from /me (loaded after login)
-      const meRes = await import('../../api').then(m => m.authAPI.me());
+
+      // Important: stocker d'abord les tokens pour que /auth/me envoie Authorization.
       setAuth(
-        { ...user, permissions: meRes.data.data.permissions, departments: meRes.data.data.departments },
+        { ...user, permissions: user.permissions || [], departments: user.departments || [] },
         accessToken,
         refreshToken
       );
-      toast.success(t('auth.welcome_back'));
-      navigate('/dashboard');
+
+      // Enrichir ensuite le profil; ne pas bloquer la redirection si /me échoue.
+      try {
+        const meRes = await authAPI.me();
+        updateUser({
+          permissions: meRes.data?.data?.permissions || [],
+          departments: meRes.data?.data?.departments || [],
+        });
+      } catch {
+        // La session est déjà créée via /login, on continue sans bloquer l'accès.
+      }
+
+      toast.success(`Bienvenue, ${user.firstName} ${user.lastName} !`);
+      // Redirection selon le rôle
+      navigate(getDashboardByRole(user.roleCode), { replace: true });
     } catch (err) {
       toast.error(err.response?.data?.message || 'Identifiants incorrects');
+      setSelectedDemo(null);
     } finally {
       setLoading(false);
     }
   };
 
+  // Soumission du formulaire manuel
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    await doLogin(email, password);
+  };
+
+  // Clic sur un compte démo → connexion immédiate
+  const handleDemoClick = async (acc) => {
+    if (loading) return;
+    setSelectedDemo(acc.email);
+    setEmail(acc.email);
+    setPassword('Admin@123');
+    await doLogin(acc.email, 'Admin@123');
+  };
+
+  // Connexion rapide — seulement les acteurs avec un compte plateforme
   const demoAccounts = [
-    { label: 'Super Admin', email: 'admin@gardesante.dz', role: 'super_admin' },
-    { label: 'Chef de Service', email: 'chef.urg@hca.dz', role: 'department_head' },
-    { label: 'Surveillant', email: 'surv.general@hca.dz', role: 'general_supervisor' },
-    { label: 'Directeur', email: 'directeur@hca.dz', role: 'director' },
-    { label: 'Médecin', email: 'dr.sofiane@hca.dz', role: 'senior_doctor' },
-    { label: 'Résident', email: 'res.lyes@hca.dz', role: 'resident' },
+    { label: 'Super Admin',     email: 'admin@gardesante.dz',  role: 'super_admin',        dest: '/dashboard', icon: '🛡️' },
+    { label: 'Directeur',       email: 'directeur@hca.dz',     role: 'director',           dest: '/director',  icon: '🏛️' },
+    { label: 'Surveillant Gén.',email: 'surv.general@hca.dz',  role: 'general_supervisor', dest: '/schedules', icon: '👁️' },
+    { label: 'Chef de Service', email: 'chef.urg@hca.dz',      role: 'department_head',    dest: '/schedules', icon: '🏥' },
   ];
+
 
   return (
     <div className="login-page">
@@ -148,16 +196,27 @@ export default function LoginPage() {
 
           {/* Comptes de démonstration */}
           <div className="demo-section">
-            <p className="demo-title">Comptes de démonstration <span>(mot de passe: Admin@123)</span></p>
+            <p className="demo-title">
+              Connexion rapide
+              <span> — cliquez pour vous connecter directement</span>
+            </p>
             <div className="demo-grid">
               {demoAccounts.map((acc) => (
                 <button
                   key={acc.email}
-                  className="demo-btn"
-                  onClick={() => { setEmail(acc.email); setPassword('Admin@123'); }}
+                  className={`demo-btn${selectedDemo === acc.email ? ' demo-btn-selected' : ''}`}
+                  onClick={() => handleDemoClick(acc)}
+                  disabled={loading}
                 >
-                  <span className="demo-role">{acc.label}</span>
+                  <span className="demo-btn-top">
+                    <span className="demo-icon">{acc.icon}</span>
+                    <span className="demo-role">{acc.label}</span>
+                    {selectedDemo === acc.email && loading && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin" style={{marginLeft:'auto',flexShrink:0}}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+                    )}
+                  </span>
                   <span className="demo-email">{acc.email}</span>
+                  <span className="demo-dest">→ {acc.dest}</span>
                 </button>
               ))}
             </div>
@@ -292,11 +351,10 @@ export default function LoginPage() {
         }
         .demo-title {
           font-size: var(--font-xs); font-weight: 600;
-          color: var(--text-muted);
-          text-transform: uppercase; letter-spacing: 0.06em;
+          color: var(--text-secondary);
           margin-bottom: var(--space-3);
         }
-        .demo-title span { font-weight: 400; text-transform: none; }
+        .demo-title span { font-weight: 400; color: var(--text-muted); }
         .demo-grid {
           display: grid; grid-template-columns: repeat(2,1fr); gap: var(--space-2);
         }
@@ -306,14 +364,24 @@ export default function LoginPage() {
           border-radius: var(--border-radius-sm);
           padding: var(--space-2) var(--space-3);
           cursor: pointer;
-          display: flex; flex-direction: column; gap: 2px;
+          display: flex; flex-direction: column; gap: 3px;
           text-align: left;
           transition: all var(--transition-fast);
           font-family: inherit;
+          position: relative;
         }
-        .demo-btn:hover { border-color: var(--color-primary); background: var(--color-primary-10); }
-        .demo-role { font-size: var(--font-xs); font-weight: 600; color: var(--text-primary); }
+        .demo-btn:hover:not(:disabled) { border-color: var(--color-primary); background: var(--color-primary-10); transform: translateY(-1px); }
+        .demo-btn:disabled { opacity: 0.7; cursor: wait; }
+        .demo-btn-selected {
+          border-color: var(--color-primary) !important;
+          background: var(--color-primary-10) !important;
+          box-shadow: 0 0 0 2px rgba(27,79,202,0.2);
+        }
+        .demo-btn-top { display: flex; align-items: center; gap: 6px; }
+        .demo-icon { font-size: 14px; flex-shrink: 0; }
+        .demo-role { font-size: var(--font-xs); font-weight: 700; color: var(--text-primary); }
         .demo-email { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .demo-dest { font-size: 10px; color: var(--color-primary-light); font-weight: 600; opacity: 0.8; }
         .login-footer { text-align: center; font-size: var(--font-xs); color: var(--text-muted); }
       `}</style>
     </div>

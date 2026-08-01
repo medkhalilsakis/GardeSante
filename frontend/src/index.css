@@ -1,16 +1,16 @@
 /* ============================================================
    GARDESANTE — DESIGN SYSTEM GLOBAL
    Police: Inter (Google Fonts)
-   Thème: Dark mode · Glassmorphism · Animations fluides
+   Thème: Light (défaut) + Dark · Glassmorphism · Animations fluides
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 /* ============================================================
-   VARIABLES CSS — DESIGN TOKENS
+   TOKENS COMMUNS (indépendants du thème)
    ============================================================ */
 :root {
-  /* Couleurs primaires */
+  /* Couleurs primaires — identiques dans les deux thèmes */
   --color-primary:       #1B4FCA;
   --color-primary-light: #3B75F5;
   --color-primary-dark:  #1340A8;
@@ -25,52 +25,20 @@
   --color-success:       #10B981;
   --color-success-10:    rgba(16, 185, 129, 0.10);
   --color-success-20:    rgba(16, 185, 129, 0.20);
-  --color-warning:       #F59E0B;
-  --color-warning-10:    rgba(245, 158, 11, 0.10);
+  --color-warning:       #D97706;
+  --color-warning-10:    rgba(217, 119, 6, 0.10);
   --color-danger:        #EF4444;
   --color-danger-10:     rgba(239, 68, 68, 0.10);
-  --color-danger-20:     rgba(239, 68, 68, 0.20);
+  --color-danger-20:     rgba(239, 68, 68, 0.18);
   --color-info:          #6366F1;
   --color-info-10:       rgba(99, 102, 241, 0.10);
 
-  /* Backgrounds */
-  --bg-base:       #080F1E;
-  --bg-surface:    #0D1829;
-  --bg-card:       #111E33;
-  --bg-card-hover: #162540;
-  --bg-elevated:   #1A2D48;
-  --bg-glass:      rgba(13, 24, 41, 0.75);
-  --bg-glass-light:rgba(26, 45, 72, 0.60);
-  --bg-overlay:    rgba(8, 15, 30, 0.85);
-
-  /* Bordures */
-  --border-subtle:  rgba(255, 255, 255, 0.05);
-  --border-default: rgba(255, 255, 255, 0.08);
-  --border-strong:  rgba(255, 255, 255, 0.15);
-  --border-primary: rgba(27, 79, 202, 0.40);
-  --border-radius:  12px;
-  --border-radius-sm: 8px;
-  --border-radius-lg: 16px;
-  --border-radius-xl: 24px;
+  /* Bordures — rayons */
+  --border-radius:      12px;
+  --border-radius-sm:   8px;
+  --border-radius-lg:   16px;
+  --border-radius-xl:   24px;
   --border-radius-full: 9999px;
-
-  /* Texte */
-  --text-primary:   #F0F6FF;
-  --text-secondary: #8BA3C7;
-  --text-muted:     #4A6380;
-  --text-disabled:  #2A3D56;
-  --text-inverse:   #080F1E;
-
-  /* Ombres */
-  --shadow-sm:  0 1px 3px rgba(0,0,0,0.4);
-  --shadow-md:  0 4px 16px rgba(0,0,0,0.5);
-  --shadow-lg:  0 8px 32px rgba(0,0,0,0.6);
-  --shadow-xl:  0 16px 48px rgba(0,0,0,0.7);
-  --shadow-primary: 0 4px 20px rgba(27, 79, 202, 0.35);
-  --shadow-glass: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.07);
-
-  /* Glassmorphism */
-  --glass-blur: blur(16px);
 
   /* Espacement */
   --space-1:  4px;
@@ -98,10 +66,10 @@
   --font-5xl:  36px;
 
   /* Layout */
-  --sidebar-width: 260px;
-  --sidebar-collapsed: 72px;
-  --header-height: 64px;
-  --content-max-width: 1400px;
+  --sidebar-width:       260px;
+  --sidebar-collapsed:   72px;
+  --header-height:       64px;
+  --content-max-width:   1400px;
 
   /* Transitions */
   --transition-fast:   0.15s ease;
@@ -115,7 +83,111 @@
   --z-modal:   200;
   --z-toast:   300;
   --z-tooltip: 250;
+
+  /* Glassmorphism */
+  --glass-blur: blur(16px);
 }
+
+/* ============================================================
+   THÈME LIGHT (défaut)
+   ============================================================ */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Backgrounds */
+  --bg-base:        #F0F4FC;
+  --bg-surface:     #E8EDF8;
+  --bg-card:        #FFFFFF;
+  --bg-card-hover:  #F8FAFF;
+  --bg-elevated:    #EDF1FA;
+  --bg-input:       #FFFFFF;
+  --bg-glass:       rgba(255, 255, 255, 0.80);
+  --bg-glass-light: rgba(237, 241, 250, 0.70);
+  --bg-overlay:     rgba(15, 23, 42, 0.45);
+  --bg-sidebar:     #FFFFFF;
+  --bg-header:      rgba(255, 255, 255, 0.92);
+
+  /* Bordures */
+  --border-subtle:  rgba(27, 79, 202, 0.06);
+  --border-default: rgba(27, 79, 202, 0.12);
+  --border-strong:  rgba(27, 79, 202, 0.22);
+  --border-primary: rgba(27, 79, 202, 0.35);
+
+  /* Texte */
+  --text-primary:   #0F172A;
+  --text-secondary: #475569;
+  --text-muted:     #94A3B8;
+  --text-disabled:  #CBD5E1;
+  --text-inverse:   #FFFFFF;
+
+  /* Ombres (légères pour le light) */
+  --shadow-sm:      0 1px 3px rgba(15, 23, 42, 0.07);
+  --shadow-md:      0 4px 16px rgba(15, 23, 42, 0.08);
+  --shadow-lg:      0 8px 32px rgba(15, 23, 42, 0.10);
+  --shadow-xl:      0 16px 48px rgba(15, 23, 42, 0.13);
+  --shadow-primary: 0 4px 20px rgba(27, 79, 202, 0.22);
+  --shadow-glass:   0 8px 32px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.9);
+
+  /* Scrollbar */
+  --scrollbar-thumb: #CBD5E1;
+  --scrollbar-thumb-hover: #94A3B8;
+
+  /* Toggle bouton */
+  --theme-toggle-bg: #EDF1FA;
+  --theme-toggle-hover: #E2E8F0;
+}
+
+/* ============================================================
+   THÈME DARK
+   ============================================================ */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Backgrounds */
+  --bg-base:        #080F1E;
+  --bg-surface:     #0D1829;
+  --bg-card:        #111E33;
+  --bg-card-hover:  #162540;
+  --bg-elevated:    #1A2D48;
+  --bg-input:       #162540;
+  --bg-glass:       rgba(13, 24, 41, 0.75);
+  --bg-glass-light: rgba(26, 45, 72, 0.60);
+  --bg-overlay:     rgba(8, 15, 30, 0.85);
+  --bg-sidebar:     #0D1829;
+  --bg-header:      rgba(8, 15, 30, 0.90);
+
+  /* Bordures */
+  --border-subtle:  rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-strong:  rgba(255, 255, 255, 0.15);
+  --border-primary: rgba(27, 79, 202, 0.40);
+
+  /* Texte */
+  --text-primary:   #F0F6FF;
+  --text-secondary: #8BA3C7;
+  --text-muted:     #4A6380;
+  --text-disabled:  #2A3D56;
+  --text-inverse:   #080F1E;
+
+  /* Ombres */
+  --shadow-sm:      0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:      0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:      0 8px 32px rgba(0,0,0,0.6);
+  --shadow-xl:      0 16px 48px rgba(0,0,0,0.7);
+  --shadow-primary: 0 4px 20px rgba(27, 79, 202, 0.35);
+  --shadow-glass:   0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.07);
+
+  /* Scrollbar */
+  --scrollbar-thumb: #1A2D48;
+  --scrollbar-thumb-hover: rgba(255,255,255,0.15);
+
+  /* Toggle bouton */
+  --theme-toggle-bg: #1A2D48;
+  --theme-toggle-hover: #243B5A;
+}
+
+
 
 /* ============================================================
    RESET & BASE
@@ -160,8 +232,16 @@ img { max-width: 100%; display: block; }
   min-height: 100vh;
   background: var(--bg-base);
   background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(27, 79, 202, 0.12), transparent),
-    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(14, 165, 233, 0.06), transparent);
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(27, 79, 202, 0.10), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(14, 165, 233, 0.05), transparent);
+  transition: background 0.3s ease;
+}
+
+/* Gradient moins prononcé en mode light */
+[data-theme="light"] .app-layout {
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(27, 79, 202, 0.06), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(14, 165, 233, 0.04), transparent);
 }
 
 .main-content {
@@ -752,8 +832,8 @@ img { max-width: 100%; display: block; }
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
 /* ============================================================
    RESPONSIVE

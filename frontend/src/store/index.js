@@ -21,6 +21,10 @@ export const useAuthStore = create(
       updateUser: (updates) =>
         set((state) => ({ user: { ...state.user, ...updates } })),
 
+      // Mise à jour rapide de l'avatar sans re-login
+      updateAvatar: (avatarUrl) =>
+        set((state) => ({ user: state.user ? { ...state.user, avatarUrl } : state.user })),
+
       hasPermission: (permissionCode) => {
         const { user } = get();
         if (!user) return false;
@@ -33,14 +37,15 @@ export const useAuthStore = create(
     {
       name: 'gardesante-auth',
       partialize: (state) => ({
-        user: state.user,
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
+        user:            state.user,
+        accessToken:     state.accessToken,
+        refreshToken:    state.refreshToken,
         isAuthenticated: state.isAuthenticated,
       }),
     }
   )
 );
+
 
 // ============================================================
 // UI STORE
@@ -51,6 +56,7 @@ export const useUIStore = create(
       sidebarCollapsed: false,
       language: 'fr',         // 'fr' | 'ar'
       direction: 'ltr',       // 'ltr' | 'rtl'
+      theme: 'light',         // 'light' | 'dark'
 
       toggleSidebar: () =>
         set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -61,17 +67,31 @@ export const useUIStore = create(
         document.documentElement.lang = lang;
         set({ language: lang, direction: dir });
       },
+
+      setTheme: (newTheme) => {
+        document.documentElement.setAttribute('data-theme', newTheme);
+        set({ theme: newTheme });
+      },
+
+      toggleTheme: () =>
+        set((state) => {
+          const next = state.theme === 'light' ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', next);
+          return { theme: next };
+        }),
     }),
     {
       name: 'gardesante-ui',
       partialize: (state) => ({
-        language: state.language,
-        direction: state.direction,
+        language:         state.language,
+        direction:        state.direction,
         sidebarCollapsed: state.sidebarCollapsed,
+        theme:            state.theme,
       }),
     }
   )
 );
+
 
 // ============================================================
 // NOTIFICATIONS STORE

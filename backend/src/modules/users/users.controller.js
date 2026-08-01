@@ -1,11 +1,39 @@
 const { query, transaction } = require('../../config/database');
 const bcrypt = require('bcryptjs');
 
+// -────────────────────────────────────────────────────────────
+// Hierarchie STRICTE de creation de comptes :
+//   super_admin          -> director
+//   director             -> general_supervisor, department_head,
+//                          service_supervisor, senior_doctor,
+//                          resident, autre
+//   general_supervisor   -> department_head, service_supervisor
+//   department_head      -> senior_doctor, resident, autre
+// Note: 'autre' = personnel sans acces plateforme (ambulancier,
+//        gardiennage, recette, etc.) identifie par job_title_id
+// -────────────────────────────────────────────────────────────
+
+const CREATABLE_ROLES = {
+  super_admin:        ['director'],
+  director:           ['general_supervisor', 'department_head', 'service_supervisor', 'senior_doctor', 'resident', 'autre'],
+  general_supervisor: ['department_head', 'service_supervisor'],
+  department_head:    ['senior_doctor', 'resident', 'autre'],
+};
+
+// Roles sans acces plateforme (can_login = FALSE)
+const NO_LOGIN_ROLES = ['senior_doctor', 'resident', 'autre'];
+
+// Roles qui DOIVENT etre associes a un service unique
+const ROLES_REQUIRING_DEPT = ['department_head', 'service_supervisor'];
+
+
 // GET /api/users
 const getUsers = async (req, res) => {
-  const { page = 1, limit = 20, search, roleCode, departmentId, isActive } = req.query;
+  const { page = 1, limit = 20, search, roleCode, departmentId, isActive, canLogin } = req.query;
   const offset = (page - 1) * limit;
-  const eid = req.user.isSuperAdmin ? (req.query.establishmentId || req.user.establishmentId) : req.user.establishmentId;
+  const eid = req.user.isSuperAdmin
+    ? (req.query.establishmentId || req.user.establishmentId)
+    : req.user.establishmentId;
 
   let conditions = ['u.establishment_id = $1'];
   let params = [eid];
@@ -24,6 +52,9 @@ const getUsers = async (req, res) => {
   if (isActive !== undefined) {
     conditions.push(`u.is_active = $${idx}`); params.push(isActive === 'true'); idx++;
   }
+  if (canLogin !== undefined) {
+    conditions.push(`u.can_login = $${idx}`); params.push(canLogin === 'true'); idx++;
+  }
 
   const where = conditions.join(' AND ');
 
@@ -38,10 +69,12 @@ const getUsers = async (req, res) => {
   const result = await query(
     `SELECT DISTINCT u.id, u.matricule, u.first_name, u.last_name, u.first_name_ar, u.last_name_ar,
             u.email, u.phone, u.speciality, u.grade, u.is_active, u.is_on_leave, u.avatar_url,
-            u.last_login, u.created_at,
-            r.code AS role_code, r.name AS role_name, r.name_ar AS role_name_ar, r.level AS role_level
+            u.can_login, u.last_login, u.created_at,
+            r.code AS role_code, r.name AS role_name, r.name_ar AS role_name_ar, r.level AS role_level,
+            e.name AS establishment_name
      FROM users u
      JOIN roles r ON u.role_id = r.id
+     JOIN establishments e ON u.establishment_id = e.id
      LEFT JOIN user_departments ud ON u.id = ud.user_id
      WHERE ${where}
      ORDER BY u.last_name, u.first_name
@@ -66,7 +99,7 @@ const getUser = async (req, res) => {
   const eid = req.user.isSuperAdmin ? null : req.user.establishmentId;
   const result = await query(
     `SELECT u.*, r.code AS role_code, r.name AS role_name, r.name_ar AS role_name_ar,
-            e.name AS establishment_name
+            e.name AS establishment_name, e.code AS establishment_code
      FROM users u
      JOIN roles r ON u.role_id = r.id
      JOIN establishments e ON u.establishment_id = e.id
@@ -83,63 +116,219 @@ const getUser = async (req, res) => {
     [req.params.id]
   );
 
-  return res.json({ success: true, data: { ...result.rows[0], departments: depts.rows } });
+  const { password_hash, refresh_token, password_reset_token, ...safeUser } = result.rows[0];
+  return res.json({ success: true, data: { ...safeUser, departments: depts.rows } });
 };
 
-// POST /api/users
+// POST /api/users — Creer un compte selon la hierarchie
 const createUser = async (req, res) => {
   const {
     email, password, firstName, lastName, firstNameAr, lastNameAr,
-    matricule, phone, speciality, grade, roleId, establishmentId, preferredLanguage
+    matricule, phone, speciality, grade, roleCode, departmentId, jobTitleId,
+    preferredLanguage, establishmentId: bodyEstId,
   } = req.body;
 
-  const eid = req.user.isSuperAdmin ? establishmentId : req.user.establishmentId;
+  if (!email || !firstName || !lastName || !roleCode) {
+    return res.status(400).json({ success: false, message: 'Email, prenom, nom et role sont requis' });
+  }
+
+  // Les roles chef/surveillant doivent OBLIGATOIREMENT avoir un service
+  if (ROLES_REQUIRING_DEPT.includes(roleCode) && !departmentId) {
+    return res.status(400).json({
+      success: false,
+      message: `Le role "${roleCode}" doit obligatoirement etre affecte a un service.`,
+    });
+  }
+
+  // Verifier la permission de creer ce role
+  const allowed = CREATABLE_ROLES[req.user.roleCode] || [];
+  if (!req.user.isSuperAdmin && !allowed.includes(roleCode)) {
+    return res.status(403).json({
+      success: false,
+      message: `Votre role (${req.user.roleCode}) ne peut pas creer le role "${roleCode}".`,
+    });
+  }
+
+  // Determiner l'etablissement cible
+  let eid;
+  if (req.user.isSuperAdmin) {
+    if (!bodyEstId) {
+      return res.status(400).json({ success: false, message: 'establishmentId requis pour le Super Admin' });
+    }
+    eid = bodyEstId;
+  } else {
+    eid = req.user.establishmentId;
+    if (bodyEstId && bodyEstId !== eid) {
+      return res.status(403).json({ success: false, message: 'Vous ne pouvez creer des comptes que dans votre etablissement.' });
+    }
+  }
+
+  // Recuperer l'UUID du role
+  const roleResult = await query(
+    'SELECT id, code FROM roles WHERE establishment_id = $1 AND code = $2',
+    [eid, roleCode]
+  );
+  if (!roleResult.rows[0]) {
+    return res.status(400).json({
+      success: false,
+      message: `Role "${roleCode}" introuvable pour cet etablissement. Verifiez que l'etablissement a bien ete initialise.`,
+    });
+  }
+
+  // ── Contrainte unicite : un seul chef et un seul surveillant par service ──
+  if (departmentId) {
+    if (roleCode === 'department_head') {
+      const existing = await query(
+        `SELECT u.id, u.first_name, u.last_name
+         FROM user_departments ud
+         JOIN users u ON ud.user_id = u.id
+         WHERE ud.department_id = $1 AND ud.is_head = TRUE AND u.is_active = TRUE`,
+        [departmentId]
+      );
+      if (existing.rows.length > 0) {
+        const ex = existing.rows[0];
+        return res.status(409).json({
+          success: false,
+          message: `Ce service a deja un chef de service : ${ex.first_name} ${ex.last_name}. Utilisez "Designer Chef de Service" pour le remplacer.`,
+        });
+      }
+    }
+
+    if (roleCode === 'service_supervisor') {
+      const existing = await query(
+        `SELECT u.id, u.first_name, u.last_name
+         FROM user_departments ud
+         JOIN users u ON ud.user_id = u.id
+         JOIN roles r ON u.role_id = r.id
+         WHERE ud.department_id = $1 AND r.code = 'service_supervisor' AND u.is_active = TRUE`,
+        [departmentId]
+      );
+      if (existing.rows.length > 0) {
+        const ex = existing.rows[0];
+        return res.status(409).json({
+          success: false,
+          message: `Ce service a deja un surveillant : ${ex.first_name} ${ex.last_name}. Utilisez "Designer Surveillant" pour le remplacer.`,
+        });
+      }
+    }
+  }
 
   const passwordHash = await bcrypt.hash(password || 'GardeSante@2025', 10);
+  const canLogin = !NO_LOGIN_ROLES.includes(roleCode);
 
-  const result = await query(
-    `INSERT INTO users (establishment_id, role_id, matricule, first_name, last_name, first_name_ar, last_name_ar,
-                        email, phone, password_hash, speciality, grade, preferred_language)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-     RETURNING id, email, first_name, last_name, matricule, created_at`,
-    [eid, roleId, matricule, firstName, lastName, firstNameAr, lastNameAr,
-     email, phone, passwordHash, speciality, grade, preferredLanguage || 'fr']
-  );
+  // is_head = TRUE uniquement pour department_head
+  const isHead = (roleCode === 'department_head');
 
-  return res.status(201).json({ success: true, data: result.rows[0], message: 'Utilisateur créé avec succès' });
+  // Derivation du speciality depuis le nom du titre de poste
+  // (pour compatibilite avec les vues existantes qui affichent speciality)
+  let resolvedSpeciality = speciality || null;
+  if (jobTitleId) {
+    try {
+      const jt = await query('SELECT name FROM job_titles WHERE id = $1', [jobTitleId]);
+      if (jt.rows[0]) resolvedSpeciality = jt.rows[0].name;
+    } catch (_) {}
+  }
+
+  const result = await transaction(async (client) => {
+    const u = await client.query(
+      `INSERT INTO users (
+         establishment_id, role_id, matricule, first_name, last_name, first_name_ar, last_name_ar,
+         email, phone, password_hash, speciality, grade, preferred_language, can_login, job_title_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       RETURNING id, email, first_name, last_name, matricule, can_login, created_at`,
+      [eid, roleResult.rows[0].id, matricule || null, firstName, lastName,
+       firstNameAr || null, lastNameAr || null,
+       email, phone || null, passwordHash, resolvedSpeciality, grade || null,
+       preferredLanguage || 'fr', canLogin, jobTitleId || null]
+    );
+
+    if (departmentId) {
+      // Securite : retirer l'ancien is_head si on affecte un nouveau chef
+      if (isHead) {
+        await client.query(
+          `UPDATE user_departments SET is_head = FALSE WHERE department_id = $1`,
+          [departmentId]
+        );
+      }
+      await client.query(
+        `INSERT INTO user_departments (user_id, department_id, is_head, is_primary)
+         VALUES ($1,$2,$3,TRUE)
+         ON CONFLICT (user_id, department_id) DO UPDATE SET is_head = $3, is_primary = TRUE`,
+        [u.rows[0].id, departmentId, isHead]
+      );
+    }
+
+    return u.rows[0];
+  });
+
+  return res.status(201).json({
+    success: true,
+    data: result,
+    message: canLogin
+      ? `Compte cree. Email : ${email} - Mot de passe : ${password || 'GardeSante@2025'}`
+      : 'Profil medical cree (sans acces plateforme).',
+  });
 };
 
-// PUT /api/users/:id
+// PUT /api/users/:id — Modifier un utilisateur
 const updateUser = async (req, res) => {
-  const { firstName, lastName, firstNameAr, lastNameAr, phone, speciality, grade, roleId, isActive, isOnLeave, preferredLanguage } = req.body;
+  const { firstName, lastName, firstNameAr, lastNameAr, phone, speciality, grade, isOnLeave, preferredLanguage } = req.body;
 
   const result = await query(
     `UPDATE users SET
-       first_name = COALESCE($1, first_name),
-       last_name = COALESCE($2, last_name),
-       first_name_ar = COALESCE($3, first_name_ar),
-       last_name_ar = COALESCE($4, last_name_ar),
-       phone = COALESCE($5, phone),
-       speciality = COALESCE($6, speciality),
-       grade = COALESCE($7, grade),
-       role_id = COALESCE($8, role_id),
-       is_active = COALESCE($9, is_active),
-       is_on_leave = COALESCE($10, is_on_leave),
-       preferred_language = COALESCE($11, preferred_language),
-       updated_at = NOW()
-     WHERE id = $12 RETURNING id, email, first_name, last_name, updated_at`,
-    [firstName, lastName, firstNameAr, lastNameAr, phone, speciality, grade, roleId, isActive, isOnLeave, preferredLanguage, req.params.id]
+       first_name        = COALESCE($1, first_name),
+       last_name         = COALESCE($2, last_name),
+       first_name_ar     = COALESCE($3, first_name_ar),
+       last_name_ar      = COALESCE($4, last_name_ar),
+       phone             = COALESCE($5, phone),
+       speciality        = COALESCE($6, speciality),
+       grade             = COALESCE($7, grade),
+       is_on_leave       = COALESCE($8, is_on_leave),
+       preferred_language= COALESCE($9, preferred_language),
+       updated_at        = NOW()
+     WHERE id = $10 AND establishment_id = $11
+     RETURNING id, email, first_name, last_name, updated_at`,
+    [firstName, lastName, firstNameAr, lastNameAr, phone, speciality, grade,
+     isOnLeave, preferredLanguage, req.params.id, req.user.isSuperAdmin ? undefined : req.user.establishmentId]
   );
 
   if (!result.rows[0]) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
-  return res.json({ success: true, data: result.rows[0], message: 'Utilisateur mis à jour' });
+  return res.json({ success: true, data: result.rows[0], message: 'Utilisateur mis a jour' });
 };
 
-// DELETE /api/users/:id
+// PUT /api/users/:id/deactivate — Cloturer un compte
+const deactivateUser = async (req, res) => {
+  if (!['director', 'hospital_admin', 'super_admin', 'general_supervisor'].includes(req.user.roleCode)) {
+    return res.status(403).json({ success: false, message: 'Permission refusee' });
+  }
+  if (req.params.id === req.user.id) {
+    return res.status(400).json({ success: false, message: 'Vous ne pouvez pas cloturer votre propre compte' });
+  }
+  await query(
+    `UPDATE users SET is_active = FALSE, updated_at = NOW()
+     WHERE id = $1 AND establishment_id = $2`,
+    [req.params.id, req.user.establishmentId]
+  );
+  return res.json({ success: true, message: 'Compte cloture avec succes' });
+};
+
+// PUT /api/users/:id/activate — Reactiver un compte
+const activateUser = async (req, res) => {
+  if (!['director', 'hospital_admin', 'super_admin', 'general_supervisor'].includes(req.user.roleCode)) {
+    return res.status(403).json({ success: false, message: 'Permission refusee' });
+  }
+  await query(
+    `UPDATE users SET is_active = TRUE, updated_at = NOW()
+     WHERE id = $1 AND establishment_id = $2`,
+    [req.params.id, req.user.establishmentId]
+  );
+  return res.json({ success: true, message: 'Compte reactive avec succes' });
+};
+
+// DELETE /api/users/:id — Soft delete (alias deactivate)
 const deleteUser = async (req, res) => {
-  // Soft delete
   await query('UPDATE users SET is_active = FALSE, updated_at = NOW() WHERE id = $1', [req.params.id]);
-  return res.json({ success: true, message: 'Utilisateur désactivé' });
+  return res.json({ success: true, message: 'Utilisateur desactive' });
 };
 
 // GET /api/users/:id/shifts
@@ -150,8 +339,8 @@ const getUserShifts = async (req, res) => {
   let idx = 2;
 
   if (from) { conditions.push(`s.shift_date >= $${idx}`); params.push(from); idx++; }
-  if (to) { conditions.push(`s.shift_date <= $${idx}`); params.push(to); idx++; }
-  if (status) { conditions.push(`s.status = $${idx}`); params.push(status); idx++; }
+  if (to)   { conditions.push(`s.shift_date <= $${idx}`); params.push(to);   idx++; }
+  if (status){ conditions.push(`s.status = $${idx}`);     params.push(status);idx++; }
 
   const result = await query(
     `SELECT s.*, st.name AS shift_type_name, st.color, st.duration_hours, st.start_time, st.end_time,
@@ -164,7 +353,6 @@ const getUserShifts = async (req, res) => {
      ORDER BY s.shift_date DESC`,
     params
   );
-
   return res.json({ success: true, data: result.rows });
 };
 
@@ -179,18 +367,40 @@ const getUserStats = async (req, res) => {
   const result = await query(
     `SELECT
        COUNT(*) FILTER (WHERE s.status NOT IN ('cancelled')) AS total_shifts,
-       COUNT(*) FILTER (WHERE s.status = 'completed') AS completed,
-       COUNT(*) FILTER (WHERE s.status = 'absent') AS absent,
-       COUNT(*) FILTER (WHERE s.status = 'replaced') AS replaced,
-       SUM(st.duration_hours) FILTER (WHERE s.status IN ('completed','confirmed','planned')) AS total_hours,
-       COUNT(*) FILTER (WHERE s.is_extra = TRUE) AS extra_shifts
+       COUNT(*) FILTER (WHERE s.status = 'completed')       AS completed,
+       COUNT(*) FILTER (WHERE s.status = 'absent')          AS absent,
+       COUNT(*) FILTER (WHERE s.status = 'replaced')        AS replaced,
+       COALESCE(SUM(st.duration_hours) FILTER (WHERE s.status IN ('completed','confirmed','planned')), 0) AS total_hours,
+       COUNT(*) FILTER (WHERE s.is_extra = TRUE)            AS extra_shifts
      FROM shifts s
      JOIN shift_types st ON s.shift_type_id = st.id
      WHERE s.user_id = $1 AND ${dateFilter}`,
     params
   );
-
   return res.json({ success: true, data: result.rows[0] });
 };
 
-module.exports = { getUsers, getUser, createUser, updateUser, deleteUser, getUserShifts, getUserStats };
+// GET /api/users/roles-available — Roles que l'acteur connecte peut creer
+const getCreatableRoles = async (req, res) => {
+  const allowed = req.user.isSuperAdmin
+    ? ['director', 'hospital_admin', 'general_supervisor', 'department_head', 'service_supervisor', 'senior_doctor', 'resident', 'observer']
+    : (CREATABLE_ROLES[req.user.roleCode] || []);
+
+  const result = await query(
+    `SELECT id, code, name, name_ar, level
+     FROM roles
+     WHERE establishment_id = $1 AND code = ANY($2::text[])
+     ORDER BY level`,
+    [req.user.establishmentId, allowed]
+  );
+  return res.json({ success: true, data: result.rows });
+};
+
+module.exports = {
+  getUsers, getUser,
+  createUser, updateUser, deleteUser,
+  activateUser, deactivateUser,
+  getUserShifts, getUserStats,
+  getCreatableRoles,
+};
+
