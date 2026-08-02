@@ -7,11 +7,15 @@ const { requirePermission, injectEstablishment } = require('../../middleware/rba
 router.use(authenticate, injectEstablishment);
 router.get('/', requirePermission('schedules.read'), ctrl.getSchedules);
 router.post('/generate', requirePermission('schedules.generate'), ctrl.generateSchedule);
+router.get('/hospital-staff', ctrl.getHospitalStaff);           // tout le personnel
+router.get('/roles', ctrl.getAllRoles);                         // tous les rôles
 router.get('/:id', requirePermission('schedules.read'), ctrl.getSchedule);
 router.get('/:id/conflicts', requirePermission('schedules.read'), ctrl.getConflicts);
 router.post('/', requirePermission('schedules.create'), ctrl.createSchedule);
 router.put('/:id', requirePermission('schedules.update'), ctrl.updateSchedule);
+router.patch('/:id/action', ctrl.scheduleAction);               // duplicate/archive/restore/delete
 router.post('/:id/submit', requirePermission('schedules.submit'), ctrl.submitSchedule);
 router.post('/:id/approve', requirePermission('schedules.approve'), ctrl.approveSchedule);
 router.post('/:id/reject', requirePermission('schedules.reject'), ctrl.rejectSchedule);
 module.exports = router;
+

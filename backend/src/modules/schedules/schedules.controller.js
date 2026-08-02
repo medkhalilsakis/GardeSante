@@ -225,13 +225,23 @@ const getSchedule = async (req, res) => {
 };
 
 const createSchedule = async (req, res) => {
-  const { departmentId, name, startDate, endDate, notes, workflowId } = req.body;
-  const eid = req.user.isSuperAdmin ? (req.body.establishmentId || req.user.establishmentId) : req.user.establishmentId;
+  // Accept both camelCase (old wizard) and snake_case (new PlanningStep1 form)
+  const deptId       = req.body.department_id || req.body.departmentId;
+  const startDate    = req.body.start_date    || req.body.startDate;
+  const endDate      = req.body.end_date      || req.body.endDate;
+  const { name, notes, workflowId, status, creation_mode } = req.body;
+  const eid = req.user.isSuperAdmin
+    ? (req.body.establishmentId || req.body.establishment_id || req.user.establishmentId)
+    : req.user.establishmentId;
+
+  if (!deptId) {
+    return res.status(400).json({ success: false, message: 'department_id est requis pour créer un planning' });
+  }
 
   const result = await query(
-    `INSERT INTO schedules (establishment_id, department_id, name, start_date, end_date, notes, workflow_id, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [eid, departmentId, name, startDate, endDate, notes, workflowId || null, req.user.id]
+    `INSERT INTO schedules (establishment_id, department_id, name, start_date, end_date, notes, workflow_id, status, creation_mode, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [eid, deptId, name, startDate, endDate, notes || null, workflowId || null, status || 'draft', creation_mode || null, req.user.id]
   );
   return res.status(201).json({ success: true, data: result.rows[0] });
 };
@@ -303,4 +313,128 @@ const getConflicts = async (req, res) => {
   return res.json({ success: true, data: conflicts, count: conflicts.length });
 };
 
-module.exports = { getSchedules, getSchedule, createSchedule, updateSchedule, submitSchedule, approveSchedule, rejectSchedule, generateSchedule, getConflicts, detectConflicts };
+/**
+ * PATCH /api/schedules/:id/action
+ * Actions: duplicate | archive | restore | delete
+ */
+const scheduleAction = async (req, res) => {
+  const { id } = req.params;
+  const { action, name } = req.body;
+  const estId = req.user.establishmentId;
+
+  const { rows } = await query('SELECT * FROM schedules WHERE id = $1 AND establishment_id = $2', [id, estId]);
+  const schedule = rows[0];
+  if (!schedule) return res.status(404).json({ success: false, message: 'Planning introuvable' });
+
+  switch (action) {
+    case 'archive': {
+      await query(`UPDATE schedules SET status = 'archived', updated_at = NOW() WHERE id = $1`, [id]);
+      return res.json({ success: true, message: 'Planning archivé' });
+    }
+    case 'restore': {
+      await query(`UPDATE schedules SET status = 'draft', updated_at = NOW() WHERE id = $1`, [id]);
+      return res.json({ success: true, message: 'Planning restauré en brouillon' });
+    }
+    case 'delete': {
+      if (!['draft', 'archived'].includes(schedule.status)) {
+        return res.status(400).json({ success: false, message: 'Seuls les brouillons et archives peuvent être supprimés' });
+      }
+      await query(`DELETE FROM shifts WHERE schedule_id = $1`, [id]);
+      await query(`DELETE FROM schedules WHERE id = $1`, [id]);
+      return res.json({ success: true, message: 'Planning supprimé' });
+    }
+    case 'duplicate': {
+      const newName = name || `${schedule.name} (copie)`;
+      const { rows: [newSched] } = await query(
+        `INSERT INTO schedules (establishment_id, department_id, name, start_date, end_date, status, creation_mode, created_by)
+         VALUES ($1,$2,$3,$4,$5,'draft',$6,$7) RETURNING id`,
+        [estId, schedule.department_id, newName, schedule.start_date, schedule.end_date, schedule.creation_mode, req.user.id]
+      );
+      // Clone shifts
+      await query(
+        `INSERT INTO shifts (schedule_id, user_id, shift_type_id, shift_date, department_id, status)
+         SELECT $1, user_id, shift_type_id, shift_date, department_id, 'scheduled'
+         FROM shifts WHERE schedule_id = $2`,
+        [newSched.id, id]
+      );
+      return res.json({ success: true, data: { scheduleId: newSched.id }, message: `Planning dupliqué : "${newName}"` });
+    }
+    default:
+      return res.status(400).json({ success: false, message: 'Action inconnue' });
+  }
+};
+
+/**
+ * GET /api/users/hospital-staff
+ * Returns all active hospital staff (all departments) for cross-service selection
+ * Query params: search, role, deptId, available
+ */
+const getHospitalStaff = async (req, res) => {
+  const { search, role, deptId, limit = 50, offset = 0 } = req.query;
+  const estId = req.user.establishmentId;
+
+  let sql = `
+    SELECT u.id, u.first_name, u.last_name, u.email, u.phone, u.matricule,
+           r.name AS role_name, r.id AS role_id,
+           d.name AS dept_name, d.id AS dept_id,
+           u.last_activity_at
+    FROM users u
+    LEFT JOIN roles r ON u.role_id = r.id
+    LEFT JOIN departments d ON u.department_id = d.id
+    WHERE u.establishment_id = $1 AND u.is_active = TRUE AND u.status = 'active'
+  `;
+  const params = [estId];
+  let p = 2;
+
+  if (search) {
+    sql += ` AND (LOWER(u.first_name) LIKE LOWER($${p}) OR LOWER(u.last_name) LIKE LOWER($${p}) OR LOWER(u.matricule) LIKE LOWER($${p}))`;
+    params.push(`%${search}%`);
+    p++;
+  }
+  if (role) {
+    sql += ` AND r.id = $${p}`;
+    params.push(role);
+    p++;
+  }
+  if (deptId) {
+    sql += ` AND u.department_id = $${p}`;
+    params.push(deptId);
+    p++;
+  }
+
+  sql += ` ORDER BY d.name, u.last_name, u.first_name LIMIT $${p} OFFSET $${p + 1}`;
+  params.push(parseInt(limit), parseInt(offset));
+
+  const { rows } = await query(sql, params);
+  const countRes = await query(
+    `SELECT COUNT(*) FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.establishment_id = $1 AND u.is_active = TRUE AND u.status = 'active'${search ? ` AND (LOWER(u.first_name) LIKE LOWER($2) OR LOWER(u.last_name) LIKE LOWER($2) OR LOWER(u.matricule) LIKE LOWER($2))` : ''}`,
+    search ? [estId, `%${search}%`] : [estId]
+  );
+
+  return res.json({ success: true, data: rows, total: parseInt(countRes.rows[0].count) });
+};
+
+/**
+ * GET /api/roles (all platform roles for wizard dropdown)
+ */
+const getAllRoles = async (req, res) => {
+  const estId = req.user.establishmentId;
+  const { rows } = await query(
+    `SELECT r.id, r.name, r.code, COUNT(u.id) AS user_count
+     FROM roles r
+     LEFT JOIN users u ON u.role_id = r.id AND u.establishment_id = $1 AND u.is_active = TRUE
+     WHERE r.establishment_id = $1 OR r.establishment_id IS NULL
+     GROUP BY r.id, r.name, r.code
+     ORDER BY r.name`,
+    [estId]
+  );
+  return res.json({ success: true, data: rows });
+};
+
+module.exports = {
+  getSchedules, getSchedule, createSchedule, updateSchedule,
+  submitSchedule, approveSchedule, rejectSchedule, generateSchedule,
+  getConflicts, detectConflicts,
+  scheduleAction, getHospitalStaff, getAllRoles,
+};
+

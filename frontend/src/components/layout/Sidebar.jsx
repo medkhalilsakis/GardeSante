@@ -73,13 +73,14 @@ export default function Sidebar({ unreadCount = 0 }) {
   const navItems = isSuperAdmin ? superAdminNav : [
     { key: 'main', label: 'Principal', items: [
       { to: '/dashboard',    icon: 'dashboard',    label: t('nav.dashboard') },
-      { to: '/schedules',    icon: 'schedules',    label: t('nav.schedules'), show: canManageSchedules },
+      // /schedules visible uniquement pour les non-chefs
+      { to: '/schedules',    icon: 'schedules',    label: t('nav.schedules'), show: canManageSchedules && !isChef },
       { to: '/shifts',       icon: 'shifts',       label: t('nav.shifts') },
       { to: '/absences',     icon: 'absences',     label: t('nav.absences') },
       { to: '/replacements', icon: 'replacements', label: t('nav.replacements') },
     ]},
     { key: 'chef', label: 'Mon Service', show: isChef, items: [
-      { to: '/chef-de-service', icon: 'planning', label: 'Tableau de bord service' },
+      { to: '/chef-de-service',          icon: 'planning',  label: '📋 Planning des Gardes' },
     ]},
     { key: 'analytics', label: 'Analytique', show: isManagement, items: [
       { to: '/statistics', icon: 'statistics', label: t('nav.statistics') },
@@ -93,6 +94,7 @@ export default function Sidebar({ unreadCount = 0 }) {
       { to: '/profile', icon: 'profile', label: 'Mon profil' },
     ]},
   ];
+
 
 
   const handleLogout = async () => {

@@ -136,7 +136,14 @@ export const schedulesAPI = {
   reject: (id, data) => api.post(`/schedules/${id}/reject`, data),
   generate: (data) => api.post('/schedules/generate', data),
   getConflicts: (id) => api.get(`/schedules/${id}/conflicts`),
+  // Nouvelles actions CRUD
+  action: (id, action, extra = {}) => api.patch(`/schedules/${id}/action`, { action, ...extra }),
+  // Personnel hôpital (cross-service)
+  getHospitalStaff: (params) => api.get('/schedules/hospital-staff', { params }),
+  // Rôles dynamiques
+  getRoles: () => api.get('/schedules/roles'),
 };
+
 
 export const shiftsAPI = {
   getAll: (params) => api.get('/shifts', { params }),

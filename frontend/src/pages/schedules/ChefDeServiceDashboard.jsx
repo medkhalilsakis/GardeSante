@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../store';
 import { departmentsAPI, schedulesAPI, absencesAPI, scheduleBuilderAPI, shiftsAPI } from '../../api';
 import SmartSpreadsheet from './components/SmartSpreadsheet';
 import VisualCalendar from './components/VisualCalendar';
 import ImportModal from './components/ImportModal';
+import HospitalStaffPicker from './components/HospitalStaffPicker';
 import toast from 'react-hot-toast';
 
 // ─── Icons ────────────────────────────────────────────────────
@@ -79,73 +80,190 @@ const getPresence = (lastActivity) => {
   return { label: `Il y a ${Math.floor(h / 24)}j`, dot: '#E5E7EB' };
 };
 
-// ─── Method Selector ──────────────────────────────────────────
+// ─── Step 1: Création planning (Nom + Dates) ─────────────────
+const PlanningStep1 = ({ departmentId, onCreated, onBack }) => {
+  const [name, setName]         = useState('');
+  const [startDate, setStart]   = useState('');
+  const [endDate, setEnd]       = useState('');
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState('');
+
+  const totalDays = startDate && endDate
+    ? Math.ceil((new Date(endDate) - new Date(startDate)) / 86400000) + 1 : 0;
+
+  const today = new Date().toISOString().split('T')[0];
+  const shortcuts = [
+    { label: 'Ce mois',      fn: () => { const d = new Date(), y = d.getFullYear(), m = d.getMonth(); return { s: `${y}-${String(m+1).padStart(2,'0')}-01`, e: new Date(y,m+1,0).toISOString().split('T')[0] }; } },
+    { label: 'Mois prochain',fn: () => { const d = new Date(), y = d.getFullYear(), m = d.getMonth()+1; return { s: `${y}-${String(m+1).padStart(2,'0')}-01`, e: new Date(y,m+1,0).toISOString().split('T')[0] }; } },
+    { label: '3 mois',       fn: () => { const d = new Date(); const e = new Date(d); e.setMonth(e.getMonth()+3); return { s: d.toISOString().split('T')[0], e: e.toISOString().split('T')[0] }; } },
+  ];
+
+  const handleCreate = async () => {
+    setError('');
+    if (!startDate || !endDate) return setError('La date de début et de fin sont obligatoires.');
+    if (new Date(endDate) < new Date(startDate)) return setError('La date de fin doit être après la date de début.');
+    if (!departmentId) return setError('Service introuvable. Veuillez patienter que la page se charge complètement.');
+    setSaving(true);
+    try {
+      const defaultName = name.trim() || `Planning ${new Date(startDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`;
+      const res = await schedulesAPI.create({ name: defaultName, start_date: startDate, end_date: endDate, department_id: departmentId, status: 'draft', creation_mode: 'assistant' });
+      const id = res.data?.data?.id || res.data?.id;
+      if (!id) throw new Error('ID de planning non reçu.');
+      onCreated(id, defaultName, startDate, endDate);
+    } catch (e) {
+      setError(e.response?.data?.message || e.message || 'Erreur lors de la création du planning.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inputSt = { width: '100%', padding: '11px 14px', borderRadius: 10, fontSize: 14, border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', color: 'var(--text-primary)', outline: 'none', boxSizing: 'border-box' };
+
+  return (
+    <div style={{ maxWidth: 540, margin: '0 auto' }}>
+      {/* Step indicator */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13 }}>1</div>
+          <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--color-primary)' }}>Informations</span>
+        </div>
+        <div style={{ flex: 1, height: 2, background: 'var(--border-subtle)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: 0.4 }}>
+          <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-elevated)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13, border: '2px solid var(--border-subtle)' }}>2</div>
+          <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-muted)' }}>Méthode</span>
+        </div>
+      </div>
+
+      <div style={{ background: 'var(--bg-card)', borderRadius: 18, border: '1px solid var(--border-subtle)', padding: 28 }}>
+        <h3 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 800 }}>📅 Définir la période</h3>
+        <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>Ces informations sont obligatoires pour créer votre planning.</p>
+
+        {/* Shortcuts */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          {shortcuts.map(p => (
+            <button key={p.label} onClick={() => { const v = p.fn(); setStart(v.s); setEnd(v.e); }}
+              style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--color-primary)', background: 'rgba(27,79,202,.06)', color: 'var(--color-primary)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Dates */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Date de début *</span>
+            <input type="date" style={inputSt} value={startDate} min={today} onChange={e => setStart(e.target.value)} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Date de fin *</span>
+            <input type="date" style={inputSt} value={endDate} min={startDate || today} onChange={e => setEnd(e.target.value)} />
+          </label>
+        </div>
+
+        {totalDays > 0 && (
+          <div style={{ padding: '8px 14px', background: '#EFF6FF', borderRadius: 8, fontSize: 12, color: '#3B82F6', fontWeight: 600, marginBottom: 14 }}>
+            📊 {totalDays} jour{totalDays > 1 ? 's' : ''} · {Math.ceil(totalDays / 7)} semaine{Math.ceil(totalDays/7) > 1 ? 's' : ''}
+          </div>
+        )}
+
+        {/* Nom */}
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 20 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Nom du planning <span style={{ fontWeight: 400 }}>(optionnel — généré automatiquement si vide)</span></span>
+          <input type="text" style={inputSt} placeholder={`Ex: Gardes ${new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })} — Urgences`}
+            value={name} onChange={e => setName(e.target.value)} />
+        </label>
+
+        {error && (
+          <div style={{ padding: '10px 14px', borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA', fontSize: 12, color: '#EF4444', marginBottom: 14, fontWeight: 600 }}>
+            ⚠ {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onBack} style={{ padding: '11px 20px', borderRadius: 10, border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, cursor: 'pointer' }}>Annuler</button>
+          <button onClick={handleCreate} disabled={saving || !startDate || !endDate}
+            style={{ padding: '11px 28px', borderRadius: 10, border: 'none', background: saving || !startDate || !endDate ? '#9CA3AF' : 'linear-gradient(135deg, var(--color-primary), #7C3AED)', color: '#fff', fontWeight: 700, cursor: saving || !startDate || !endDate ? 'not-allowed' : 'pointer', fontSize: 14, boxShadow: saving ? 'none' : '0 4px 14px rgba(27,79,202,.3)' }}>
+            {saving ? 'Création...' : 'Suivant →'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Step 2: Méthode de création ─────────────────────────────
 const MethodSelector = ({ onSelect }) => {
   const methods = [
     {
       id: 'assistant', color: '#8B5CF6',
       gradient: 'linear-gradient(135deg,#8B5CF6,#6D28D9)',
-      title: 'Assistant Intelligent', tag: 'Recommande',
-      desc: 'Le systeme vous guide etape par etape. Repondez a quelques questions et le planning est genere automatiquement.',
-      features: ['Generation automatique', 'Detection des conflits', 'Rotation equitable'],
+      icon: '🤖',
+      title: 'Assistant Intelligent', tag: 'Recommandé',
+      desc: 'L\'assistant vous guide étape par étape. Répondez à quelques questions et le planning est généré automatiquement selon vos contraintes.',
+      features: ['Génération automatique', 'Détection des conflits', 'Rotation équitable', '8 algorithmes disponibles'],
     },
     {
       id: 'spreadsheet', color: '#0891B2',
       gradient: 'linear-gradient(135deg,#0891B2,#0E7490)',
-      title: 'Tableur Intelligent', tag: 'Power User',
-      desc: 'Interface tableur similaire a Excel avec colonnes proposees automatiquement. Ideal pour les plannings complexes.',
-      features: ['Colonnes configurables', 'Validation en ligne', 'Import/Export'],
+      icon: '📊',
+      title: 'Tableur Manuel', tag: 'Contrôle total',
+      desc: 'Remplissez vous-même le tableau de garde. Ajoutez le personnel, définissez les durées de garde et les colonnes personnalisées.',
+      features: ['Colonnes dynamiques', 'Durées personnalisées', 'Import/Export Excel', 'Clic droit contextuel'],
     },
     {
-      id: 'visual', color: '#059669',
+      id: 'import', color: '#059669',
       gradient: 'linear-gradient(135deg,#059669,#047857)',
-      icon: '📅',
-      title: 'Éditeur Visuel', tag: 'Drag & Drop',
-      desc: 'Glissez-déposez les gardes sur une grille calendrier interactive. Visualisation immédiate des conflits.',
-      features: ['Drag & Drop intuitif', 'Conflits en temps réel', 'Vue semaine / mois'],
+      icon: '📥',
+      title: 'Importer Excel / CSV', tag: 'Rapide',
+      desc: 'Importez un fichier Excel ou CSV existant. Le système reconnaît automatiquement les colonnes et vérifie les données.',
+      features: ['Modèle téléchargeable', 'Vérification des données', 'Prévisualisation avant import', 'CSV et XLSX supportés'],
     },
   ];
 
   return (
-    <div style={{ padding: '24px 0' }}>
-      <div style={{ textAlign: 'center', marginBottom: 40 }}>
-        <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>
-          Comment souhaitez-vous creer votre planning ?
+    <div style={{ maxWidth: 900, margin: '0 auto' }}>
+      {/* Step indicator */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: 0.6 }}>
+          <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#10B981', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13 }}>✓</div>
+          <span style={{ fontWeight: 700, fontSize: 13, color: '#10B981' }}>Informations</span>
         </div>
-        <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>
-          Choisissez la methode qui vous convient le mieux
+        <div style={{ flex: 1, height: 2, background: 'var(--color-primary)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13 }}>2</div>
+          <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--color-primary)' }}>Choisir la méthode</span>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 24 }}>
+
+      <div style={{ textAlign: 'center', marginBottom: 28 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 6 }}>Comment créer ce planning ?</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Le planning est déjà enregistré — choisissez maintenant la méthode de saisie</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 20 }}>
         {methods.map(m => (
           <div key={m.id} onClick={() => onSelect(m.id)}
-            style={{
-              background: 'var(--bg-card)', borderRadius: 20, overflow: 'hidden',
-              border: '1px solid var(--border-subtle)', cursor: 'pointer',
-              transition: 'transform .2s, box-shadow .2s',
-            }}
+            style={{ background: 'var(--bg-card)', borderRadius: 20, overflow: 'hidden', border: '1px solid var(--border-subtle)', cursor: 'pointer', transition: 'transform .2s, box-shadow .2s' }}
             onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = `0 16px 40px ${m.color}22`; }}
             onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
           >
-            <div style={{ background: m.gradient, padding: '28px 24px' }}>
-              <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', marginBottom: 6 }}>{m.title}</div>
-              <span style={{ background: 'rgba(255,255,255,.2)', color: '#fff', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>{m.tag}</span>
+            <div style={{ background: m.gradient, padding: '24px 22px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 28 }}>{m.icon}</span>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 4 }}>{m.title}</div>
+                <span style={{ background: 'rgba(255,255,255,.2)', color: '#fff', padding: '3px 10px', borderRadius: 20, fontSize: 10, fontWeight: 700 }}>{m.tag}</span>
+              </div>
             </div>
-            <div style={{ padding: '20px 24px' }}>
-              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.6 }}>{m.desc}</p>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ padding: '18px 22px' }}>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.6 }}>{m.desc}</p>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {m.features.map(f => (
-                  <li key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)', fontWeight: 500 }}>
+                  <li key={f} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500 }}>
                     <span style={{ color: m.color, lineHeight: 0 }}><IconCheck /></span> {f}
                   </li>
                 ))}
               </ul>
-              <button onClick={e => { e.stopPropagation(); onSelect(m.id); }} style={{
-                width: '100%', marginTop: 18, padding: '10px 0', border: 'none', borderRadius: 10,
-                background: m.gradient, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer',
-              }}>
-                Commencer
-              </button>
+              <button style={{ width: '100%', marginTop: 16, padding: '10px 0', border: 'none', borderRadius: 10, background: m.gradient, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Commencer</button>
             </div>
           </div>
         ))}
@@ -154,31 +272,80 @@ const MethodSelector = ({ onSelect }) => {
   );
 };
 
+// ─── StaffRow component ────────────────────────────────────────
+const StaffRow = ({ m, sel, isExternal, deptName, onToggle }) => (
+  <div onClick={onToggle}
+    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9, cursor: 'pointer',
+      border: `1.5px solid ${sel ? 'var(--color-primary)' : 'var(--border-subtle)'}`,
+      background: sel ? 'rgba(27,79,202,.05)' : 'var(--bg-card)', transition: 'all .1s',
+    }}
+    onMouseEnter={e => e.currentTarget.style.background = sel ? 'rgba(27,79,202,.08)' : 'var(--bg-elevated)'}
+    onMouseLeave={e => e.currentTarget.style.background = sel ? 'rgba(27,79,202,.05)' : 'var(--bg-card)'}
+  >
+    <div style={{ width: 32, height: 32, borderRadius: '50%', background: isExternal ? '#D97706' : 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+      {(m.first_name||'?')[0]}{(m.last_name||'?')[0]}
+    </div>
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ fontWeight: 700, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.first_name} {m.last_name}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <span>{m.role_name}</span>
+        {isExternal && deptName && <span style={{ color: '#D97706', fontWeight: 600 }}>⚡ {deptName}</span>}
+      </div>
+    </div>
+    {isExternal && <span style={{ padding: '2px 7px', borderRadius: 6, fontSize: 9, fontWeight: 800, background: '#FFFBEB', color: '#D97706' }}>Externe</span>}
+    {sel && <span style={{ color: 'var(--color-primary)', flexShrink: 0 }}><IconCheck /></span>}
+  </div>
+);
+
 // ─── Wizard Assistant ─────────────────────────────────────────
-const WizardAssistant = ({ departmentId, onBack, onDone }) => {
-  const [step, setStep]     = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [result,  setResult]  = useState(null);
-  const [context, setContext] = useState(null);
-  const [staffSearch, setStaffSearch] = useState('');
+const WizardAssistant = ({ departmentId, scheduleId, startDate: initStart, endDate: initEnd, name: initName, onBack, onDone }) => {
+  const [step, setStep]         = useState(0);
+  const [loading, setLoading]   = useState(false);
+  const [result, setResult]     = useState(null);
+  const [context, setContext]   = useState(null);
+  const [staffSearch, setStaffSearch]           = useState('');
+  const [showExternalPicker, setShowExternalPicker] = useState(false);
+  const [roleSearch, setRoleSearch]             = useState('');
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(null);
+  const [stepError, setStepError]               = useState('');
   const [cfg, setCfg] = useState({
-    startDate: '', endDate: '', name: '', periodType: 'monthly',
-    useWeekSlices: false,
-    weekSlices: [],
-    shiftTypeId: '',  // optionnel
-    algo: 'round_robin',
-    staffIds: [],
-    requiredPosts: [],   // [{ roleId, roleName, count }]
-    externalStaff: [],   // [{ userId, firstName, lastName, deptName }]
-    teamA: [], teamB: [],
+    startDate: initStart || '', endDate: initEnd || '', name: initName || '',
+    periodType: 'monthly', useWeekSlices: false, weekSlices: [],
+    shiftTypeId: '', algo: 'round_robin',
+    staffIds: [], requiredPosts: [],
+    externalStaff: [], teamA: [], teamB: [],
   });
 
+  // Wizard context (shift types)
   useEffect(() => {
     if (!departmentId) return;
     scheduleBuilderAPI.getWizardContext({ departmentId })
       .then(r => setContext(r.data.data))
       .catch(() => {});
   }, [departmentId]);
+
+  // TOUT le personnel de l'hôpital — propre service en premier
+  const { data: hospitalStaffData, isLoading: staffLoading } = useQuery({
+    queryKey: ['hospital-staff-wizard', staffSearch],
+    queryFn: () => schedulesAPI.getHospitalStaff({ search: staffSearch || undefined, limit: 200 }),
+    staleTime: 60000,
+  });
+  const allHospitalStaff = hospitalStaffData?.data?.data || hospitalStaffData?.data || [];
+  // Groupe 1: même service, Groupe 2: autres services, Groupe 3: sans service
+  const ownStaff     = allHospitalStaff.filter(m => m.dept_id === departmentId);
+  const otherStaff   = allHospitalStaff.filter(m => m.dept_id && m.dept_id !== departmentId);
+  const noServiceStaff = allHospitalStaff.filter(m => !m.dept_id);
+
+  // Fetch platform roles (dynamique)
+  const { data: rolesData } = useQuery({
+    queryKey: ['platform-roles'],
+    queryFn: () => schedulesAPI.getRoles(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const platformRoles = rolesData?.data?.data || rolesData?.data || [];
+  const filteredPlatformRoles = platformRoles.filter(r =>
+    !roleSearch || r.name.toLowerCase().includes(roleSearch.toLowerCase())
+  );
 
   const WEEK_TYPES = [
     { id: 'semaine_a',      label: 'Semaine A',                   emoji: '🔵', desc: 'Première équipe en rotation' },
@@ -227,16 +394,33 @@ const WizardAssistant = ({ departmentId, onBack, onDone }) => {
   const totalDays = cfg.startDate && cfg.endDate
     ? Math.ceil((new Date(cfg.endDate) - new Date(cfg.startDate)) / 86400000) + 1 : 0;
 
-  const canNext = () => {
-    if (step === 0) return cfg.startDate && cfg.endDate && new Date(cfg.endDate) >= new Date(cfg.startDate);
-    if (step === 1) {
-      if (cfg.useWeekSlices) return cfg.weekSlices.length > 0 && cfg.weekSlices.every(w => w.name && w.startDate && w.endDate);
-      return true; // shift type is optional
+  const getStepError = () => {
+    if (step === 0) {
+      if (!cfg.startDate || !cfg.endDate) return 'Les dates de début et de fin sont obligatoires.';
+      if (new Date(cfg.endDate) < new Date(cfg.startDate)) return 'La date de fin doit être après la date de début.';
+      return '';
     }
-    if (step === 2) return !!cfg.algo;
-    if (step === 3 && cfg.algo === 'ab_rotation') return cfg.teamA.length > 0 && cfg.teamB.length > 0;
-    return true;
+    if (step === 1) {
+      if (cfg.useWeekSlices) {
+        if (cfg.weekSlices.length === 0) return 'Ajoutez au moins une semaine ou désactivez le découpage.';
+        const incomplete = cfg.weekSlices.find(w => !w.startDate || !w.endDate);
+        if (incomplete) return `La semaine "${incomplete.name || 'sans nom'}" doit avoir des dates de début et fin.`;
+      }
+      return '';
+    }
+    if (step === 2) {
+      if (!cfg.algo) return 'Veuillez choisir un algorithme de répartition.';
+      return '';
+    }
+    if (step === 3) {
+      const totalSel = cfg.staffIds.length + cfg.externalStaff.length;
+      if (totalSel === 0 && allHospitalStaff.length > 0) return 'Sélectionnez au moins un membre du personnel pour ce planning.';
+      if (cfg.algo === 'ab_rotation' && (cfg.teamA.length === 0 || cfg.teamB.length === 0)) return 'L\'algorithme A/B nécessite au moins un membre dans chaque équipe.';
+      return '';
+    }
+    return '';
   };
+  const canNext = () => !getStepError();
 
   const addWeekSlice = () => {
     const lastEnd = cfg.weekSlices.length > 0 ? cfg.weekSlices[cfg.weekSlices.length - 1].endDate : cfg.startDate;
@@ -271,7 +455,7 @@ const WizardAssistant = ({ departmentId, onBack, onDone }) => {
   };
 
   const totalRequired = cfg.requiredPosts.reduce((sum, p) => sum + (parseInt(p.count) || 0), 0);
-  const totalSelected = cfg.staffIds.length || context?.staff?.length || 0;
+  const totalSelected = cfg.staffIds.length + cfg.externalStaff.length || allHospitalStaff.length;
 
   const generate = async () => {
     setLoading(true);
@@ -292,14 +476,13 @@ const WizardAssistant = ({ departmentId, onBack, onDone }) => {
     }
   };
 
-  const filteredStaff = (context?.staff || []).filter(m =>
-    !staffSearch || `${m.first_name} ${m.last_name} ${m.matricule || ''}`.toLowerCase().includes(staffSearch.toLowerCase())
-  );
+  const filteredStaff = [];
+  // (replaced by grouped hospital staff — ownStaff / otherStaff / noServiceStaff)
 
   return (
-    <div style={{ maxWidth: 780, margin: '0 auto' }}>
+    <div style={{ maxWidth: 820, margin: '0 auto' }}>
       {/* Stepper */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 28, overflowX: 'auto', paddingBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 24, overflowX: 'auto', paddingBottom: 4 }}>
         {stepLabels.map((lbl, i) => (
           <React.Fragment key={i}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, opacity: i > step ? 0.4 : 1 }}>
@@ -522,18 +705,67 @@ const WizardAssistant = ({ departmentId, onBack, onDone }) => {
                   (par garde : combien de personnes par rôle)
                 </span>
               </div>
+
+              {/* RoleSearchDropdown — dynamique depuis la BDD */}
               {cfg.requiredPosts.map((post, idx) => (
                 <div key={post.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                  <select value={post.roleName}
-                    onChange={e => {
-                      const roles = context?.staff?.reduce((acc, s) => { if (!acc.find(r => r.name === s.role_name)) acc.push({ id: s.role_id, name: s.role_name }); return acc; }, []) || [];
-                      const found = roles.find(r => r.name === e.target.value);
-                      setCfg(c => { const p = [...c.requiredPosts]; p[idx] = { ...p[idx], roleName: e.target.value, roleId: found?.id || '' }; return { ...c, requiredPosts: p }; });
-                    }}
-                    style={{ ...inputSt, flex: 1, padding: '8px 10px', fontSize: 12 }}>
-                    <option value="">Sélectionner un rôle...</option>
-                    {[...new Set((context?.staff || []).map(s => s.role_name))].map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
+                  {/* Dropdown avec recherche */}
+                  <div style={{ flex: 1, position: 'relative' }}>
+                    <div
+                      onClick={() => { setRoleDropdownOpen(roleDropdownOpen === idx ? null : idx); setRoleSearch(''); }}
+                      style={{
+                        ...inputSt, padding: '8px 12px', cursor: 'pointer', display: 'flex',
+                        alignItems: 'center', justifyContent: 'space-between', fontSize: 12,
+                        color: post.roleName ? 'var(--text-primary)' : 'var(--text-muted)',
+                        userSelect: 'none',
+                      }}>
+                      <span>{post.roleName || 'Sélectionner un rôle...'}</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{roleDropdownOpen === idx ? '▲' : '▼'}</span>
+                    </div>
+                    {roleDropdownOpen === idx && (
+                      <div style={{
+                        position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
+                        background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+                        borderRadius: 10, boxShadow: '0 8px 30px rgba(0,0,0,.15)',
+                        maxHeight: 220, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+                      }}>
+                        {/* Search input inside dropdown */}
+                        <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-subtle)' }}>
+                          <input
+                            autoFocus
+                            value={roleSearch}
+                            onChange={e => setRoleSearch(e.target.value)}
+                            placeholder="Rechercher un rôle..."
+                            style={{ width: '100%', padding: '6px 10px', borderRadius: 7, border: '1px solid var(--border-subtle)', fontSize: 12, outline: 'none', background: 'var(--bg-elevated)', color: 'var(--text-primary)', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                        {/* Role list */}
+                        <div style={{ overflowY: 'auto', flex: 1 }}>
+                          {platformRoles.length === 0 ? (
+                            <div style={{ padding: '12px 14px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>Chargement...</div>
+                          ) : filteredPlatformRoles.length === 0 ? (
+                            <div style={{ padding: '12px 14px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>Aucun résultat</div>
+                          ) : filteredPlatformRoles.map(role => (
+                            <div
+                              key={role.id}
+                              onClick={() => {
+                                setCfg(c => { const p = [...c.requiredPosts]; p[idx] = { ...p[idx], roleName: role.name, roleId: role.id }; return { ...c, requiredPosts: p }; });
+                                setRoleDropdownOpen(null);
+                              }}
+                              style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 12, fontWeight: post.roleId === role.id ? 700 : 400, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
+                              onMouseLeave={e => e.currentTarget.style.background = ''}
+                            >
+                              <span>{role.name}</span>
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{role.user_count || 0} pers.</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Counter */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     <button onClick={() => setCfg(c => { const p = [...c.requiredPosts]; p[idx].count = Math.max(1, (p[idx].count || 1) - 1); return { ...c, requiredPosts: p }; })}
                       style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', cursor: 'pointer', fontWeight: 700 }}>−</button>
@@ -556,72 +788,142 @@ const WizardAssistant = ({ departmentId, onBack, onDone }) => {
               )}
             </div>
 
-            {/* Sélection équipe */}
+            {/* Sélection équipe — TOUT l'hôpital */}
             <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 16, marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>👤 Personnel du service</div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>👥 Sélection du personnel</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {allHospitalStaff.length} personne{allHospitalStaff.length !== 1 ? 's' : ''} disponibles ·
+                    {cfg.staffIds.length === 0 ? ' Tous sélectionnés par défaut' : ` ${cfg.staffIds.length} sélectionné(s)`}
+                  </div>
+                </div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}
-                    onClick={() => setCfg(c => ({ ...c, staffIds: (context?.staff || []).map(s => s.id) }))}>Tous</button>
-                  <button style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}
-                    onClick={() => setCfg(c => ({ ...c, staffIds: [] }))}>Réinitialiser</button>
+                  <button onClick={() => setCfg(c => ({ ...c, staffIds: allHospitalStaff.map(s => s.id) }))}
+                    style={{ fontSize: 11, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--color-primary)', background: 'rgba(27,79,202,.06)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 600 }}>Tous</button>
+                  <button onClick={() => setCfg(c => ({ ...c, staffIds: ownStaff.map(s => s.id) }))}
+                    style={{ fontSize: 11, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>Mon service</button>
+                  <button onClick={() => setCfg(c => ({ ...c, staffIds: [] }))}
+                    style={{ fontSize: 11, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>Vider</button>
                 </div>
               </div>
-              <input type="text" placeholder="Chercher dans le service..." value={staffSearch}
+              <input type="text" placeholder="🔍 Rechercher par nom, prénom, matricule..." value={staffSearch}
                 onChange={e => setStaffSearch(e.target.value)}
-                style={{ ...inputSt, marginBottom: 8, fontSize: 12, padding: '8px 12px' }} />
-              <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {filteredStaff.map(m => {
-                  const all = cfg.staffIds.length === 0;
-                  const sel = all || cfg.staffIds.includes(m.id);
-                  return (
-                    <div key={m.id} onClick={() => setCfg(c => {
-                      const ids = c.staffIds.length === 0 ? (context?.staff || []).map(s => s.id) : [...c.staffIds];
-                      return { ...c, staffIds: ids.includes(m.id) ? ids.filter(x => x !== m.id) : [...ids, m.id] };
-                    })}
-                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9, cursor: 'pointer', border: `1.5px solid ${sel ? 'var(--color-primary)' : 'var(--border-subtle)'}`, background: sel ? 'rgba(27,79,202,.05)' : 'var(--bg-card)', transition: 'all .1s' }}>
-                      <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
-                        {m.first_name[0]}{m.last_name[0]}
+                style={{ ...inputSt, marginBottom: 10, fontSize: 12, padding: '8px 12px' }} />
+
+              {staffLoading ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Chargement du personnel...</div>
+              ) : allHospitalStaff.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, background: 'var(--bg-elevated)', borderRadius: 8 }}>
+                  Aucun personnel trouvé dans cet hôpital.
+                </div>
+              ) : (
+                <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {/* Groupe 1: Mon service */}
+                  {ownStaff.length > 0 && (
+                    <>
+                      <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 800, color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: 1, background: 'rgba(27,79,202,.04)', borderRadius: 6, marginBottom: 4 }}>
+                        🏥 Personnel de ce service ({ownStaff.length})
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12 }}>{m.first_name} {m.last_name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.role_name}</div>
+                      {ownStaff.map(m => {
+                        const sel = cfg.staffIds.length === 0 || cfg.staffIds.includes(m.id);
+                        return <StaffRow key={m.id} m={m} sel={sel} isExternal={false} onToggle={() => setCfg(c => {
+                          const ids = c.staffIds.length === 0 ? allHospitalStaff.map(s => s.id) : [...c.staffIds];
+                          return { ...c, staffIds: ids.includes(m.id) ? ids.filter(x => x !== m.id) : [...ids, m.id] };
+                        })} />;
+                      })}
+                    </>
+                  )}
+                  {/* Groupe 2: Autres services */}
+                  {otherStaff.length > 0 && (
+                    <>
+                      <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 800, color: '#D97706', textTransform: 'uppercase', letterSpacing: 1, background: 'rgba(217,119,6,.04)', borderRadius: 6, marginTop: 8, marginBottom: 4 }}>
+                        🔄 Autres services ({otherStaff.length}) — Notification automatique
                       </div>
-                      {sel && <span style={{ color: 'var(--color-primary)' }}><IconCheck /></span>}
-                    </div>
-                  );
-                })}
-              </div>
+                      {otherStaff.map(m => {
+                        const sel = cfg.staffIds.includes(m.id);
+                        return <StaffRow key={m.id} m={m} sel={sel} isExternal deptName={m.dept_name} onToggle={() => {
+                          setCfg(c => {
+                            const ids = [...c.staffIds];
+                            if (ids.includes(m.id)) return { ...c, staffIds: ids.filter(x => x !== m.id) };
+                            toast(`🔔 Sélection de ${m.first_name} ${m.last_name} — notification au chef du service ${m.dept_name}`, { icon: '⚠️' });
+                            return { ...c, staffIds: [...ids, m.id] };
+                          });
+                        }} />;
+                      })}
+                    </>
+                  )}
+                  {/* Groupe 3: Sans service */}
+                  {noServiceStaff.length > 0 && (
+                    <>
+                      <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, background: 'rgba(107,114,128,.04)', borderRadius: 6, marginTop: 8, marginBottom: 4 }}>
+                        👤 Personnel sans service ({noServiceStaff.length})
+                      </div>
+                      {noServiceStaff.map(m => {
+                        const sel = cfg.staffIds.length === 0 || cfg.staffIds.includes(m.id);
+                        return <StaffRow key={m.id} m={m} sel={sel} isExternal={false} onToggle={() => setCfg(c => {
+                          const ids = c.staffIds.length === 0 ? allHospitalStaff.map(s => s.id) : [...c.staffIds];
+                          return { ...c, staffIds: ids.includes(m.id) ? ids.filter(x => x !== m.id) : [...ids, m.id] };
+                        })} />;
+                      })}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Personnel externe */}
+            {/* Personnel externe — via HospitalStaffPicker */}
             <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
-                🤝 Ajouter du personnel externe
-                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>(d'un autre service — nécessite accord)</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>
+                    🤝 Personnel externe
+                    <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>(autre service — notification automatique)</span>
+                  </div>
+                </div>
+                <button onClick={() => setShowExternalPicker(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #1B4FCA, #7C3AED)', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                  ＋ Ajouter
+                </button>
               </div>
               {cfg.externalStaff.length === 0 ? (
                 <div style={{ padding: '14px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px dashed var(--border-subtle)', textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
                   Aucun personnel externe ajouté.<br />
-                  <span style={{ fontSize: 11 }}>Une notification sera envoyée au chef du service concerné pour accord.</span>
+                  <span style={{ fontSize: 11 }}>Le chef du service concerné sera notifié automatiquement.</span>
                 </div>
               ) : (
                 cfg.externalStaff.map((ext, idx) => (
                   <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: '#FFFBEB', border: '1px solid #FDE68A', marginBottom: 6 }}>
                     <span style={{ fontSize: 18 }}>👤</span>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700 }}>{ext.firstName} {ext.lastName}</div>
-                      <div style={{ fontSize: 11, color: '#D97706' }}>{ext.deptName} · En attente d'accord</div>
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>{ext.firstName || ext.first_name} {ext.lastName || ext.last_name}</div>
+                      <div style={{ fontSize: 11, color: '#D97706' }}>{ext.deptName || ext.dept_name} · {ext.role_name || ext.roleName} · Notification envoyée</div>
                     </div>
                     <button onClick={() => setCfg(c => ({ ...c, externalStaff: c.externalStaff.filter((_, i) => i !== idx) }))}
                       style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>✕</button>
                   </div>
                 ))
               )}
-              <div style={{ marginTop: 8, padding: '10px 14px', borderRadius: 8, background: '#EFF6FF', border: '1px solid #BFDBFE', fontSize: 12, color: '#3B82F6' }}>
-                💡 La recherche de personnel externe sera disponible après la première génération. Vous pourrez l'ajouter depuis la vue du planning.
-              </div>
             </div>
+
+            {/* Drawer HospitalStaffPicker pour personnel externe */}
+            <HospitalStaffPicker
+              open={showExternalPicker}
+              onClose={() => setShowExternalPicker(false)}
+              onSelect={member => {
+                setCfg(c => ({
+                  ...c,
+                  externalStaff: c.externalStaff.find(e => e.userId === member.id)
+                    ? c.externalStaff
+                    : [...c.externalStaff, { userId: member.id, firstName: member.first_name, lastName: member.last_name, deptName: member.dept_name, roleName: member.role_name }],
+                }));
+                toast(`👤 ${member.first_name} ${member.last_name} ajouté — notification au chef du service ${member.dept_name}`, { icon: '🔔' });
+                setShowExternalPicker(false);
+              }}
+              onDragStart={() => {}}
+              ownDeptId={departmentId}
+              title="Rechercher personnel externe"
+            />
           </div>
         )}
 
@@ -687,23 +989,37 @@ const WizardAssistant = ({ departmentId, onBack, onDone }) => {
 
       {/* Navigation */}
       {step < 5 && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <button style={btnSecondary} onClick={() => step === 0 ? onBack() : setStep(s => s - 1)}>
-            {step === 0 ? 'Changer de méthode' : '← Retour'}
-          </button>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Étape {step + 1} / {stepLabels.length}</div>
-          {step < 4 ? (
-            <button style={{ ...btnPrimary, opacity: canNext() ? 1 : 0.4 }}
-              disabled={!canNext()} onClick={() => setStep(s => s + 1)}>
-              Suivant →
-            </button>
-          ) : (
-            <button style={{ ...btnPrimary, opacity: loading ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 8 }}
-              disabled={loading} onClick={generate}>
-              {loading && <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,.3)', borderTopColor: '#fff', animation: 'spin 1s linear infinite' }} />}
-              {loading ? 'Génération...' : '🚀 Générer le planning'}
-            </button>
+        <div>
+          {/* Error banner — shown when user tries to advance with missing fields */}
+          {stepError && (
+            <div style={{ padding: '10px 14px', borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA', fontSize: 12, color: '#EF4444', marginBottom: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+              ⚠ {stepError}
+            </div>
           )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <button style={btnSecondary} onClick={() => { setStepError(''); step === 0 ? onBack() : setStep(s => s - 1); }}>
+              {step === 0 ? '← Changer de méthode' : '← Retour'}
+            </button>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Étape {step + 1} / {stepLabels.length}</div>
+            {step < 4 ? (
+              <button
+                style={{ ...btnPrimary, background: canNext() ? 'var(--color-primary)' : '#9CA3AF', cursor: canNext() ? 'pointer' : 'not-allowed' }}
+                onClick={() => {
+                  const err = getStepError();
+                  if (err) { setStepError(err); return; }
+                  setStepError('');
+                  setStep(s => s + 1);
+                }}>
+                Suivant →
+              </button>
+            ) : (
+              <button style={{ ...btnPrimary, opacity: loading ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 8 }}
+                disabled={loading} onClick={generate}>
+                {loading && <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,.3)', borderTopColor: '#fff', animation: 'spin 1s linear infinite' }} />}
+                {loading ? 'Génération...' : '🚀 Générer le planning'}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -711,75 +1027,208 @@ const WizardAssistant = ({ departmentId, onBack, onDone }) => {
 };
 
 
+// ─── Status meta (full set) ─────────────────────────────────────
+const STATUS_FULL = {
+  draft:              { label: 'Brouillon',           bg: '#F3F4F6', color: '#6B7280', icon: '📝' },
+  preparing:          { label: 'En préparation',      bg: '#FFFBEB', color: '#D97706', icon: '⚙️' },
+  pending_validation: { label: 'En attente',          bg: '#EFF6FF', color: '#2563EB', icon: '⏳' },
+  validated:          { label: 'Validé',              bg: '#ECFDF5', color: '#059669', icon: '✅' },
+  submitted:          { label: 'Soumis',              bg: '#EFF6FF', color: '#3B82F6', icon: '📤' },
+  under_review:       { label: 'En révision',         bg: '#FFFBEB', color: '#F59E0B', icon: '🔍' },
+  approved:           { label: 'Approuvé',            bg: '#ECFDF5', color: '#10B981', icon: '✔️' },
+  rejected:           { label: 'Rejeté',              bg: '#FEF2F2', color: '#EF4444', icon: '❌' },
+  active:             { label: 'Actif',               bg: '#ECFDF5', color: '#059669', icon: '🟢' },
+  archived:           { label: 'Archivé',             bg: '#F9FAFB', color: '#9CA3AF', icon: '📦' },
+};
+
+const FullStatusBadge = ({ status }) => {
+  const m = STATUS_FULL[status] || { label: status, bg: '#F3F4F6', color: '#6B7280', icon: '•' };
+  return (
+    <span style={{ background: m.bg, color: m.color, padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+      {m.icon} {m.label}
+    </span>
+  );
+};
+
+// ─── Schedule Action Menu ────────────────────────────────────────
+function ScheduleActionMenu({ schedule, onView, onRefresh }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const h = e => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  const doAction = async (action, label) => {
+    setOpen(false);
+    if (action === 'delete' && !window.confirm(`Supprimer le planning "${schedule.name}" ? Cette action est irréversible.`)) return;
+    try {
+      await schedulesAPI.action(schedule.id, action);
+      toast.success(label);
+      onRefresh();
+    } catch (e) {
+      toast.error(e.response?.data?.message || 'Erreur');
+    }
+  };
+
+  const isArchived = schedule.status === 'archived';
+  const isDeletable = ['draft', 'archived'].includes(schedule.status);
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={e => { e.stopPropagation(); setOpen(v => !v); }}
+        style={{ padding: '5px 8px', borderRadius: 7, border: '1px solid var(--border-subtle)', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, display: 'flex', alignItems: 'center' }}
+        title="Actions">
+        ⋮
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', right: 0, top: '110%', zIndex: 200, minWidth: 190,
+          background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+          borderRadius: 10, padding: '4px 0',
+          boxShadow: '0 12px 40px rgba(0,0,0,.18)',
+          animation: 'fadeIn .1s ease',
+        }}>
+          <ActItem icon="👁" label="Ouvrir" onClick={() => { setOpen(false); onView(schedule.id); }} />
+          <ActItem icon="⧉" label="Dupliquer" onClick={() => doAction('duplicate', 'Planning dupliqué !')} />
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '3px 0' }} />
+          {!isArchived
+            ? <ActItem icon="📦" label="Archiver" onClick={() => doAction('archive', 'Planning archivé')} />
+            : <ActItem icon="🔄" label="Restaurer" onClick={() => doAction('restore', 'Planning restauré en brouillon')} />
+          }
+          {isDeletable && (
+            <ActItem icon="🗑" label="Supprimer" danger onClick={() => doAction('delete', 'Planning supprimé')} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ActItem = ({ icon, label, onClick, danger }) => (
+  <button onClick={onClick}
+    style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: danger ? '#EF4444' : 'var(--text-primary)', textAlign: 'left' }}
+    onMouseEnter={e => e.currentTarget.style.background = danger ? '#FEF2F2' : 'var(--bg-elevated)'}
+    onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+    <span style={{ fontSize: 15 }}>{icon}</span> {label}
+  </button>
+);
+
 // ─── Schedule List ─────────────────────────────────────────────
 const ScheduleList = ({ departmentId, onView, onNew }) => {
+  const qc = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState('');
   const { data, isLoading } = useQuery({
     queryKey: ['schedules', departmentId],
-    queryFn:  () => schedulesAPI.getAll({ departmentId, limit: 20 }),
+    queryFn:  () => schedulesAPI.getAll({ departmentId, limit: 50 }),
     enabled:  !!departmentId,
   });
 
-  const items = data?.data?.data || data?.data || [];
+  const allItems = data?.data?.data || data?.data || [];
+  const items = statusFilter ? allItems.filter(s => s.status === statusFilter) : allItems;
+
+  const refresh = () => qc.invalidateQueries(['schedules', departmentId]);
 
   if (isLoading) {
     return <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Chargement...</div>;
   }
 
-  const modeLabel = (m) => {
-    if (m === 'assistant')   return 'Assistant';
-    if (m === 'spreadsheet') return 'Tableur';
-    if (m === 'visual')      return 'Visuel';
-    return m;
-  };
+  const modeLabel = m => ({ assistant: '🤖 Assistant', spreadsheet: '📊 Tableur', visual: '📅 Visuel' }[m] || m);
+
+  // Count by status
+  const statusCounts = allItems.reduce((acc, s) => { acc[s.status] = (acc[s.status] || 0) + 1; return acc; }, {});
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Mes plannings</h3>
-        <button onClick={onNew} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 18px', borderRadius: 10, border: 'none', cursor: 'pointer', background: 'var(--color-primary)', color: '#fff', fontWeight: 700, fontSize: 13 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Mes plannings</h3>
+          <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{allItems.length} planning{allItems.length !== 1 ? 's' : ''} au total</p>
+        </div>
+        <button onClick={onNew} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg, var(--color-primary), #7C3AED)', color: '#fff', fontWeight: 700, fontSize: 13, boxShadow: '0 4px 14px rgba(27,79,202,.3)' }}>
           <IconPlus /> Nouveau planning
         </button>
       </div>
 
+      {/* Status filter pills */}
+      {allItems.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+          <button onClick={() => setStatusFilter('')} style={{
+            padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+            border: `1px solid ${!statusFilter ? 'var(--color-primary)' : 'var(--border-subtle)'}`,
+            background: !statusFilter ? 'rgba(27,79,202,.08)' : 'transparent',
+            color: !statusFilter ? 'var(--color-primary)' : 'var(--text-muted)',
+          }}>Tous ({allItems.length})</button>
+          {Object.entries(statusCounts).map(([st, cnt]) => {
+            const m = STATUS_FULL[st] || { label: st, icon: '•' };
+            return (
+              <button key={st} onClick={() => setStatusFilter(st === statusFilter ? '' : st)} style={{
+                padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                border: `1px solid ${statusFilter === st ? m.color : 'var(--border-subtle)'}`,
+                background: statusFilter === st ? m.bg : 'transparent',
+                color: statusFilter === st ? m.color : 'var(--text-muted)',
+              }}>{m.icon} {m.label} ({cnt})</button>
+            );
+          })}
+        </div>
+      )}
+
       {items.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '56px 20px', background: 'var(--bg-card)', borderRadius: 16, border: '1px dashed var(--border-subtle)', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: 44, marginBottom: 10 }}>?</div>
-          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>Aucun planning cree</div>
-          <div style={{ fontSize: 13, marginBottom: 18 }}>Creez votre premier tableau de garde</div>
+          <div style={{ fontSize: 48, marginBottom: 10 }}>📋</div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{statusFilter ? 'Aucun planning dans ce statut' : 'Aucun planning créé'}</div>
+          <div style={{ fontSize: 13, marginBottom: 18 }}>Créez votre premier tableau de garde</div>
           <button onClick={onNew} style={{ padding: '10px 24px', borderRadius: 10, border: 'none', cursor: 'pointer', background: 'var(--color-primary)', color: '#fff', fontWeight: 700 }}>
-            Creer un planning
+            Créer un planning
           </button>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {items.map(s => (
-            <div key={s.id} onClick={() => onView(s.id)}
+            <div key={s.id}
               style={{
                 background: 'var(--bg-card)', borderRadius: 14, border: '1px solid var(--border-subtle)',
-                padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer',
-                transition: 'box-shadow .2s',
+                padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12,
+                transition: 'box-shadow .15s, border-color .15s',
               }}
-              onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,.08)'; }}
-              onMouseLeave={e => { e.currentTarget.style.boxShadow = ''; }}
+              onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,.08)'; e.currentTarget.style.borderColor = 'rgba(27,79,202,.2)'; }}
+              onMouseLeave={e => { e.currentTarget.style.boxShadow = ''; e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
             >
-              <div style={{ width: 42, height: 42, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(27,79,202,.1)', color: 'var(--color-primary)', flexShrink: 0 }}>
+              {/* Color bar */}
+              <div style={{ width: 4, height: 48, borderRadius: 4, background: STATUS_FULL[s.status]?.color || '#9CA3AF', flexShrink: 0 }} />
+
+              {/* Icon */}
+              <div style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(27,79,202,.07)', color: 'var(--color-primary)', flexShrink: 0 }}>
                 <IconCalendar />
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+
+              {/* Info */}
+              <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => onView(s.id)}>
+                <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>
                   {s.name}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {s.start_date} au {s.end_date}
-                  {s.creation_mode ? ` - ${modeLabel(s.creation_mode)}` : ''}
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <span>📅 {s.start_date} → {s.end_date}</span>
+                  {s.creation_mode && <span>{modeLabel(s.creation_mode)}</span>}
+                  {s.updated_at && <span>Modifié {new Date(s.updated_at).toLocaleDateString('fr-FR')}</span>}
                 </div>
               </div>
-              <StatusBadge status={s.status} />
-              <span style={{ color: 'var(--text-muted)', lineHeight: 0 }}><IconRight /></span>
+
+              {/* Status */}
+              <FullStatusBadge status={s.status} />
+
+              {/* Arrow + Actions */}
+              <span style={{ color: 'var(--text-muted)', lineHeight: 0, cursor: 'pointer' }} onClick={() => onView(s.id)}><IconRight /></span>
+              <ScheduleActionMenu schedule={s} onView={onView} onRefresh={refresh} />
             </div>
           ))}
         </div>
       )}
+
+      <style>{`@keyframes fadeIn { from { opacity:0; transform:scale(.97) } to { opacity:1; transform:scale(1) } }`}</style>
     </div>
   );
 };
@@ -792,6 +1241,8 @@ export default function ChefDeServiceDashboard() {
   const [view,         setView]         = useState('list');
   const [selectedScheduleId, setSelectedScheduleId] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  // 2-step flow: stores {id, name, startDate, endDate} after step 1
+  const [scheduleInfo, setScheduleInfo] = useState(null);
 
   // Departments dont ce chef est responsable
   const { data: deptData, isLoading: deptLoading } = useQuery({
@@ -801,10 +1252,13 @@ export default function ChefDeServiceDashboard() {
   const departments = deptData?.data?.data || deptData?.data || [];
 
   useEffect(() => {
+    // Priorité: 1) departments chargés  2) department_id du profil user (fallback rapide)
     if (departments.length > 0 && !selectedDept) {
       setSelectedDept(departments[0].id);
+    } else if (!selectedDept && user?.department_id) {
+      setSelectedDept(user.department_id);
     }
-  }, [departments]);
+  }, [departments, user]);
 
   // Detail du service selectionne
   const { data: deptDetail } = useQuery({
@@ -924,8 +1378,8 @@ export default function ChefDeServiceDashboard() {
             <h3 style={{ margin: '0 0 14px', fontSize: 15, fontWeight: 700 }}>Actions rapides</h3>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {[
-                { label: 'Creer un planning', color: 'var(--color-primary)', action: () => { setActiveTab('schedules'); setView('method'); } },
-                { label: 'Importer Excel/CSV', color: '#0891B2',              action: () => setShowImport(true) },
+                { label: 'Créer un planning', color: 'var(--color-primary)', action: () => { setActiveTab('schedules'); setView('new'); } },
+                { label: 'Importer Excel/CSV',  color: '#0891B2',              action: () => setShowImport(true) },
                 { label: 'Voir l\'equipe',    color: '#10B981',              action: () => setActiveTab('team') },
                 { label: 'Absences',          color: '#F59E0B',              action: () => setActiveTab('absences') },
               ].map(a => (
@@ -1013,87 +1467,80 @@ export default function ChefDeServiceDashboard() {
         </div>
       )}
 
-      {/* ── PLANNINGS ──────────────────────────────────────── */}
+      {/* ── PLANNINGS ──────────────────────────────────── */}
       {activeTab === 'schedules' && (
         <div>
+          {/* Étape 0 — Liste des plannings */}
           {view === 'list' && (
             <ScheduleList departmentId={selectedDept}
               onView={(id) => { setSelectedScheduleId(id); setView('spreadsheet'); }}
-              onNew={() => setView('method')} />
+              onNew={() => { setScheduleInfo(null); setView('new'); }} />
           )}
+
+          {/* Étape 1 — Créer le planning (Nom + Dates) */}
+          {view === 'new' && (
+            <PlanningStep1
+              departmentId={selectedDept}
+              onBack={() => setView('list')}
+              onCreated={(id, name, startDate, endDate) => {
+                setSelectedScheduleId(id);
+                setScheduleInfo({ id, name, startDate, endDate });
+                setView('method');
+              }}
+            />
+          )}
+
+          {/* Étape 2 — Choisir la méthode */}
           {view === 'method' && (
-            <MethodSelector onSelect={(method) => setView(method)} />
+            <MethodSelector onSelect={(method) => {
+              if (method === 'import') {
+                setShowImport(true);
+                // Stay on method view so user can go back
+              } else {
+                setView(method);
+              }
+            }} />
           )}
+
+          {/* Assistant intelligent (reçoit startDate/endDate déjà créés) */}
           {view === 'assistant' && (
-            <WizardAssistant departmentId={selectedDept}
+            <WizardAssistant
+              departmentId={selectedDept}
+              scheduleId={scheduleInfo?.id || selectedScheduleId}
+              startDate={scheduleInfo?.startDate}
+              endDate={scheduleInfo?.endDate}
+              name={scheduleInfo?.name}
               onBack={() => setView('method')}
               onDone={(schedId) => {
-                if (schedId) { setSelectedScheduleId(schedId); setView('spreadsheet'); }
-                else { setView('list'); }
-                toast.success('Planning genere !');
-              }} />
+                const id = schedId || scheduleInfo?.id || selectedScheduleId;
+                if (id) { setSelectedScheduleId(id); setView('spreadsheet'); }
+                else setView('list');
+                toast.success('Planning généré !');
+              }}
+            />
           )}
-          {(view === 'spreadsheet' || view === 'visual') && selectedScheduleId && (
-            <div>
-              {/* View toggle bar */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
-              }}>
-                <div style={{
-                  display: 'flex', background: 'var(--bg-elevated)', borderRadius: 10,
-                  border: '1px solid var(--border-subtle)', overflow: 'hidden',
-                }}>
-                  {[
-                    { id: 'spreadsheet', label: 'Tableur', emoji: '📊' },
-                    { id: 'visual', label: 'Calendrier', emoji: '📅' },
-                  ].map(v => (
-                    <button key={v.id} onClick={() => setView(v.id)}
-                      style={{
-                        padding: '7px 16px', border: 'none', cursor: 'pointer',
-                        fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5,
-                        background: view === v.id ? 'var(--color-primary)' : 'transparent',
-                        color: view === v.id ? '#fff' : 'var(--text-secondary)',
-                        transition: 'all .15s',
-                      }}>
-                      {v.emoji} {v.label}
-                    </button>
-                  ))}
-                </div>
-                <div style={{ flex: 1 }} />
-                <button onClick={() => setShowImport(true)}
-                  style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #0891B2', background: 'rgba(8,145,178,.06)', color: '#0891B2', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                  Importer
-                </button>
-              </div>
 
-              {/* Active view */}
-              {view === 'spreadsheet' && (
-                <SmartSpreadsheet
-                  scheduleId={selectedScheduleId}
-                  departmentId={selectedDept}
-                  onBack={() => setView('list')}
-                />
-              )}
-              {view === 'visual' && (
-                <VisualCalendar
-                  scheduleId={selectedScheduleId}
-                  departmentId={selectedDept}
-                  onBack={() => setView('list')}
-                />
-              )}
-            </div>
+          {/* Tableur — vue directe */}
+          {view === 'spreadsheet' && selectedScheduleId && (
+            <SmartSpreadsheet
+              scheduleId={selectedScheduleId}
+              departmentId={selectedDept}
+              onBack={() => setView('list')}
+            />
           )}
-          {(view === 'spreadsheet' || view === 'visual') && !selectedScheduleId && (
+
+          {/* Tableur sans planning sélectionné */}
+          {view === 'spreadsheet' && !selectedScheduleId && (
             <div style={{ ...cardSt, textAlign: 'center', padding: '48px 20px' }}>
               <div style={{ fontSize: 38, marginBottom: 10 }}>📋</div>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Aucun planning selectionne</div>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Aucun planning sélectionné</div>
               <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 18 }}>
-                Creez d'abord un planning via l'Assistant, puis ouvrez-le ici.
+                Créez d'abord un planning, puis ouvrez-le ici.
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-                <button onClick={() => setView('method')}
+                <button onClick={() => { setScheduleInfo(null); setView('new'); }}
                   style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: 'var(--color-primary)', color: '#fff', cursor: 'pointer', fontWeight: 700 }}>
-                  Creer un planning
+                  Créer un planning
                 </button>
                 <button onClick={() => setView('list')}
                   style={{ padding: '10px 20px', borderRadius: 10, border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: 600 }}>
