@@ -32,13 +32,18 @@ function StaffCard({ member, ownDeptId, onSelect, onDragStart, compact }) {
   return (
     <div
       draggable
-      onDragStart={() => onDragStart?.(member)}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData('application/json', JSON.stringify(member));
+        event.dataTransfer.setData('text/plain', `staff:${member.id}`);
+        onDragStart?.(member);
+      }}
       onClick={() => onSelect?.(member)}
       style={{
         display: 'flex', alignItems: 'center', gap: compact ? 8 : 10,
         padding: compact ? '7px 8px' : '10px 12px',
         borderRadius: 10, cursor: 'pointer', userSelect: 'none',
-        border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
+        border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
         transition: 'all .12s', position: 'relative',
       }}
       onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(27,79,202,.1)'; }}
@@ -167,18 +172,18 @@ export default function HospitalStaffPicker({
         {/* Header */}
         <div style={{
           padding: '16px 18px', borderBottom: '1px solid var(--border-subtle)',
-          background: 'linear-gradient(135deg, #1E293B, #0F172A)',
+          background: 'var(--bg-elevated)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>{title}</div>
-              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>{title}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                 {total} membre{total !== 1 ? 's' : ''} · Tout l'hôpital
               </div>
             </div>
             <button onClick={onClose} style={{
-              background: 'rgba(255,255,255,.1)', border: 'none', borderRadius: 8,
-              padding: '6px 8px', cursor: 'pointer', color: '#94A3B8', display: 'flex',
+              background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 8,
+              padding: '6px 8px', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex',
             }}><IcoClose /></button>
           </div>
 
@@ -194,8 +199,8 @@ export default function HospitalStaffPicker({
               placeholder="Nom, prénom, matricule..."
               style={{
                 width: '100%', padding: '9px 9px 9px 32px', borderRadius: 8,
-                border: '1px solid #334155', background: '#1E293B',
-                color: '#F1F5F9', fontSize: 12, outline: 'none', boxSizing: 'border-box',
+                border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
+                color: 'var(--text-primary)', fontSize: 12, outline: 'none', boxSizing: 'border-box',
               }}
             />
             {search && (
@@ -238,7 +243,7 @@ export default function HospitalStaffPicker({
         </div>
 
         {/* Help text */}
-        <div style={{ padding: '8px 14px', background: '#EFF6FF', borderBottom: '1px solid #BFDBFE', fontSize: 11, color: '#3B82F6', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ padding: '8px 14px', background: 'var(--color-primary-10)', borderBottom: '1px solid var(--color-primary-20)', fontSize: 11, color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span>💡</span>
           Cliquez pour ajouter · Glissez dans le tableau · <strong style={{ color: '#F59E0B' }}>Personnel externe</strong> = notification automatique
         </div>
@@ -302,6 +307,6 @@ export default function HospitalStaffPicker({
 }
 
 const selectSt = {
-  width: '100%', padding: '6px 10px', borderRadius: 7, border: '1px solid #334155',
-  background: '#1E293B', color: '#F1F5F9', fontSize: 11, cursor: 'pointer', outline: 'none',
+  width: '100%', padding: '6px 10px', borderRadius: 7, border: '1px solid var(--border-subtle)',
+  background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', outline: 'none',
 };

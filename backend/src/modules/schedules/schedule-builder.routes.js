@@ -30,6 +30,7 @@ router.post('/import/confirm',             importCtrl.importConfirm);
 router.get('/:scheduleId/detail',          ctrl.getScheduleDetail);
 router.post('/:scheduleId/validate',       ctrl.validateSchedule);
 router.post('/:scheduleId/validate-shift', ctrl.validateShift);
+router.put('/:scheduleId/draft',           ctrl.saveDraft);
 router.post('/:scheduleId/submit',         ctrl.submitSchedule);
 router.post('/:scheduleId/snapshot',       ctrl.createSnapshot);
 

@@ -1,4 +1,5 @@
 const { query } = require('../../config/database');
+const { PERSONNEL_CATEGORIES } = require('../../config/personnel-categories');
 
 // ─── GET /api/job-titles ──────────────────────────────────────
 // Retourne les titres de poste de l'etablissement (systeme + custom)
@@ -38,7 +39,7 @@ const getJobTitles = async (req, res) => {
     params
   );
 
-  return res.json({ success: true, data: result.rows });
+  return res.json({ success: true, data: result.rows, categories: PERSONNEL_CATEGORIES });
 };
 
 // ─── POST /api/job-titles ─────────────────────────────────────

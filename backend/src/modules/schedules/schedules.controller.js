@@ -377,11 +377,12 @@ const getHospitalStaff = async (req, res) => {
     SELECT u.id, u.first_name, u.last_name, u.email, u.phone, u.matricule,
            r.name AS role_name, r.id AS role_id,
            d.name AS dept_name, d.id AS dept_id,
-           u.last_activity_at
+           NULL::timestamptz AS last_activity_at
     FROM users u
     LEFT JOIN roles r ON u.role_id = r.id
-    LEFT JOIN departments d ON u.department_id = d.id
-    WHERE u.establishment_id = $1 AND u.is_active = TRUE AND u.status = 'active'
+    LEFT JOIN user_departments ud ON ud.user_id = u.id AND ud.is_primary = TRUE
+    LEFT JOIN departments d ON ud.department_id = d.id
+    WHERE u.establishment_id = $1 AND u.is_active = TRUE
   `;
   const params = [estId];
   let p = 2;
@@ -397,7 +398,7 @@ const getHospitalStaff = async (req, res) => {
     p++;
   }
   if (deptId) {
-    sql += ` AND u.department_id = $${p}`;
+    sql += ` AND ud.department_id = $${p}`;
     params.push(deptId);
     p++;
   }
@@ -407,7 +408,7 @@ const getHospitalStaff = async (req, res) => {
 
   const { rows } = await query(sql, params);
   const countRes = await query(
-    `SELECT COUNT(*) FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.establishment_id = $1 AND u.is_active = TRUE AND u.status = 'active'${search ? ` AND (LOWER(u.first_name) LIKE LOWER($2) OR LOWER(u.last_name) LIKE LOWER($2) OR LOWER(u.matricule) LIKE LOWER($2))` : ''}`,
+    `SELECT COUNT(*) FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.establishment_id = $1 AND u.is_active = TRUE${search ? ` AND (LOWER(u.first_name) LIKE LOWER($2) OR LOWER(u.last_name) LIKE LOWER($2) OR LOWER(u.matricule) LIKE LOWER($2))` : ''}`,
     search ? [estId, `%${search}%`] : [estId]
   );
 
@@ -437,4 +438,3 @@ module.exports = {
   getConflicts, detectConflicts,
   scheduleAction, getHospitalStaff, getAllRoles,
 };
-

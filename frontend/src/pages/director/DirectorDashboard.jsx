@@ -160,6 +160,10 @@ export default function DirectorDashboard() {
     queryKey: ['roles-available'],
     queryFn: () => usersAPI.rolesAvailable().then(r => r.data.data),
   });
+  const { data: jobTitles = [] } = useQuery({
+    queryKey: ['job-titles', 'all'],
+    queryFn: () => jobTitlesAPI.getAll().then(r => r.data.data),
+  });
 
   // Membres du service sélectionné (pour désigner chef/surveillant)
   const { data: deptDetail } = useQuery({
@@ -234,7 +238,10 @@ export default function DirectorDashboard() {
     }
   };
 
-  const ROLES_NEED_DEPT = ['department_head', 'service_supervisor'];
+  const ROLES_NEED_DEPT = ['department_head', 'service_supervisor', 'senior_doctor', 'resident'];
+  const selectedTitle = jobTitles.find(t => t.id === userForm.jobTitleId);
+  const personnelNeedsDept = ROLES_NEED_DEPT.includes(userForm.roleCode)
+    || ['medical', 'paramedical'].includes(selectedTitle?.category);
   const submitUser = () => {
     if (!userForm.firstName || !userForm.lastName || !userForm.email || !userForm.roleCode) {
       return toast.error('Prenom, Nom, Email et Role/Titre sont obligatoires');
@@ -242,8 +249,8 @@ export default function DirectorDashboard() {
     if (userForm.roleCode === 'autre' && !userForm.jobTitleId) {
       return toast.error('Veuillez choisir un titre de poste pour le role "Autre Personnel".');
     }
-    if (ROLES_NEED_DEPT.includes(userForm.roleCode) && !userForm.departmentId) {
-      return toast.error('Un chef de service ou surveillant doit obligatoirement etre affecte a un service.');
+    if (personnelNeedsDept && !userForm.departmentId) {
+      return toast.error('Le personnel medical ou paramedical doit obligatoirement etre affecte a un service.');
     }
     createUser.mutate(userForm);
   };
@@ -786,20 +793,20 @@ export default function DirectorDashboard() {
           </div>
           {/* Service — pleine largeur si requis */}
           <Field
-            label={ROLES_NEED_DEPT.includes(userForm.roleCode) ? 'Service (obligatoire *)' : 'Service (optionnel)'}
-            required={ROLES_NEED_DEPT.includes(userForm.roleCode)}
+            label={personnelNeedsDept ? 'Service (obligatoire *)' : 'Service (optionnel)'}
+            required={personnelNeedsDept}
           >
             <Select
               value={userForm.departmentId || ''}
               onChange={e => setUserForm(f => ({ ...f, departmentId: e.target.value }))}
-              style={{ borderColor: ROLES_NEED_DEPT.includes(userForm.roleCode) && !userForm.departmentId ? 'var(--color-danger)' : undefined }}
+              style={{ borderColor: personnelNeedsDept && !userForm.departmentId ? 'var(--color-danger)' : undefined }}
             >
               <option value="">— Choisir un service —</option>
               {departments.map(d => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </Select>
-            {ROLES_NEED_DEPT.includes(userForm.roleCode) && (
+            {personnelNeedsDept && (
               <div style={{ fontSize: 11, color: '#F59E0B', marginTop: 4, fontWeight: 600 }}>
                 Ce role necessite un service. Un seul chef et un seul surveillant par service.
               </div>

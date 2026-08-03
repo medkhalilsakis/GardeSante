@@ -267,6 +267,7 @@ export const scheduleBuilderAPI = {
   getDetail:        (id)            => api.get(`/schedule-builder/${id}/detail`),
   validate:         (id)            => api.post(`/schedule-builder/${id}/validate`),
   validateShift:    (id, data)      => api.post(`/schedule-builder/${id}/validate-shift`, data),
+  saveDraft:        (id, data)      => api.put(`/schedule-builder/${id}/draft`, data),
   submit:           (id, data)      => api.post(`/schedule-builder/${id}/submit`, data),
   createSnapshot:   (id)            => api.post(`/schedule-builder/${id}/snapshot`),
   // Import

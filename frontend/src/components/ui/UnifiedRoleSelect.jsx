@@ -28,19 +28,17 @@ const SYSTEM_ROLE_COLORS = {
 
 const JT_CAT_COLORS = {
   medical:   { bg: '#EFF6FF', color: '#3B82F6' },
-  surgical:  { bg: '#FEF3C7', color: '#D97706' },
-  nursing:   { bg: '#ECFDF5', color: '#059669' },
-  admin:     { bg: '#F5F3FF', color: '#7C3AED' },
-  technical: { bg: '#F0F9FF', color: '#0891B2' },
+  paramedical: { bg: '#ECFDF5', color: '#059669' },
+  administrative: { bg: '#F5F3FF', color: '#7C3AED' },
+  technical_logistics: { bg: '#F0F9FF', color: '#0891B2' },
   other:     { bg: '#F3F4F6', color: '#6B7280' },
 };
 
 const JT_CAT_LABELS = {
-  medical:   'Medical',
-  surgical:  'Chirurgical',
-  nursing:   'Paramedical',
-  admin:     'Administratif',
-  technical:  'Technique / Logistique',
+  medical:   'Personnel médical',
+  paramedical: 'Personnel paramédical',
+  administrative: 'Personnel administratif',
+  technical_logistics: 'Personnel technique et logistique',
   other:     'Autre',
 };
 

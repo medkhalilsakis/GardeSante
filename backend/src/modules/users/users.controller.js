@@ -1,5 +1,6 @@
 const { query, transaction } = require('../../config/database');
 const bcrypt = require('bcryptjs');
+const { CARE_CATEGORIES } = require('../../config/personnel-categories');
 
 // -────────────────────────────────────────────────────────────
 // Hierarchie STRICTE de creation de comptes :
@@ -24,7 +25,7 @@ const CREATABLE_ROLES = {
 const NO_LOGIN_ROLES = ['senior_doctor', 'resident', 'autre'];
 
 // Roles qui DOIVENT etre associes a un service unique
-const ROLES_REQUIRING_DEPT = ['department_head', 'service_supervisor'];
+const ROLES_REQUIRING_DEPT = ['department_head', 'service_supervisor', 'senior_doctor', 'resident'];
 
 
 // GET /api/users
@@ -71,10 +72,12 @@ const getUsers = async (req, res) => {
             u.email, u.phone, u.speciality, u.grade, u.is_active, u.is_on_leave, u.avatar_url,
             u.can_login, u.last_login, u.created_at,
             r.code AS role_code, r.name AS role_name, r.name_ar AS role_name_ar, r.level AS role_level,
+            jt.id AS job_title_id, jt.name AS job_title, jt.category AS personnel_category, jt.category_label AS personnel_category_label,
             e.name AS establishment_name
      FROM users u
      JOIN roles r ON u.role_id = r.id
      JOIN establishments e ON u.establishment_id = e.id
+     LEFT JOIN job_titles jt ON jt.id = u.job_title_id
      LEFT JOIN user_departments ud ON u.id = ud.user_id
      WHERE ${where}
      ORDER BY u.last_name, u.first_name
@@ -132,14 +135,6 @@ const createUser = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Email, prenom, nom et role sont requis' });
   }
 
-  // Les roles chef/surveillant doivent OBLIGATOIREMENT avoir un service
-  if (ROLES_REQUIRING_DEPT.includes(roleCode) && !departmentId) {
-    return res.status(400).json({
-      success: false,
-      message: `Le role "${roleCode}" doit obligatoirement etre affecte a un service.`,
-    });
-  }
-
   // Verifier la permission de creer ce role
   const allowed = CREATABLE_ROLES[req.user.roleCode] || [];
   if (!req.user.isSuperAdmin && !allowed.includes(roleCode)) {
@@ -173,6 +168,21 @@ const createUser = async (req, res) => {
       success: false,
       message: `Role "${roleCode}" introuvable pour cet etablissement. Verifiez que l'etablissement a bien ete initialise.`,
     });
+  }
+
+  // Le personnel de soins doit toujours appartenir à un service.
+  // Le rôle système couvre les médecins sans intitulé; l'intitulé couvre le paramédical.
+  let jobTitle = null;
+  if (jobTitleId) {
+    const titleResult = await query(
+      'SELECT id, name, category FROM job_titles WHERE id = $1 AND establishment_id = $2 AND is_active = TRUE',
+      [jobTitleId, eid]
+    );
+    jobTitle = titleResult.rows[0];
+    if (!jobTitle) return res.status(400).json({ success: false, message: 'Titre de poste invalide pour cet établissement.' });
+  }
+  if ((ROLES_REQUIRING_DEPT.includes(roleCode) || CARE_CATEGORIES.has(jobTitle?.category)) && !departmentId) {
+    return res.status(400).json({ success: false, message: 'Le personnel médical ou paramédical doit obligatoirement être affecté à un service.' });
   }
 
   // ── Contrainte unicite : un seul chef et un seul surveillant par service ──
@@ -224,8 +234,7 @@ const createUser = async (req, res) => {
   let resolvedSpeciality = speciality || null;
   if (jobTitleId) {
     try {
-      const jt = await query('SELECT name FROM job_titles WHERE id = $1', [jobTitleId]);
-      if (jt.rows[0]) resolvedSpeciality = jt.rows[0].name;
+      if (jobTitle) resolvedSpeciality = jobTitle.name;
     } catch (_) {}
   }
 

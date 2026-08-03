@@ -24,6 +24,15 @@ const getDatesInRange = (startDate, endDate) => {
   return dates;
 };
 
+// PostgreSQL DATE est renvoyé comme Date par node-postgres : conserver le jour
+// UTC, sans le transformer dans le fuseau horaire du serveur.
+const dateKey = (value) => {
+  if (!value) return '';
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const match = String(value).match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : new Date(value).toISOString().slice(0, 10);
+};
+
 // ──────────────────────────────────────────────────────────────
 // ÉTAPE 1 DU WIZARD — Contexte du service
 // GET /api/schedule-builder/wizard/context?departmentId=&startDate=&endDate=
@@ -300,6 +309,88 @@ const validateShift = async (req, res) => {
   });
 };
 
+// Sauvegarde du tableur manuel. Les identités du personnel restent des UUID,
+// les champs affichés ne sont donc jamais une source de données modifiable.
+const saveDraft = async (req, res) => {
+  const { scheduleId } = req.params;
+  const { rows = [], customCols = [] } = req.body;
+  const estId = req.user.establishmentId;
+  const schedRes = await query(
+    'SELECT id, department_id, start_date, end_date, status FROM schedules WHERE id=$1 AND establishment_id=$2',
+    [scheduleId, estId]
+  );
+  const schedule = schedRes.rows[0];
+  if (!schedule) return res.status(404).json({ success: false, message: 'Planning introuvable' });
+  if (schedule.status !== 'draft') return res.status(400).json({ success: false, message: 'Seul un planning brouillon peut être modifié.' });
+
+  // Les ids de lignes (`new-...`) ne sont jamais des UUID de personnel.
+  const isUuid = (value) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  const roster = rows.filter(r => isUuid(r.userId));
+  const invalidPersonnelRow = rows.find(r => r.userId && !isUuid(r.userId));
+  if (invalidPersonnelRow) {
+    return res.status(400).json({ success: false, code: 'INVALID_PERSONNEL_ID', message: 'Une ligne du tableur contient un identifiant de personnel invalide. Veuillez selectionner a nouveau ce personnel.' });
+  }
+  const ids = roster.map(r => r.userId);
+  if (new Set(ids).size !== ids.length) return res.status(400).json({ success: false, message: 'Un membre du personnel ne peut apparaître qu\'une fois dans le tableur.' });
+  if (ids.length) {
+    const users = await query('SELECT id FROM users WHERE establishment_id=$1 AND is_active=TRUE AND id = ANY($2)', [estId, ids]);
+    if (users.rows.length !== ids.length) return res.status(400).json({ success: false, message: 'Le personnel sélectionné doit appartenir à l\'hôpital et être actif.' });
+  }
+  const start = dateKey(schedule.start_date), end = dateKey(schedule.end_date);
+  for (const row of roster) {
+    const name = `${row.lastName || ''} ${row.firstName || ''}`.trim() || 'Personnel sélectionné';
+    const pStart = row.periodStart || null, pEnd = row.periodEnd || null;
+    if (!pStart) return res.status(400).json({ success: false, code: 'PERIOD_START_REQUIRED', message: `${name} : date de début requise.` });
+    if (!pEnd) return res.status(400).json({ success: false, code: 'PERIOD_END_REQUIRED', message: `${name} : date de fin requise.` });
+    if (pStart < start) return res.status(400).json({ success: false, code: 'PERIOD_START_BEFORE_SCHEDULE', message: `${name} : la date de début ne peut pas être avant le ${start}.` });
+    if (pStart > end) return res.status(400).json({ success: false, code: 'PERIOD_START_AFTER_SCHEDULE', message: `${name} : la date de début ne peut pas être après le ${end}.` });
+    if (pEnd < start) return res.status(400).json({ success: false, code: 'PERIOD_END_BEFORE_SCHEDULE', message: `${name} : la date de fin ne peut pas être avant le ${start}.` });
+    if (pEnd > end) return res.status(400).json({ success: false, code: 'PERIOD_END_AFTER_SCHEDULE', message: `${name} : la date de fin ne peut pas dépasser le ${end}.` });
+    if (pStart > pEnd) return res.status(400).json({ success: false, code: 'PERIOD_RANGE_INVALID', message: `${name} : la date de début doit être antérieure ou égale à la date de fin.` });
+  }
+  if (roster.length > 0 && !roster.some(row => (row.periodStart || start) === start)) {
+    return res.status(400).json({ success: false, message: `Au moins un personnel doit couvrir le début du planning (${start}).` });
+  }
+  if (roster.length > 0 && !roster.some(row => (row.periodEnd || end) === end)) {
+    return res.status(400).json({ success: false, message: `Au moins un personnel doit couvrir la fin du planning (${end}).` });
+  }
+  // Convertit aussi les codes du tableur en gardes réelles : le brouillon
+  // reste exploitable par les règles métier et par la validation finale.
+  const typeRes = await query('SELECT id, UPPER(code) AS code, LOWER(name) AS name FROM shift_types WHERE establishment_id=$1 AND is_active=TRUE', [estId]);
+  const resolveShiftType = (code) => typeRes.rows.find(t => t.code === code)
+    || typeRes.rows.find(t => (code === 'J' && t.name.startsWith('jour')) || (code === 'N' && t.name.startsWith('nuit')) || (code === 'S' && t.name.startsWith('soir')) || (code === 'G' && t.name.startsWith('garde')));
+  const shiftRows = [];
+  for (const row of roster) {
+    for (const [date, code] of Object.entries(row.shifts || {})) {
+      if (code === 'R' || date < (row.periodStart || start) || date > (row.periodEnd || end)) continue;
+      const shiftType = resolveShiftType(String(code).toUpperCase());
+      if (!shiftType) return res.status(400).json({ success: false, message: `Type de garde introuvable pour le code "${code}".` });
+      shiftRows.push([scheduleId, estId, schedule.department_id, row.userId, shiftType.id, date, req.user.id]);
+    }
+  }
+  await transaction(async client => {
+    await client.query('DELETE FROM schedule_staff_assignments WHERE schedule_id=$1', [scheduleId]);
+    for (const [position, row] of roster.entries()) {
+      await client.query(
+        'INSERT INTO schedule_staff_assignments (schedule_id,user_id,period_start,period_end,position) VALUES ($1,$2,$3,$4,$5)',
+        [scheduleId, row.userId, row.periodStart || start, row.periodEnd || end, position]
+      );
+    }
+    await client.query('DELETE FROM shifts WHERE schedule_id=$1', [scheduleId]);
+    for (const shift of shiftRows) {
+      await client.query(
+        'INSERT INTO shifts (schedule_id,establishment_id,department_id,user_id,shift_type_id,shift_date,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        shift
+      );
+    }
+    await client.query(
+      `UPDATE schedules SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb, updated_at=NOW() WHERE id=$1`,
+      [scheduleId, JSON.stringify({ spreadsheet: { rows: roster, customCols, savedAt: new Date().toISOString() } })]
+    );
+  });
+  return res.json({ success: true, message: 'Brouillon enregistré', data: { savedAt: new Date().toISOString() } });
+};
+
 // ──────────────────────────────────────────────────────────────
 // SNAPSHOT NATIONAL (après approbation)
 // POST /api/schedule-builder/:scheduleId/snapshot
@@ -351,12 +442,20 @@ const getScheduleDetail = async (req, res) => {
     [scheduleId]
   );
 
+  const staff = await query(
+    `SELECT u.id, u.first_name, u.last_name, u.matricule, u.phone, r.name AS role_name,
+            a.period_start, a.period_end, a.position
+     FROM schedule_staff_assignments a JOIN users u ON u.id=a.user_id JOIN roles r ON r.id=u.role_id
+     WHERE a.schedule_id=$1 ORDER BY a.position`, [scheduleId]
+  );
+
   return res.json({
     success: true,
     data: {
       schedule: sched.rows[0],
       shifts:   shifts.rows,
       cycles:   cycles.rows,
+      staff:    staff.rows,
     },
   });
 };
@@ -416,6 +515,7 @@ module.exports = {
   generateSchedule,
   validateSchedule,
   validateShift,
+  saveDraft,
   createSnapshot,
   getScheduleDetail,
   submitSchedule,
