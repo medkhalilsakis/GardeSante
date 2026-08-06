@@ -363,6 +363,265 @@ function PieChart({ data, size = 100 }) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// HOLIDAY FORM COMPONENT
+// ══════════════════════════════════════════════════════════════
+function HolidayForm({ form, setForm }) {
+  return (
+    <div>
+      <Field label="Nom de la fête / événement" required>
+        <Inp
+          value={form.name || ''}
+          onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+          placeholder="Ex: Fête de l'Indépendance, Aïd el-Fitr..."
+        />
+      </Field>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Catégorie" required>
+          <Sel value={form.category || 'national'} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+            <option value="national">🏛️ National (Fête civile)</option>
+            <option value="religious">🌙 Religieux (Fête religieuse)</option>
+            <option value="special">⭐ Spécial (Période d'urgence / Autre)</option>
+          </Sel>
+        </Field>
+
+        <Field label="Année" required>
+          <Inp
+            type="number"
+            value={form.year || new Date().getFullYear()}
+            onChange={e => setForm(f => ({ ...f, year: parseInt(e.target.value) || new Date().getFullYear() }))}
+          />
+        </Field>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Date de début" required>
+          <Inp
+            type="date"
+            value={form.startDate || ''}
+            onChange={e => setForm(f => ({
+              ...f,
+              startDate: e.target.value,
+              endDate: f.endDate && f.endDate < e.target.value ? e.target.value : (f.endDate || e.target.value)
+            }))}
+          />
+        </Field>
+
+        <Field label="Date de fin (pour les périodes)">
+          <Inp
+            type="date"
+            value={form.endDate || form.startDate || ''}
+            onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))}
+          />
+        </Field>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Coeff. Garde (Multiplicateur)">
+          <Inp
+            type="number" step="0.1" min="1.0" max="3.0"
+            value={form.multiplier || 1.5}
+            onChange={e => setForm(f => ({ ...f, multiplier: parseFloat(e.target.value) || 1.5 }))}
+            placeholder="1.5 = Majorée de 50%"
+          />
+        </Field>
+
+        <Field label="Récurrence">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 38, fontSize: 13, fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={Boolean(form.isRecurring)}
+              onChange={e => setForm(f => ({ ...f, isRecurring: e.target.checked }))}
+              style={{ width: 16, height: 16, accentColor: 'var(--color-primary)', cursor: 'pointer' }}
+            />
+            <span>Récurrent chaque année (date fixe)</span>
+          </label>
+        </Field>
+      </div>
+
+      <Field label="Notes / Description (Optionnel)">
+        <Inp
+          value={form.notes || ''}
+          onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+          placeholder="Ex: Majoration double de nuit, congés légaux..."
+        />
+      </Field>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// HOLIDAYS SECTION COMPONENT
+// ══════════════════════════════════════════════════════════════
+function HolidaysSection({ onOpenCreate, onEdit, onDelete, onSeedTunisia }) {
+  const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const years = [currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
+
+  const { data: holidaysData, isLoading } = useQuery({
+    queryKey: ['admin-holidays', selectedYear],
+    queryFn: () => adminAPI.getHolidays({ year: selectedYear }),
+  });
+  const holidays = holidaysData?.data?.data || holidaysData?.data || [];
+
+  const categoryBadges = {
+    national:  { label: '🏛️ National', bg: '#EFF6FF', color: '#1D4ED8', border: '#BFDBFE' },
+    religious: { label: '🌙 Religieux', bg: '#F3E8FF', color: '#7E22CE', border: '#E9D5FF' },
+    special:   { label: '⭐ Spécial',   bg: '#FEF3C7', color: '#B45309', border: '#FDE68A' },
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Header section */}
+      <div style={{
+        background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 14, padding: 18,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ background: '#7C3AED20', color: '#7C3AED', padding: 10, borderRadius: 10 }}>
+            <span style={{ fontSize: 22 }}>📅</span>
+          </div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>
+              Jours & Périodes Fériés {selectedYear}
+            </h2>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+              Gérez le calendrier officiel des jours fériés pour l'attribution et le calcul des gardes.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', background: 'var(--bg-elevated)', borderRadius: 8, padding: 3, border: '1px solid var(--border-subtle)' }}>
+            {years.map(y => (
+              <button
+                key={y}
+                type="button"
+                onClick={() => setSelectedYear(y)}
+                style={{
+                  padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer',
+                  background: selectedYear === y ? 'var(--color-primary)' : 'transparent',
+                  color: selectedYear === y ? '#fff' : 'var(--text-secondary)',
+                  transition: 'all .15s'
+                }}
+              >
+                {y}
+              </button>
+            ))}
+          </div>
+
+          <Btn variant="ghost" onClick={() => onSeedTunisia(selectedYear)} title="Précharger les 8 jours fériés nationaux tunisiens">
+            ⚡ Jours Fériés Tunisiens
+          </Btn>
+          <Btn variant="primary" icon="plus" onClick={() => onOpenCreate(selectedYear)}>
+            Ajouter un jour/période
+          </Btn>
+        </div>
+      </div>
+
+      {/* KPI summary */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+        <KpiCard icon="clock" label="Total Fériés" value={holidays.length} sub={`Année ${selectedYear}`} color="#7C3AED" />
+        <KpiCard icon="check" label="Nationaux" value={holidays.filter(h => h.category === 'national').length} sub="Fêtes civiles & nationaux" color="#1B4FCA" />
+        <KpiCard icon="history" label="Religieux" value={holidays.filter(h => h.category === 'religious').length} sub="Fêtes religieuses" color="#059669" />
+        <KpiCard icon="stats" label="Récurrents" value={holidays.filter(h => h.is_recurring).length} sub="Reconduits chaque année" color="#D97706" />
+      </div>
+
+      {/* Table grid */}
+      {isLoading ? (
+        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>Chargement des jours fériés...</div>
+      ) : holidays.length === 0 ? (
+        <div style={{
+          background: 'var(--bg-card)', borderRadius: 14, border: '1px dashed var(--border-subtle)', padding: 40,
+          textAlign: 'center', color: 'var(--text-muted)'
+        }}>
+          <span style={{ fontSize: 36, display: 'block', marginBottom: 10 }}>📅</span>
+          <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+            Aucun jour férié configuré pour {selectedYear}
+          </h3>
+          <p style={{ margin: '0 0 16px', fontSize: 12 }}>
+            Ajoutez les jours et périodes fériés manuellement ou préchargez les jours fériés usuels en 1 clic.
+          </p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            <Btn variant="ghost" onClick={() => onSeedTunisia(selectedYear)}>⚡ Précharger les jours tunisiens</Btn>
+            <Btn variant="primary" icon="plus" onClick={() => onOpenCreate(selectedYear)}>Ajouter manuellement</Btn>
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: 'var(--bg-card)', borderRadius: 14, border: '1px solid var(--border-subtle)', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <th style={{ padding: '12px 16px' }}>Événement / Fête</th>
+                <th style={{ padding: '12px 16px' }}>Type</th>
+                <th style={{ padding: '12px 16px' }}>Dates & Période</th>
+                <th style={{ padding: '12px 16px' }}>Catégorie</th>
+                <th style={{ padding: '12px 16px' }}>Récurrence</th>
+                <th style={{ padding: '12px 16px' }}>Coeff. Garde</th>
+                <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {holidays.map((h, idx) => {
+                const sStr = String(h.start_date || '').split('T')[0];
+                const eStr = String(h.end_date || '').split('T')[0];
+                const isPeriod = sStr !== eStr;
+                const cat = categoryBadges[h.category] || categoryBadges.national;
+                const fmtDate = str => {
+                  if (!str) return '';
+                  const [y, m, d] = str.split('-');
+                  return y && m && d ? `${d}/${m}/${y}` : str;
+                };
+                const startDateFormatted = fmtDate(sStr);
+                const endDateFormatted = fmtDate(eStr);
+                return (
+                  <tr key={h.id} style={{ borderBottom: '1px solid var(--border-subtle)', background: idx % 2 === 0 ? 'transparent' : 'var(--bg-elevated)' }}>
+                    <td style={{ padding: '14px 16px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      {h.name}
+                      {h.notes && <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>{h.notes}</div>}
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 12, fontSize: 11, fontWeight: 700,
+                        background: isPeriod ? '#FEF3C7' : '#F3F4F6', color: isPeriod ? '#92400E' : '#4B5563', border: `1px solid ${isPeriod ? '#FDE68A' : '#E5E7EB'}`
+                      }}>
+                        {isPeriod ? '📆 Période' : '📅 Jour unique'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '14px 16px', fontWeight: 700 }}>
+                      {isPeriod ? `${startDateFormatted} → ${endDateFormatted}` : startDateFormatted}
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <span style={{ padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700, background: cat.bg, color: cat.color, border: `1px solid ${cat.border}` }}>
+                        {cat.label}
+                      </span>
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: h.is_recurring ? '#059669' : 'var(--text-muted)' }}>
+                        {h.is_recurring ? '🔄 Oui (Annuel)' : '📌 Date fixe'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '14px 16px', fontWeight: 800, color: '#7C3AED' }}>
+                      x{parseFloat(h.multiplier || 1.5).toFixed(2)}
+                    </td>
+                    <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <Btn size="sm" variant="ghost" icon="edit" onClick={() => onEdit(h)} title="Éditer" />
+                        <Btn size="sm" variant="danger" icon="trash" onClick={() => onDelete(h)} title="Supprimer" />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ══════════════════════════════════════════════════════════════
 export default function SuperAdminDashboard() {
@@ -376,10 +635,11 @@ export default function SuperAdminDashboard() {
   const [confirm, setConfirm]         = useState(null);
   const [mainTab, setMainTab]         = useState('establishments'); // 'establishments'|'stats'
 
-  const [estForm,   setEstForm]   = useState({});
-  const [dirForm,   setDirForm]   = useState({});
-  const [staffForm, setStaffForm] = useState({});
-  const [pwdForm,   setPwdForm]   = useState({ newPassword: '', confirm: '' });
+  const [estForm,     setEstForm]     = useState({});
+  const [dirForm,     setDirForm]     = useState({});
+  const [staffForm,   setStaffForm]   = useState({});
+  const [pwdForm,     setPwdForm]     = useState({ newPassword: '', confirm: '' });
+  const [holidayForm, setHolidayForm] = useState({});
 
   const [staffFilter, setStaffFilter] = useState({ search: '', roleCode: '', isActive: 'true' });
   const [histFilter,  setHistFilter]  = useState({ from: '', to: '', category: '' });
@@ -455,6 +715,11 @@ export default function SuperAdminDashboard() {
   const removeStaff       = mut(id => establishmentsAPI.removePersonnel(id),    ['personnel'], 'Compte désactivé');
   const updateStaff       = mut(({ id, ...d }) => establishmentsAPI.updatePersonnel(id, d), ['personnel', 'salary'], 'Informations mises à jour');
 
+  const createHoliday     = mut(d => adminAPI.createHoliday(d),                 ['admin-holidays'], 'Jour férié enregistré');
+  const updateHoliday     = mut(({ id, ...d }) => adminAPI.updateHoliday(id, d), ['admin-holidays'], 'Jour férié mis à jour');
+  const deleteHoliday     = mut(id => adminAPI.deleteHoliday(id),               ['admin-holidays'], 'Jour férié supprimé');
+  const seedTunisiaHolidays = mut(year => adminAPI.seedTunisiaHolidays({ year }), ['admin-holidays'], 'Jours fériés tunisiens préchargés !');
+
   // ── Handlers ──────────────────────────────────────────────────
   const goToEst   = useCallback(id => { setSelectedEstId(id); setActiveTab('overview'); }, []);
   const goBack    = useCallback(() => { setSelectedEstId(null); setActiveTab('overview'); }, []);
@@ -492,8 +757,14 @@ export default function SuperAdminDashboard() {
           </div>
         </div>
         {!selectedEstId && (
-          <div style={{ display: 'flex', gap: 10 }}>
-            <Btn icon="chart" variant={mainTab === 'stats' ? 'primary' : 'ghost'} onClick={() => setMainTab(mainTab === 'stats' ? 'establishments' : 'stats')}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Btn variant={mainTab === 'establishments' ? 'primary' : 'ghost'} onClick={() => setMainTab('establishments')}>
+              🏥 Établissements
+            </Btn>
+            <Btn variant={mainTab === 'holidays' ? 'primary' : 'ghost'} onClick={() => setMainTab('holidays')}>
+              📅 Jours Fériés
+            </Btn>
+            <Btn icon="chart" variant={mainTab === 'stats' ? 'primary' : 'ghost'} onClick={() => setMainTab('stats')}>
               Statistiques
             </Btn>
             {mainTab === 'establishments' && (
@@ -505,7 +776,7 @@ export default function SuperAdminDashboard() {
         )}
       </div>
 
-      {/* ── Vue liste OU stats ── */}
+      {/* ── Vue liste, jours fériés OU stats ── */}
       {!selectedEstId && (
         <>
           {mainTab === 'establishments' ? (
@@ -536,6 +807,51 @@ export default function SuperAdminDashboard() {
                 </div>
               )}
             </>
+          ) : mainTab === 'holidays' ? (
+            <HolidaysSection
+              onOpenCreate={(yr) => {
+                setHolidayForm({
+                  name: '',
+                  category: 'national',
+                  startDate: `${yr}-01-01`,
+                  endDate: `${yr}-01-01`,
+                  year: yr,
+                  isRecurring: true,
+                  multiplier: 1.5,
+                  notes: ''
+                });
+                setModal('create-holiday');
+              }}
+              onEdit={(h) => {
+                setHolidayForm({
+                  id: h.id,
+                  name: h.name,
+                  category: h.category,
+                  startDate: h.start_date?.substring(0, 10),
+                  endDate: h.end_date?.substring(0, 10),
+                  year: h.year,
+                  isRecurring: Boolean(h.is_recurring),
+                  multiplier: h.multiplier,
+                  notes: h.notes || ''
+                });
+                setModal('edit-holiday');
+              }}
+              onDelete={(h) => {
+                setConfirm({
+                  message: `Supprimer "${h.name}" ?`,
+                  sub: 'Ce jour férié sera retiré du calendrier.',
+                  action: () => deleteHoliday.mutate(h.id)
+                });
+              }}
+              onSeedTunisia={(yr) => {
+                setConfirm({
+                  message: `Précharger les 8 jours fériés nationaux tunisiens pour ${yr} ?`,
+                  sub: 'Les jours fériés usuels seront automatiquement enregistrés.',
+                  action: () => seedTunisiaHolidays.mutate(yr),
+                  danger: false
+                });
+              }}
+            />
           ) : (
             <StatsSection stats={globalStats} loading={loadingStats} />
           )}
@@ -668,6 +984,30 @@ export default function SuperAdminDashboard() {
             <Btn variant="ghost" onClick={() => setModal(null)}>Annuler</Btn>
             <Btn icon="check" onClick={() => updateStaff.mutate({ id: modalData.userId, ...staffForm })} disabled={updateStaff.isPending}>
               {updateStaff.isPending ? 'Enregistrement…' : 'Enregistrer'}
+            </Btn>
+          </div>
+        </Modal>
+      )}
+
+      {modal === 'create-holiday' && (
+        <Modal title="Ajouter un jour ou une période férié(e)" icon="📅" onClose={() => setModal(null)}>
+          <HolidayForm form={holidayForm} setForm={setHolidayForm} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+            <Btn variant="ghost" onClick={() => setModal(null)}>Annuler</Btn>
+            <Btn icon="check" onClick={() => createHoliday.mutate(holidayForm)} disabled={createHoliday.isPending || !holidayForm.name?.trim() || !holidayForm.startDate}>
+              {createHoliday.isPending ? 'Enregistrement…' : 'Enregistrer le jour férié'}
+            </Btn>
+          </div>
+        </Modal>
+      )}
+
+      {modal === 'edit-holiday' && (
+        <Modal title="Modifier le jour / la période férié(e)" icon="✏️" onClose={() => setModal(null)}>
+          <HolidayForm form={holidayForm} setForm={setHolidayForm} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+            <Btn variant="ghost" onClick={() => setModal(null)}>Annuler</Btn>
+            <Btn icon="check" onClick={() => updateHoliday.mutate(holidayForm)} disabled={updateHoliday.isPending || !holidayForm.name?.trim() || !holidayForm.startDate}>
+              {updateHoliday.isPending ? 'Enregistrement…' : 'Mettre à jour'}
             </Btn>
           </div>
         </Modal>

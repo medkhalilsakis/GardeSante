@@ -87,6 +87,8 @@ const COLUMN_TYPE_PATTERNS = [
   { pattern: /^(nom|last.?name|family.?name)/i,                      type: 'person',   confidence: 0.85 },
   { pattern: /^(prenom|first.?name|prénom)/i,                        type: 'person',   confidence: 0.85 },
   { pattern: /^(horaire|heure|time|schedule|garde)/i,               type: 'time',     confidence: 0.90 },
+  { pattern: /^(période|periode).*(début|debut|fin)|^(début|debut|fin).*(période|periode)/i, type: 'date', confidence: 0.95 },
+  { pattern: /^(durée|duree).*(début|debut|fin)|^(début|debut|fin).*(durée|duree)/i, type: 'time', confidence: 0.95 },
   { pattern: /^(date|jour|day)/i,                                    type: 'date',     confidence: 0.90 },
   { pattern: /^(obs|comment|note|remarque)/i,                        type: 'text',     confidence: 0.80 },
   { pattern: /^(remplaç|remplacement|replacement)/i,                 type: 'person',   confidence: 0.90 },

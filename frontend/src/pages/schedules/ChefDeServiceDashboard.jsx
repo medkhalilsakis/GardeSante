@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../store';
-import { departmentsAPI, schedulesAPI, absencesAPI, scheduleBuilderAPI, shiftsAPI } from '../../api';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { departmentsAPI, schedulesAPI, absencesAPI, scheduleBuilderAPI, shiftsAPI, adminAPI } from '../../api';
 import SmartSpreadsheet from './components/SmartSpreadsheet';
 import VisualCalendar from './components/VisualCalendar';
 import ImportModal from './components/ImportModal';
 import HospitalStaffPicker from './components/HospitalStaffPicker';
+import ScheduleChangeProposals from './components/ScheduleChangeProposals';
 import toast from 'react-hot-toast';
 
 // ─── Icons ────────────────────────────────────────────────────
@@ -87,6 +89,7 @@ const PlanningStep1 = ({ departmentId, onCreated, onBack }) => {
   const [endDate, setEnd]       = useState('');
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState('');
+  const [specialDaysOnly, setSpecialDaysOnly] = useState(false);
 
   const totalDays = startDate && endDate
     ? Math.ceil((new Date(endDate) - new Date(startDate)) / 86400000) + 1 : 0;
@@ -105,8 +108,8 @@ const PlanningStep1 = ({ departmentId, onCreated, onBack }) => {
     if (!departmentId) return setError('Service introuvable. Veuillez patienter que la page se charge complètement.');
     setSaving(true);
     try {
-      const defaultName = name.trim() || `Planning ${new Date(startDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`;
-      const res = await schedulesAPI.create({ name: defaultName, start_date: startDate, end_date: endDate, department_id: departmentId, status: 'draft', creation_mode: 'assistant' });
+      const defaultName = name.trim() || `${specialDaysOnly ? 'Gardes week-ends et jours fériés' : 'Planning'} ${new Date(startDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`;
+      const res = await schedulesAPI.create({ name: defaultName, start_date: startDate, end_date: endDate, department_id: departmentId, status: 'draft', schedule_type: specialDaysOnly ? 'special_weekend_holiday' : 'normal', creation_mode: specialDaysOnly ? 'special_days' : 'assistant', metadata: specialDaysOnly ? { schedule_kind: 'weekend_holiday', special_days_only: true } : { schedule_kind: 'normal' } });
       const id = res.data?.data?.id || res.data?.id;
       if (!id) throw new Error('ID de planning non reçu.');
       onCreated(id, defaultName, startDate, endDate);
@@ -166,6 +169,11 @@ const PlanningStep1 = ({ departmentId, onCreated, onBack }) => {
           </div>
         )}
 
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 12, marginBottom: 16, borderRadius: 10, border: `1px solid ${specialDaysOnly ? '#F59E0B' : 'var(--border-subtle)'}`, background: specialDaysOnly ? '#FFFBEB' : 'var(--bg-elevated)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={specialDaysOnly} onChange={e => setSpecialDaysOnly(e.target.checked)} style={{ marginTop: 3 }} />
+          <span><strong style={{ display: 'block', fontSize: 13 }}>Planning spécial : week-ends et jours fériés uniquement</strong><span style={{ display: 'block', marginTop: 3, fontSize: 11, color: 'var(--text-muted)' }}>Les jours fériés sont récupérés depuis la configuration du Super Admin. Seules ces dates seront affichées dans le tableur.</span></span>
+        </label>
+
         {/* Nom */}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 20 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Nom du planning <span style={{ fontWeight: 400 }}>(optionnel — généré automatiquement si vide)</span></span>
@@ -199,8 +207,8 @@ const MethodSelector = ({ onSelect }) => {
       gradient: 'linear-gradient(135deg,#8B5CF6,#6D28D9)',
       icon: '🤖',
       title: 'Assistant Intelligent', tag: 'Recommandé',
-      desc: 'L\'assistant vous guide étape par étape. Répondez à quelques questions et le planning est généré automatiquement selon vos contraintes.',
-      features: ['Génération automatique', 'Détection des conflits', 'Rotation équitable', '8 algorithmes disponibles'],
+      desc: 'L\'assistant vous guide étape par étape. Spécifiez l\'équipe, les contraintes et générez automatiquement le meilleur planning.',
+      features: ['Assistant en 7 étapes', 'Règles métier & Relais', '3 propositions optimisées', 'Génération intelligente'],
     },
     {
       id: 'spreadsheet', color: '#0891B2',
@@ -297,735 +305,575 @@ const StaffRow = ({ m, sel, isExternal, deptName, onToggle }) => (
   </div>
 );
 
-// ─── Wizard Assistant ─────────────────────────────────────────
+// ─── ASSISTANT DE PLANIFICATION DES GARDES (7 ÉTAPES) ─────────────
 const WizardAssistant = ({ departmentId, scheduleId, startDate: initStart, endDate: initEnd, name: initName, onBack, onDone }) => {
-  const [step, setStep]         = useState(0);
-  const [loading, setLoading]   = useState(false);
-  const [result, setResult]     = useState(null);
-  const [context, setContext]   = useState(null);
-  const [staffSearch, setStaffSearch]           = useState('');
-  const [showExternalPicker, setShowExternalPicker] = useState(false);
-  const [roleSearch, setRoleSearch]             = useState('');
-  const [roleDropdownOpen, setRoleDropdownOpen] = useState(null);
-  const [stepError, setStepError]               = useState('');
+  const { user } = useAuthStore();
+  const [step, setStep]       = useState(0); // 0 to 6
+  const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  // Step 1: Informations Générales
   const [cfg, setCfg] = useState({
-    startDate: initStart || '', endDate: initEnd || '', name: initName || '',
-    periodType: 'monthly', useWeekSlices: false, weekSlices: [],
-    shiftTypeId: '', algo: 'round_robin',
-    staffIds: [], requiredPosts: [],
-    externalStaff: [], teamA: [], teamB: [],
+    name: initName || '',
+    startDate: initStart || '',
+    endDate: initEnd || '',
+    periodType: 'monthly', // weekly | monthly | ab_weeks | rotation | custom
+    scheduleType: 'normal', // normal | special_weekend_holiday
   });
 
-  // Wizard context (shift types)
+  // Keep synced if initStart or initEnd changes
   useEffect(() => {
-    if (!departmentId) return;
-    scheduleBuilderAPI.getWizardContext({ departmentId })
-      .then(r => setContext(r.data.data))
-      .catch(() => {});
-  }, [departmentId]);
+    if (initStart) setCfg(c => ({ ...c, startDate: initStart }));
+    if (initEnd) setCfg(c => ({ ...c, endDate: initEnd }));
+    if (initName) setCfg(c => ({ ...c, name: initName }));
+  }, [initStart, initEnd, initName]);
 
-  // TOUT le personnel de l'hôpital — propre service en premier
-  const { data: hospitalStaffData, isLoading: staffLoading } = useQuery({
+  // Step 2: Constitution de l'équipe
+  const [selectedStaffIds, setSelectedStaffIds] = useState([]);
+  const [staffSearch, setStaffSearch]           = useState('');
+
+  // Fetch tous les membres disponibles de l'hôpital / service
+  const { data: hospitalStaffData } = useQuery({
     queryKey: ['hospital-staff-wizard', staffSearch],
     queryFn: () => schedulesAPI.getHospitalStaff({ search: staffSearch || undefined, limit: 200 }),
     staleTime: 60000,
   });
-  const allHospitalStaff = hospitalStaffData?.data?.data || hospitalStaffData?.data || [];
-  // Groupe 1: même service, Groupe 2: autres services, Groupe 3: sans service
-  const ownStaff     = allHospitalStaff.filter(m => m.dept_id === departmentId);
-  const otherStaff   = allHospitalStaff.filter(m => m.dept_id && m.dept_id !== departmentId);
-  const noServiceStaff = allHospitalStaff.filter(m => !m.dept_id);
+  const allStaff = hospitalStaffData?.data?.data || hospitalStaffData?.data || [];
+  const ownStaff   = allStaff.filter(m => m.dept_id === departmentId);
 
-  // Fetch platform roles (dynamique)
-  const { data: rolesData } = useQuery({
-    queryKey: ['platform-roles'],
-    queryFn: () => schedulesAPI.getRoles(),
-    staleTime: 5 * 60 * 1000,
+  // Par défaut, sélectionner tous les membres du service au premier chargement
+  useEffect(() => {
+    if (ownStaff.length > 0 && selectedStaffIds.length === 0) {
+      setSelectedStaffIds(ownStaff.map(s => s.id));
+    }
+  }, [ownStaff]);
+
+  // Step 3: Contraintes & Ordre de Relais par membre
+  const [memberConfigs, setMemberConfigs] = useState({});
+  useEffect(() => {
+    setMemberConfigs(prev => {
+      const next = { ...prev };
+      selectedStaffIds.forEach(id => {
+        if (!next[id]) {
+          const staffObj = allStaff.find(s => s.id === id);
+          next[id] = {
+            id,
+            firstName: staffObj?.first_name || '',
+            lastName: staffObj?.last_name || '',
+            roleName: staffObj?.role_name || '',
+            roleCode: staffObj?.role_code || '',
+            isAvailable: true,
+            presenceDuration: 'full',
+            periodStart: cfg.startDate,
+            periodEnd: cfg.endDate,
+            maxShiftsMonth: 10,
+            excludedDays: [],
+            preferredCycle: 'any',
+          };
+        }
+      });
+      return next;
+    });
+  }, [selectedStaffIds, allStaff, cfg.startDate, cfg.endDate]);
+
+  // Step 4: Définir les Règles du Service & Missions
+  const [serviceReqs, setServiceReqs] = useState({
+    seniorCount: 1,
+    residentCount: 2,
+    supervisorCount: 1,
+    nurseCount: 2,
+    shiftHours: '07_07',
+    maxPerWeek: 5,
+    noConsecutiveShifts: true,
+    minRestHours: 24,
   });
-  const platformRoles = rolesData?.data?.data || rolesData?.data || [];
-  const filteredPlatformRoles = platformRoles.filter(r =>
-    !roleSearch || r.name.toLowerCase().includes(roleSearch.toLowerCase())
-  );
 
-  const WEEK_TYPES = [
-    { id: 'semaine_a',      label: 'Semaine A',                   emoji: '🔵', desc: 'Première équipe en rotation' },
-    { id: 'semaine_b',      label: 'Semaine B',                   emoji: '🟢', desc: 'Deuxième équipe en rotation' },
-    { id: 'collaboration',  label: 'Collaboration inter-hôpital', emoji: '🤝', desc: 'Personnel externe inclus' },
-    { id: 'formation',      label: 'Semaine formation',           emoji: '📚', desc: 'Gardes légères + formation' },
-    { id: 'renfort',        label: 'Semaine renforcée',           emoji: '💪', desc: 'Effectif augmenté (pic, épidémie)' },
-    { id: 'custom',         label: 'Personnalisée',               emoji: '✏️', desc: 'Nom libre défini par le chef' },
+  // Step 5: Choix du Mode de Génération
+  const [generationMode, setGenerationMode] = useState('auto_balance');
+
+  // Step 6: Validation Intelligente & Pre-Check
+  const [anomalies, setAnomalies] = useState([]);
+  const [autoFixed, setAutoFixed] = useState(false);
+
+  // Step 7: Propositions (A, B, C)
+  const [proposals, setProposals] = useState([]);
+  const [selectedProposalKey, setSelectedProposalKey] = useState('proposal_a');
+
+  // Navigation labels
+  const stepLabels = [
+    '1. Informations',
+    '2. Équipe',
+    '3. Contraintes',
+    '4. Missions & Règles',
+    '5. Mode de génération',
+    '6. Pré-Validation',
+    '7. Choix du planning',
   ];
-
-  const algoOptions = [
-    { id: 'round_robin',     label: 'Round-Robin équitable',      emoji: '🔄', badge: 'Recommandé',
-      desc: 'Distribution cyclique équitable en tenant compte des gardes passées. Chaque membre reçoit un nombre de gardes quasi-identique.' },
-    { id: 'ab_rotation',     label: 'Rotation A/B',              emoji: '↔️', badge: null,
-      desc: 'Deux équipes alternatives qui tournent chaque semaine. Idéal pour les plannings avec organisation Semaine A / Semaine B.' },
-    { id: 'weighted_fair',   label: 'Équilibrage pondéré',        emoji: '⚖️', badge: 'Nouveau',
-      desc: 'Tient compte de l\'ancienneté, spécialité et charge récente pour une distribution encore plus juste.' },
-    { id: 'constraint_first',label: 'Contraintes prioritaires',   emoji: '🛡️', badge: null,
-      desc: 'Respecte d\'abord les indisponibilités et repos requis, puis distribue les gardes restantes.' },
-    { id: 'skill_match',     label: 'Adéquation compétences',     emoji: '🎯', badge: 'Nouveau',
-      desc: 'Affecte chaque garde selon la spécialité et le grade requis par poste. Optimise la qualité de couverture.' },
-    { id: 'min_fatigue',     label: 'Minimisation fatigue',       emoji: '😴', badge: null,
-      desc: 'Évite les gardes consécutives, respecte les temps de repos réglementaires et limite la charge hebdomadaire.' },
-    { id: 'cyclic',          label: 'Cyclique fixe',              emoji: '📊', badge: null,
-      desc: 'Chaque membre suit un pattern de rotation prédéfini et répété. Prévisible et stable dans le temps.' },
-    { id: 'manual',          label: 'Manuel assisté',             emoji: '🖊️', badge: null,
-      desc: 'L\'IA propose des suggestions et détecte les conflits, mais vous décidez manuellement de chaque affectation.' },
-  ];
-
-  const stepLabels = ['Période', 'Organisation', 'Algorithme', 'Équipe & Postes', 'Confirmation', 'Résultat'];
-
-  const inputSt = {
-    width: '100%', padding: '10px 14px', borderRadius: 10, fontSize: 14,
-    border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
-    color: 'var(--text-primary)', outline: 'none', boxSizing: 'border-box',
-  };
-  const btnPrimary = {
-    padding: '11px 28px', borderRadius: 10, border: 'none', cursor: 'pointer',
-    background: 'var(--color-primary)', color: '#fff', fontWeight: 700, fontSize: 14,
-  };
-  const btnSecondary = {
-    padding: '11px 20px', borderRadius: 10, border: '1px solid var(--border-subtle)',
-    background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, fontSize: 14, cursor: 'pointer',
-  };
 
   const totalDays = cfg.startDate && cfg.endDate
-    ? Math.ceil((new Date(cfg.endDate) - new Date(cfg.startDate)) / 86400000) + 1 : 0;
+    ? Math.max(1, Math.ceil((new Date(cfg.endDate) - new Date(cfg.startDate)) / 86400000) + 1) : 0;
 
   const getStepError = () => {
     if (step === 0) {
       if (!cfg.startDate || !cfg.endDate) return 'Les dates de début et de fin sont obligatoires.';
-      if (new Date(cfg.endDate) < new Date(cfg.startDate)) return 'La date de fin doit être après la date de début.';
+      if (new Date(cfg.endDate) < new Date(cfg.startDate)) return 'La date de fin doit être postérieure à la date de début.';
       return '';
     }
     if (step === 1) {
-      if (cfg.useWeekSlices) {
-        if (cfg.weekSlices.length === 0) return 'Ajoutez au moins une semaine ou désactivez le découpage.';
-        const incomplete = cfg.weekSlices.find(w => !w.startDate || !w.endDate);
-        if (incomplete) return `La semaine "${incomplete.name || 'sans nom'}" doit avoir des dates de début et fin.`;
-      }
-      return '';
-    }
-    if (step === 2) {
-      if (!cfg.algo) return 'Veuillez choisir un algorithme de répartition.';
-      return '';
-    }
-    if (step === 3) {
-      const totalSel = cfg.staffIds.length + cfg.externalStaff.length;
-      if (totalSel === 0 && allHospitalStaff.length > 0) return 'Sélectionnez au moins un membre du personnel pour ce planning.';
-      if (cfg.algo === 'ab_rotation' && (cfg.teamA.length === 0 || cfg.teamB.length === 0)) return 'L\'algorithme A/B nécessite au moins un membre dans chaque équipe.';
+      if (selectedStaffIds.length === 0) return 'Sélectionnez au moins un membre du personnel pour composer l\'équipe.';
       return '';
     }
     return '';
   };
   const canNext = () => !getStepError();
 
-  const addWeekSlice = () => {
-    const lastEnd = cfg.weekSlices.length > 0 ? cfg.weekSlices[cfg.weekSlices.length - 1].endDate : cfg.startDate;
-    const nextStart = lastEnd ? new Date(new Date(lastEnd).getTime() + 86400000).toISOString().split('T')[0] : cfg.startDate;
-    setCfg(c => ({
-      ...c,
-      weekSlices: [...c.weekSlices, { id: Date.now(), type: 'semaine_a', name: 'Semaine A', startDate: nextStart, endDate: '', customName: '' }],
-    }));
-  };
+  const runPreCheck = () => {
+    const detected = [];
+    const staffList = selectedStaffIds.map(id => memberConfigs[id]).filter(Boolean);
 
-  const updateSlice = (idx, field, val) => {
-    setCfg(c => {
-      const slices = [...c.weekSlices];
-      slices[idx] = { ...slices[idx], [field]: val };
-      if (field === 'type' && val !== 'custom') {
-        const wt = WEEK_TYPES.find(w => w.id === val);
-        if (wt) slices[idx].name = wt.label;
+    const seniorCount = staffList.filter(s => (s?.roleName?.toLowerCase().includes('senior') || s?.roleName?.toLowerCase().includes('médecin'))).length;
+    if (seniorCount === 0) {
+      detected.push({
+        id: 'no-senior',
+        severity: 'error',
+        message: 'Aucun Médecin Sénior n\'a été inclus dans l\'équipe sélectionnée.',
+      });
+    }
+
+    staffList.forEach(s => {
+      if (s?.periodStart && s?.periodEnd && s.periodEnd < s.periodStart) {
+        detected.push({
+          id: `invalid-period-${s.id}`,
+          severity: 'warning',
+          message: `${s.firstName} ${s.lastName} : La date de fin de présence (${s.periodEnd}) précède le début (${s.periodStart}).`,
+        });
       }
-      if (field === 'customName') slices[idx].name = val;
-      return { ...c, weekSlices: slices };
     });
+
+    setAnomalies(detected);
   };
 
-  const removeSlice = (idx) => setCfg(c => ({ ...c, weekSlices: c.weekSlices.filter((_, i) => i !== idx) }));
-
-  const addPost = () => {
-    const roles = context?.roles || context?.staff?.reduce((acc, s) => {
-      if (!acc.find(r => r.id === s.role_id)) acc.push({ id: s.role_id, name: s.role_name });
-      return acc;
-    }, []) || [];
-    setCfg(c => ({ ...c, requiredPosts: [...c.requiredPosts, { id: Date.now(), roleName: '', roleId: '', count: 1 }] }));
+  const autoFixAnomalies = () => {
+    setMemberConfigs(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(id => {
+        if (next[id].periodEnd < next[id].periodStart) {
+          next[id].periodEnd = cfg.endDate;
+        }
+      });
+      return next;
+    });
+    setAnomalies([]);
+    setAutoFixed(true);
+    toast.success('Anomalies corrigées automatiquement avec succès !');
   };
 
-  const totalRequired = cfg.requiredPosts.reduce((sum, p) => sum + (parseInt(p.count) || 0), 0);
-  const totalSelected = cfg.staffIds.length + cfg.externalStaff.length || allHospitalStaff.length;
+  const handleGenerateProposals = async () => {
+    setGenerating(true);
+    try {
+      const selectedStaffObjects = selectedStaffIds.map(id => memberConfigs[id]).filter(Boolean);
+      const res = await scheduleBuilderAPI.generateProposals({
+        departmentId,
+        name: cfg.name || `Planning ${cfg.startDate} → ${cfg.endDate}`,
+        startDate: cfg.startDate,
+        endDate: cfg.endDate,
+        periodType: cfg.periodType,
+        scheduleType: cfg.scheduleType,
+        selectedStaff: selectedStaffObjects,
+        serviceRequirements: serviceReqs,
+        generationStrategy: generationMode,
+      });
 
-  const generate = async () => {
+      setProposals(res.data.data.proposals || []);
+      setStep(6);
+      toast.success('3 propositions de planning générées avec succès !');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Erreur lors de la génération des propositions');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleConfirmSelectedProposal = async () => {
+    const chosen = proposals.find(p => p.key === selectedProposalKey) || proposals[0];
+    if (!chosen) return;
     setLoading(true);
     try {
-      const payload = { ...cfg, departmentId, staffIds: cfg.staffIds.length ? cfg.staffIds : undefined };
-      const res = await scheduleBuilderAPI.generate(payload);
-      setResult(res.data);
-      setStep(5);
-      if (res.data.data?.evaluation?.errors?.length === 0) {
-        toast.success(res.data.message || 'Planning généré !');
-      } else {
-        toast('Planning généré avec avertissements', { icon: '⚠️' });
-      }
-    } catch (e) {
-      toast.error(e.response?.data?.message || 'Erreur de génération');
+      const res = await scheduleBuilderAPI.confirmProposal({
+        departmentId,
+        name: cfg.name || `Planning (${cfg.startDate} → ${cfg.endDate})`,
+        startDate: cfg.startDate,
+        endDate: cfg.endDate,
+        scheduleType: cfg.scheduleType,
+        periodType: cfg.periodType,
+        selectedProposal: chosen,
+      });
+
+      toast.success(res.data.message || 'Planning créé avec succès !');
+      onDone(res.data.data?.scheduleId);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Erreur lors de la création du planning');
     } finally {
       setLoading(false);
     }
   };
 
-  const filteredStaff = [];
-  // (replaced by grouped hospital staff — ownStaff / otherStaff / noServiceStaff)
+  const inputSt = {
+    width: '100%', padding: '9px 12px', borderRadius: 8, fontSize: 13,
+    border: '1px solid var(--border-subtle)', background: 'var(--bg-card)',
+    color: 'var(--text-primary)', outline: 'none', boxSizing: 'border-box'
+  };
 
   return (
-    <div style={{ maxWidth: 820, margin: '0 auto' }}>
+    <div style={{ maxWidth: 860, margin: '0 auto' }}>
       {/* Stepper */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 24, overflowX: 'auto', paddingBottom: 4 }}>
         {stepLabels.map((lbl, i) => (
           <React.Fragment key={i}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, opacity: i > step ? 0.4 : 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, opacity: i > step ? 0.45 : 1 }}>
               <div style={{
-                width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: i < step ? '#10B981' : i === step ? 'var(--color-primary)' : 'var(--bg-elevated)',
-                color: i <= step ? '#fff' : 'var(--text-muted)', fontWeight: 700, fontSize: 11, flexShrink: 0,
+                color: i <= step ? '#fff' : 'var(--text-muted)', fontWeight: 800, fontSize: 11, flexShrink: 0,
               }}>
-                {i < step ? <IconCheck /> : i + 1}
+                {i < step ? '✓' : i + 1}
               </div>
-              <span style={{ fontSize: 11, fontWeight: 600, color: i === step ? 'var(--color-primary)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 11, fontWeight: i === step ? 800 : 600, color: i === step ? 'var(--color-primary)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                 {lbl}
               </span>
             </div>
             {i < stepLabels.length - 1 && (
-              <div style={{ flex: 1, height: 2, background: i < step ? '#10B981' : 'var(--border-subtle)', minWidth: 12 }} />
+              <div style={{ flex: 1, height: 2, background: i < step ? '#10B981' : 'var(--border-subtle)', minWidth: 8 }} />
             )}
           </React.Fragment>
         ))}
       </div>
 
-      {/* Card step */}
-      <div style={{ background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border-subtle)', padding: '24px 28px', marginBottom: 18 }}>
+      {/* Main step container */}
+      <div style={{ background: 'var(--bg-card)', borderRadius: 18, border: '1px solid var(--border-subtle)', padding: '24px 28px', marginBottom: 18, boxShadow: '0 10px 30px rgba(0,0,0,.04)' }}>
 
-        {/* ── STEP 0 : Période ── */}
+        {/* ══ ÉTAPE 1 : Informations Générales ══════════════════════════ */}
         {step === 0 && (
           <div>
-            <h3 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 800 }}>📅 Quelle période ?</h3>
-            <p style={{ margin: '0 0 18px', color: 'var(--text-muted)', fontSize: 13 }}>Définissez la plage de dates couverte par ce planning.</p>
+            <h3 style={{ margin: '0 0 6px', fontSize: 19, fontWeight: 800, color: 'var(--text-primary)' }}>
+              📋 Étape 1 : Informations générales du planning
+            </h3>
+            <p style={{ margin: '0 0 20px', color: 'var(--text-muted)', fontSize: 13 }}>
+              Spécifiez l'intitulé, la période globale et le type de garde à organiser.
+            </p>
 
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-              {[
-                { label: 'Ce mois',     fn: () => { const d = new Date(), y = d.getFullYear(), m = d.getMonth(); return { s: `${y}-${String(m+1).padStart(2,'0')}-01`, e: new Date(y,m+1,0).toISOString().split('T')[0] }; } },
-                { label: 'Mois prochain', fn: () => { const d = new Date(), y = d.getFullYear(), m = d.getMonth()+1; return { s: `${y}-${String(m+1).padStart(2,'0')}-01`, e: new Date(y,m+1,0).toISOString().split('T')[0] }; } },
-                { label: '3 mois',      fn: () => { const d = new Date(); const e = new Date(d); e.setMonth(e.getMonth()+3); return { s: d.toISOString().split('T')[0], e: e.toISOString().split('T')[0] }; } },
-              ].map(p => (
-                <button key={p.label} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--color-primary)', background: 'rgba(27,79,202,.06)', color: 'var(--color-primary)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}
-                  onClick={() => { const v = p.fn(); setCfg(c => ({ ...c, startDate: v.s, endDate: v.e })); }}>
-                  {p.label}
-                </button>
-              ))}
-            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, gridColumn: '1 / -1' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Nom du planning *</span>
+                <input type="text" style={inputSt} value={cfg.name} onChange={e => setCfg(c => ({ ...c, name: e.target.value }))} placeholder="Ex: Garde Septembre - Octobre 2026" />
+              </label>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Date de début *</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Date de début *</span>
                 <input type="date" style={inputSt} value={cfg.startDate} onChange={e => setCfg(c => ({ ...c, startDate: e.target.value }))} />
               </label>
+
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Date de fin *</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Date de fin *</span>
                 <input type="date" style={inputSt} value={cfg.endDate} onChange={e => setCfg(c => ({ ...c, endDate: e.target.value }))} />
               </label>
+
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Organisation temporelle</span>
+                <select style={inputSt} value={cfg.periodType} onChange={e => setCfg(c => ({ ...c, periodType: e.target.value }))}>
+                  <option value="weekly">Hebdomadaire (1 semaine)</option>
+                  <option value="monthly">Mensuel (1 mois)</option>
+                  <option value="ab_weeks">Semaines A / B (Alternance)</option>
+                  <option value="rotation">Rotation cyclique</option>
+                  <option value="custom">Période personnalisée</option>
+                </select>
+              </label>
+
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>Nature des gardes</span>
+                <select style={inputSt} value={cfg.scheduleType} onChange={e => setCfg(c => ({ ...c, scheduleType: e.target.value }))}>
+                  <option value="normal">📋 Planning Normal (Tous les jours de la période)</option>
+                  <option value="special_weekend_holiday">⚡ Planning Spécial (Week-ends & Jours Fériés uniquement)</option>
+                </select>
+              </label>
             </div>
+
             {totalDays > 0 && (
-              <div style={{ padding: '8px 14px', background: '#EFF6FF', borderRadius: 8, fontSize: 12, color: '#3B82F6', fontWeight: 600, marginBottom: 14 }}>
-                📊 {totalDays} jours · {Math.ceil(totalDays / 7)} semaines
+              <div style={{ padding: '10px 14px', background: 'rgba(27,79,202,.06)', border: '1px solid rgba(27,79,202,.15)', borderRadius: 10, fontSize: 12, color: 'var(--color-primary)', fontWeight: 700 }}>
+                📊 Période de {totalDays} jour(s) · environ {Math.ceil(totalDays / 7)} semaine(s)
               </div>
             )}
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Nom du planning (optionnel)</span>
-              <input type="text" style={inputSt} placeholder="Ex: Gardes Août 2026 — Urgences"
-                value={cfg.name} onChange={e => setCfg(c => ({ ...c, name: e.target.value }))} />
-            </label>
           </div>
         )}
 
-        {/* ── STEP 1 : Organisation (Type + Semaines) ── */}
+        {/* ══ ÉTAPE 2 : Constitution de l'équipe ═════════════════════════ */}
         {step === 1 && (
           <div>
-            <h3 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 800 }}>🗂️ Organisation des semaines</h3>
-            <p style={{ margin: '0 0 18px', color: 'var(--text-muted)', fontSize: 13 }}>
-              Définissez comment découper la période. Vous pouvez nommer chaque semaine et lui donner un caractère particulier.
+            <h3 style={{ margin: '0 0 6px', fontSize: 19, fontWeight: 800, color: 'var(--text-primary)' }}>
+              👥 Étape 2 : Constitution de l'équipe
+            </h3>
+            <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 13 }}>
+              Sélectionnez les professionnels hospitaliers participant à ce planning de garde.
             </p>
 
-            {/* Type de garde — optionnel */}
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--text-primary)' }}>
-                Type de garde <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>(optionnel — laissez vide pour tous types)</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div onClick={() => setCfg(c => ({ ...c, shiftTypeId: '' }))}
-                  style={{ padding: '10px 14px', borderRadius: 10, cursor: 'pointer', border: `2px solid ${!cfg.shiftTypeId ? 'var(--color-primary)' : 'var(--border-subtle)'}`, background: !cfg.shiftTypeId ? 'rgba(27,79,202,.06)' : 'var(--bg-card)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#94A3B8', flexShrink: 0 }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>Tous types de garde</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>L'algorithme gérera la répartition par type</div>
-                  </div>
-                  {!cfg.shiftTypeId && <span style={{ color: 'var(--color-primary)' }}><IconCheck /></span>}
-                </div>
-                {(context?.shiftTypes || []).map(st => (
-                  <div key={st.id} onClick={() => setCfg(c => ({ ...c, shiftTypeId: st.id }))}
-                    style={{ padding: '10px 14px', borderRadius: 10, cursor: 'pointer', border: `2px solid ${cfg.shiftTypeId === st.id ? st.color || 'var(--color-primary)' : 'var(--border-subtle)'}`, background: cfg.shiftTypeId === st.id ? `${st.color}12` : 'var(--bg-card)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: st.color, flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>{st.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {st.start_time?.slice(0, 5)} – {st.end_time?.slice(0, 5)} ({st.duration_hours}h{st.is_overnight ? ' · nuit' : ''})
-                      </div>
-                    </div>
-                    {cfg.shiftTypeId === st.id && <span style={{ color: st.color }}><IconCheck /></span>}
-                  </div>
-                ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <input type="text" placeholder="🔍 Filtrer par nom, prénom, rôle..." style={{ ...inputSt, maxWidth: 320 }} value={staffSearch} onChange={e => setStaffSearch(e.target.value)} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={() => setSelectedStaffIds(allStaff.map(s => s.id))} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--color-primary)', background: 'rgba(27,79,202,.06)', color: 'var(--color-primary)', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Tous sélectionner</button>
+                <button type="button" onClick={() => setSelectedStaffIds([])} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Vider</button>
               </div>
             </div>
 
-            {/* Découpage par semaines */}
-            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 18 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>Découpage par semaines nommées</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Facultatif — pour les plannings avec organisation complexe</div>
-                </div>
-                <button onClick={() => setCfg(c => ({ ...c, useWeekSlices: !c.useWeekSlices, weekSlices: !c.useWeekSlices && c.weekSlices.length === 0 ? [{ id: 1, type: 'semaine_a', name: 'Semaine A', startDate: c.startDate, endDate: '', customName: '' }] : c.weekSlices }))}
-                  style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${cfg.useWeekSlices ? 'var(--color-primary)' : 'var(--border-subtle)'}`, background: cfg.useWeekSlices ? 'var(--color-primary)' : 'transparent', color: cfg.useWeekSlices ? '#fff' : 'var(--text-secondary)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-                  {cfg.useWeekSlices ? '✓ Activé' : 'Activer'}
-                </button>
-              </div>
-
-              {cfg.useWeekSlices && (
-                <div>
-                  {cfg.weekSlices.map((slice, idx) => (
-                    <div key={slice.id} style={{ background: 'var(--bg-elevated)', borderRadius: 12, padding: 14, marginBottom: 8, border: '1px solid var(--border-subtle)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 18 }}>{WEEK_TYPES.find(w => w.id === slice.type)?.emoji || '📋'}</span>
-                          <span style={{ fontWeight: 700, fontSize: 13 }}>{slice.name || `Semaine ${idx + 1}`}</span>
-                        </div>
-                        <button onClick={() => removeSlice(idx)}
-                          style={{ background: 'rgba(239,68,68,.1)', border: 'none', borderRadius: 6, padding: '4px 8px', color: '#EF4444', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
-                          Supprimer
-                        </button>
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>Type</span>
-                          <select value={slice.type} onChange={e => updateSlice(idx, 'type', e.target.value)}
-                            style={{ ...inputSt, padding: '7px 10px', fontSize: 12 }}>
-                            {WEEK_TYPES.map(w => <option key={w.id} value={w.id}>{w.emoji} {w.label}</option>)}
-                          </select>
-                        </label>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>Début</span>
-                          <input type="date" value={slice.startDate} min={cfg.startDate} max={cfg.endDate}
-                            onChange={e => updateSlice(idx, 'startDate', e.target.value)} style={{ ...inputSt, padding: '7px 10px', fontSize: 12 }} />
-                        </label>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>Fin</span>
-                          <input type="date" value={slice.endDate} min={slice.startDate} max={cfg.endDate}
-                            onChange={e => updateSlice(idx, 'endDate', e.target.value)} style={{ ...inputSt, padding: '7px 10px', fontSize: 12 }} />
-                        </label>
-                      </div>
-                      {slice.type === 'custom' && (
-                        <input type="text" placeholder="Nom personnalisé de la semaine..." value={slice.customName}
-                          onChange={e => updateSlice(idx, 'customName', e.target.value)}
-                          style={{ ...inputSt, marginTop: 8, fontSize: 12, padding: '7px 10px' }} />
-                      )}
-                      <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}>
-                        {WEEK_TYPES.find(w => w.id === slice.type)?.desc}
+            <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 8 }}>
+              {allStaff.map(member => {
+                const sel = selectedStaffIds.includes(member.id);
+                return (
+                  <div key={member.id} onClick={() => setSelectedStaffIds(prev => sel ? prev.filter(x => x !== member.id) : [...prev, member.id])} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', borderRadius: 8, background: sel ? 'rgba(27,79,202,.06)' : 'var(--bg-card)', border: `1px solid ${sel ? 'var(--color-primary)' : 'var(--border-subtle)'}`, cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <input type="checkbox" checked={sel} readOnly style={{ cursor: 'pointer' }} />
+                      <div>
+                        <strong style={{ fontSize: 13 }}>{member.first_name} {member.last_name}</strong>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{member.role_name || member.role_code} · {member.matricule || 'Sans mat.'}</div>
                       </div>
                     </div>
-                  ))}
-                  <button onClick={addWeekSlice}
-                    style={{ width: '100%', padding: '10px', borderRadius: 10, border: '2px dashed var(--border-subtle)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
-                    ＋ Ajouter une semaine
-                  </button>
-                </div>
-              )}
+                    {member.dept_id !== departmentId && <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 800, background: '#FFFBEB', color: '#D97706' }}>Externe ({member.dept_name})</span>}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* ── STEP 2 : Algorithme ── */}
+        {/* ══ ÉTAPE 3 : Définir les contraintes & Ordre de relais ══════ */}
         {step === 2 && (
           <div>
-            <h3 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 800 }}>⚙️ Méthode de répartition</h3>
-            <p style={{ margin: '0 0 18px', color: 'var(--text-muted)', fontSize: 13 }}>
-              Choisissez comment les gardes seront distribuées. L'algorithme s'adapte automatiquement aux contraintes de votre équipe.
+            <h3 style={{ margin: '0 0 6px', fontSize: 19, fontWeight: 800, color: 'var(--text-primary)' }}>
+              🎯 Étape 3 : Contraintes individuelles & Ordre de relais
+            </h3>
+            <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 13 }}>
+              Configurez les périodes d'intervention, relais séquentiels et indisponibilités de chaque membre.
             </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {algoOptions.map(a => (
-                <div key={a.id} onClick={() => setCfg(c => ({ ...c, algo: a.id }))}
-                  style={{
-                    padding: '14px 18px', borderRadius: 12, cursor: 'pointer',
-                    border: `2px solid ${cfg.algo === a.id ? 'var(--color-primary)' : 'var(--border-subtle)'}`,
-                    background: cfg.algo === a.id ? 'rgba(27,79,202,.06)' : 'var(--bg-card)',
-                    display: 'flex', gap: 12, alignItems: 'flex-start', transition: 'all .15s',
-                  }}>
-                  <span style={{ fontSize: 22, flexShrink: 0, lineHeight: 1.2 }}>{a.emoji}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                      <span style={{ fontWeight: 700, fontSize: 13 }}>{a.label}</span>
-                      {a.badge && (
-                        <span style={{ padding: '2px 7px', borderRadius: 6, fontSize: 10, fontWeight: 800, background: a.badge === 'Recommandé' ? '#DCFCE7' : '#EFF6FF', color: a.badge === 'Recommandé' ? '#059669' : '#3B82F6' }}>
-                          {a.badge}
-                        </span>
-                      )}
+
+            <div style={{ maxHeight: 380, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {selectedStaffIds.map(id => {
+                const member = memberConfigs[id] || {};
+                return (
+                  <div key={id} style={{ padding: 14, borderRadius: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <strong style={{ fontSize: 14, color: 'var(--color-primary)' }}>👨‍⚕️ {member.firstName} {member.lastName} <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>({member.roleName})</span></strong>
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>{a.desc}</div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>Début de présence</span>
+                        <input type="date" style={{ ...inputSt, padding: '6px 8px', fontSize: 11 }} value={member.periodStart || ''} onChange={e => setMemberConfigs(prev => ({ ...prev, [id]: { ...prev[id], periodStart: e.target.value } }))} />
+                      </label>
+
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>Fin de présence (Relais)</span>
+                        <input type="date" style={{ ...inputSt, padding: '6px 8px', fontSize: 11 }} value={member.periodEnd || ''} onChange={e => setMemberConfigs(prev => ({ ...prev, [id]: { ...prev[id], periodEnd: e.target.value } }))} />
+                      </label>
+
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>Max gardes / mois</span>
+                        <input type="number" style={{ ...inputSt, padding: '6px 8px', fontSize: 11 }} value={member.maxShiftsMonth || 10} onChange={e => setMemberConfigs(prev => ({ ...prev, [id]: { ...prev[id], maxShiftsMonth: parseInt(e.target.value) || 10 } }))} />
+                      </label>
+                    </div>
                   </div>
-                  {cfg.algo === a.id && <span style={{ color: 'var(--color-primary)', flexShrink: 0 }}><IconCheck /></span>}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* ── STEP 3 : Équipe & Postes ── */}
+        {/* ══ ÉTAPE 4 : Définir les règles du service & Missions ═════════ */}
         {step === 3 && (
           <div>
-            <h3 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 800 }}>👥 Équipe & Postes requis</h3>
+            <h3 style={{ margin: '0 0 6px', fontSize: 19, fontWeight: 800, color: 'var(--text-primary)' }}>
+              🏛️ Étape 4 : Règles du service & Besoins en garde
+            </h3>
             <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 13 }}>
-              Définissez les postes à couvrir, sélectionnez les membres et ajoutez éventuellement du personnel externe.
+              Définissez le nombre minimal de membres requis par garde et les limites de repos réglementaires.
             </p>
 
-            {/* Postes requis */}
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
-                📋 Postes de garde requis
-                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>
-                  (par garde : combien de personnes par rôle)
-                </span>
-              </div>
-
-              {/* RoleSearchDropdown — dynamique depuis la BDD */}
-              {cfg.requiredPosts.map((post, idx) => (
-                <div key={post.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                  {/* Dropdown avec recherche */}
-                  <div style={{ flex: 1, position: 'relative' }}>
-                    <div
-                      onClick={() => { setRoleDropdownOpen(roleDropdownOpen === idx ? null : idx); setRoleSearch(''); }}
-                      style={{
-                        ...inputSt, padding: '8px 12px', cursor: 'pointer', display: 'flex',
-                        alignItems: 'center', justifyContent: 'space-between', fontSize: 12,
-                        color: post.roleName ? 'var(--text-primary)' : 'var(--text-muted)',
-                        userSelect: 'none',
-                      }}>
-                      <span>{post.roleName || 'Sélectionner un rôle...'}</span>
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{roleDropdownOpen === idx ? '▲' : '▼'}</span>
-                    </div>
-                    {roleDropdownOpen === idx && (
-                      <div style={{
-                        position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
-                        background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-                        borderRadius: 10, boxShadow: '0 8px 30px rgba(0,0,0,.15)',
-                        maxHeight: 220, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-                      }}>
-                        {/* Search input inside dropdown */}
-                        <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-subtle)' }}>
-                          <input
-                            autoFocus
-                            value={roleSearch}
-                            onChange={e => setRoleSearch(e.target.value)}
-                            placeholder="Rechercher un rôle..."
-                            style={{ width: '100%', padding: '6px 10px', borderRadius: 7, border: '1px solid var(--border-subtle)', fontSize: 12, outline: 'none', background: 'var(--bg-elevated)', color: 'var(--text-primary)', boxSizing: 'border-box' }}
-                          />
-                        </div>
-                        {/* Role list */}
-                        <div style={{ overflowY: 'auto', flex: 1 }}>
-                          {platformRoles.length === 0 ? (
-                            <div style={{ padding: '12px 14px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>Chargement...</div>
-                          ) : filteredPlatformRoles.length === 0 ? (
-                            <div style={{ padding: '12px 14px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>Aucun résultat</div>
-                          ) : filteredPlatformRoles.map(role => (
-                            <div
-                              key={role.id}
-                              onClick={() => {
-                                setCfg(c => { const p = [...c.requiredPosts]; p[idx] = { ...p[idx], roleName: role.name, roleId: role.id }; return { ...c, requiredPosts: p }; });
-                                setRoleDropdownOpen(null);
-                              }}
-                              style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 12, fontWeight: post.roleId === role.id ? 700 : 400, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
-                              onMouseLeave={e => e.currentTarget.style.background = ''}
-                            >
-                              <span>{role.name}</span>
-                              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{role.user_count || 0} pers.</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Counter */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <button onClick={() => setCfg(c => { const p = [...c.requiredPosts]; p[idx].count = Math.max(1, (p[idx].count || 1) - 1); return { ...c, requiredPosts: p }; })}
-                      style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', cursor: 'pointer', fontWeight: 700 }}>−</button>
-                    <span style={{ fontSize: 14, fontWeight: 700, minWidth: 24, textAlign: 'center' }}>{post.count}</span>
-                    <button onClick={() => setCfg(c => { const p = [...c.requiredPosts]; p[idx].count = (p[idx].count || 1) + 1; return { ...c, requiredPosts: p }; })}
-                      style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', cursor: 'pointer', fontWeight: 700 }}>＋</button>
-                  </div>
-                  <button onClick={() => setCfg(c => ({ ...c, requiredPosts: c.requiredPosts.filter((_, i) => i !== idx) }))}
-                    style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: '#FEF2F2', color: '#EF4444', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>✕</button>
-                </div>
-              ))}
-              <button onClick={addPost}
-                style={{ width: '100%', padding: '8px', borderRadius: 8, border: '1px dashed var(--border-subtle)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-                ＋ Ajouter un poste
-              </button>
-              {totalRequired > 0 && (
-                <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: totalRequired <= totalSelected ? '#ECFDF5' : '#FEF2F2', border: `1px solid ${totalRequired <= totalSelected ? '#A7F3D0' : '#FECACA'}`, fontSize: 12, fontWeight: 600, color: totalRequired <= totalSelected ? '#059669' : '#EF4444' }}>
-                  {totalRequired <= totalSelected ? '✓' : '⚠'} {totalRequired} personnes requises · {totalSelected} disponibles
-                </div>
-              )}
-            </div>
-
-            {/* Sélection équipe — TOUT l'hôpital */}
-            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 16, marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>👥 Sélection du personnel</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                    {allHospitalStaff.length} personne{allHospitalStaff.length !== 1 ? 's' : ''} disponibles ·
-                    {cfg.staffIds.length === 0 ? ' Tous sélectionnés par défaut' : ` ${cfg.staffIds.length} sélectionné(s)`}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => setCfg(c => ({ ...c, staffIds: allHospitalStaff.map(s => s.id) }))}
-                    style={{ fontSize: 11, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--color-primary)', background: 'rgba(27,79,202,.06)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 600 }}>Tous</button>
-                  <button onClick={() => setCfg(c => ({ ...c, staffIds: ownStaff.map(s => s.id) }))}
-                    style={{ fontSize: 11, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>Mon service</button>
-                  <button onClick={() => setCfg(c => ({ ...c, staffIds: [] }))}
-                    style={{ fontSize: 11, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}>Vider</button>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+                <h4 style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 800, color: 'var(--color-primary)' }}>👥 Besoins par garde (Effectif requis)</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+                    <span>Séniors / Médecins :</span>
+                    <input type="number" min="0" style={{ ...inputSt, width: 70, padding: '4px 8px', textAlign: 'center' }} value={serviceReqs.seniorCount} onChange={e => setServiceReqs(s => ({ ...s, seniorCount: parseInt(e.target.value) || 0 }))} />
+                  </label>
+                  <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+                    <span>Résidents :</span>
+                    <input type="number" min="0" style={{ ...inputSt, width: 70, padding: '4px 8px', textAlign: 'center' }} value={serviceReqs.residentCount} onChange={e => setServiceReqs(s => ({ ...s, residentCount: parseInt(e.target.value) || 0 }))} />
+                  </label>
+                  <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+                    <span>Surveillants :</span>
+                    <input type="number" min="0" style={{ ...inputSt, width: 70, padding: '4px 8px', textAlign: 'center' }} value={serviceReqs.supervisorCount} onChange={e => setServiceReqs(s => ({ ...s, supervisorCount: parseInt(e.target.value) || 0 }))} />
+                  </label>
                 </div>
               </div>
-              <input type="text" placeholder="🔍 Rechercher par nom, prénom, matricule..." value={staffSearch}
-                onChange={e => setStaffSearch(e.target.value)}
-                style={{ ...inputSt, marginBottom: 10, fontSize: 12, padding: '8px 12px' }} />
 
-              {staffLoading ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Chargement du personnel...</div>
-              ) : allHospitalStaff.length === 0 ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, background: 'var(--bg-elevated)', borderRadius: 8 }}>
-                  Aucun personnel trouvé dans cet hôpital.
-                </div>
-              ) : (
-                <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {/* Groupe 1: Mon service */}
-                  {ownStaff.length > 0 && (
-                    <>
-                      <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 800, color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: 1, background: 'rgba(27,79,202,.04)', borderRadius: 6, marginBottom: 4 }}>
-                        🏥 Personnel de ce service ({ownStaff.length})
-                      </div>
-                      {ownStaff.map(m => {
-                        const sel = cfg.staffIds.length === 0 || cfg.staffIds.includes(m.id);
-                        return <StaffRow key={m.id} m={m} sel={sel} isExternal={false} onToggle={() => setCfg(c => {
-                          const ids = c.staffIds.length === 0 ? allHospitalStaff.map(s => s.id) : [...c.staffIds];
-                          return { ...c, staffIds: ids.includes(m.id) ? ids.filter(x => x !== m.id) : [...ids, m.id] };
-                        })} />;
-                      })}
-                    </>
-                  )}
-                  {/* Groupe 2: Autres services */}
-                  {otherStaff.length > 0 && (
-                    <>
-                      <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 800, color: '#D97706', textTransform: 'uppercase', letterSpacing: 1, background: 'rgba(217,119,6,.04)', borderRadius: 6, marginTop: 8, marginBottom: 4 }}>
-                        🔄 Autres services ({otherStaff.length}) — Notification automatique
-                      </div>
-                      {otherStaff.map(m => {
-                        const sel = cfg.staffIds.includes(m.id);
-                        return <StaffRow key={m.id} m={m} sel={sel} isExternal deptName={m.dept_name} onToggle={() => {
-                          setCfg(c => {
-                            const ids = [...c.staffIds];
-                            if (ids.includes(m.id)) return { ...c, staffIds: ids.filter(x => x !== m.id) };
-                            toast(`🔔 Sélection de ${m.first_name} ${m.last_name} — notification au chef du service ${m.dept_name}`, { icon: '⚠️' });
-                            return { ...c, staffIds: [...ids, m.id] };
-                          });
-                        }} />;
-                      })}
-                    </>
-                  )}
-                  {/* Groupe 3: Sans service */}
-                  {noServiceStaff.length > 0 && (
-                    <>
-                      <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, background: 'rgba(107,114,128,.04)', borderRadius: 6, marginTop: 8, marginBottom: 4 }}>
-                        👤 Personnel sans service ({noServiceStaff.length})
-                      </div>
-                      {noServiceStaff.map(m => {
-                        const sel = cfg.staffIds.length === 0 || cfg.staffIds.includes(m.id);
-                        return <StaffRow key={m.id} m={m} sel={sel} isExternal={false} onToggle={() => setCfg(c => {
-                          const ids = c.staffIds.length === 0 ? allHospitalStaff.map(s => s.id) : [...c.staffIds];
-                          return { ...c, staffIds: ids.includes(m.id) ? ids.filter(x => x !== m.id) : [...ids, m.id] };
-                        })} />;
-                      })}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+              <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+                <h4 style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 800, color: 'var(--color-primary)' }}>⏱️ Horaires & Repos obligatoire</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>
+                    Plage horaire des gardes
+                    <select style={inputSt} value={serviceReqs.shiftHours} onChange={e => setServiceReqs(s => ({ ...s, shiftHours: e.target.value }))}>
+                      <option value="07_07">07h → 07h (Garde de 24 heures)</option>
+                      <option value="08_08">08h → 08h (Garde de 24 heures)</option>
+                      <option value="12h_day_night">12h Jour / Nuit (08h-20h / 20h-08h)</option>
+                      <option value="8h_three_shifts">8h par équipe (08h-16h / 16h-24h / 00h-08h)</option>
+                    </select>
+                  </label>
 
-            {/* Personnel externe — via HospitalStaffPicker */}
-            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>
-                    🤝 Personnel externe
-                    <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>(autre service — notification automatique)</span>
-                  </div>
+                  <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 4 }}>
+                    <span>Repos minimum après garde :</span>
+                    <select style={{ ...inputSt, width: 110, padding: '4px 6px', fontSize: 11 }} value={serviceReqs.minRestHours} onChange={e => setServiceReqs(s => ({ ...s, minRestHours: parseInt(e.target.value) || 24 }))}>
+                      <option value={24}>24 heures</option>
+                      <option value={48}>48 heures</option>
+                    </select>
+                  </label>
                 </div>
-                <button onClick={() => setShowExternalPicker(true)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #1B4FCA, #7C3AED)', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-                  ＋ Ajouter
-                </button>
               </div>
-              {cfg.externalStaff.length === 0 ? (
-                <div style={{ padding: '14px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px dashed var(--border-subtle)', textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
-                  Aucun personnel externe ajouté.<br />
-                  <span style={{ fontSize: 11 }}>Le chef du service concerné sera notifié automatiquement.</span>
-                </div>
-              ) : (
-                cfg.externalStaff.map((ext, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: '#FFFBEB', border: '1px solid #FDE68A', marginBottom: 6 }}>
-                    <span style={{ fontSize: 18 }}>👤</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700 }}>{ext.firstName || ext.first_name} {ext.lastName || ext.last_name}</div>
-                      <div style={{ fontSize: 11, color: '#D97706' }}>{ext.deptName || ext.dept_name} · {ext.role_name || ext.roleName} · Notification envoyée</div>
-                    </div>
-                    <button onClick={() => setCfg(c => ({ ...c, externalStaff: c.externalStaff.filter((_, i) => i !== idx) }))}
-                      style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>✕</button>
-                  </div>
-                ))
-              )}
             </div>
-
-            {/* Drawer HospitalStaffPicker pour personnel externe */}
-            <HospitalStaffPicker
-              open={showExternalPicker}
-              onClose={() => setShowExternalPicker(false)}
-              onSelect={member => {
-                setCfg(c => ({
-                  ...c,
-                  externalStaff: c.externalStaff.find(e => e.userId === member.id)
-                    ? c.externalStaff
-                    : [...c.externalStaff, { userId: member.id, firstName: member.first_name, lastName: member.last_name, deptName: member.dept_name, roleName: member.role_name }],
-                }));
-                toast(`👤 ${member.first_name} ${member.last_name} ajouté — notification au chef du service ${member.dept_name}`, { icon: '🔔' });
-                setShowExternalPicker(false);
-              }}
-              onDragStart={() => {}}
-              ownDeptId={departmentId}
-              title="Rechercher personnel externe"
-            />
           </div>
         )}
 
-        {/* ── STEP 4 : Confirmation ── */}
+        {/* ══ ÉTAPE 5 : Choix du Mode de Génération ═════════════════════ */}
         {step === 4 && (
           <div>
-            <h3 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 800 }}>✅ Récapitulatif</h3>
-            <p style={{ margin: '0 0 20px', color: 'var(--text-muted)', fontSize: 13 }}>Vérifiez la configuration avant de générer le planning.</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: 19, fontWeight: 800, color: 'var(--text-primary)' }}>
+              ⚙️ Étape 5 : Stratégie de génération des gardes
+            </h3>
+            <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 13 }}>
+              Choisissez le mode de répartition qui correspond le mieux à votre organisation.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {[
-                { label: 'Période',       value: `${cfg.startDate} au ${cfg.endDate} (${totalDays} jours)` },
-                { label: 'Type de garde', value: cfg.shiftTypeId ? (context?.shiftTypes?.find(s => s.id === cfg.shiftTypeId)?.name || '-') : 'Tous types' },
-                { label: 'Organisation',  value: cfg.useWeekSlices ? `${cfg.weekSlices.length} semaine(s) nommée(s)` : 'Planning continu' },
-                { label: 'Algorithme',    value: algoOptions.find(a => a.id === cfg.algo)?.label },
-                { label: 'Personnel',     value: cfg.staffIds.length > 0 ? `${cfg.staffIds.length} membres sélectionnés` : `Tous actifs (${context?.staff?.length || 0})` },
-                { label: 'Postes requis', value: cfg.requiredPosts.length > 0 ? cfg.requiredPosts.map(p => `${p.count}× ${p.roleName}`).join(', ') : 'Non définis' },
-              ].map(row => (
-                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '11px 14px', background: 'var(--bg-elevated)', borderRadius: 10, gap: 12 }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, flexShrink: 0 }}>{row.label}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, textAlign: 'right' }}>{row.value}</span>
+                { id: 'auto_balance', title: 'Mode 4 : Équilibrage Automatique (Recommandé)', icon: '⚖️', desc: 'Répartit automatiquement les gardes, nuits et week-ends de manière égale entre les membres.' },
+                { id: 'relais', title: 'Mode 3 : Répartition par Périodes & Relais', icon: '⏱️', desc: 'Respecte scrupuleusement les tranches de présence définies à l\'étape 3 (ex: Résident Y puis Résident Z).' },
+                { id: 'rotation', title: 'Mode 2 : Rotation Séquentielle', icon: '🔄', desc: 'Alterne les gardes selon une séquence fixe et prévisible entre les membres de l\'équipe.' },
+                { id: 'manual', title: 'Mode 1 : Canevas Manuel Assisté', icon: '🖊️', desc: 'Génère la grille vierge structurée avec l\'équipe configurée pour une saisie libre dans le Tableur.' },
+              ].map(mode => (
+                <div key={mode.id} onClick={() => setGenerationMode(mode.id)} style={{ padding: 14, borderRadius: 12, border: `2px solid ${generationMode === mode.id ? 'var(--color-primary)' : 'var(--border-subtle)'}`, background: generationMode === mode.id ? 'rgba(27,79,202,.06)' : 'var(--bg-card)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 24 }}>{mode.icon}</span>
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ fontSize: 13, color: generationMode === mode.id ? 'var(--color-primary)' : 'var(--text-primary)' }}>{mode.title}</strong>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{mode.desc}</div>
+                  </div>
+                  {generationMode === mode.id && <span style={{ color: 'var(--color-primary)', fontWeight: 900 }}>✓</span>}
                 </div>
               ))}
             </div>
-            {context?.plannedAbsences?.length > 0 && (
-              <div style={{ marginTop: 14, padding: '10px 14px', background: '#FFFBEB', borderRadius: 8, border: '1px solid #FDE68A', fontSize: 12, color: '#D97706', fontWeight: 600 }}>
-                ⚠️ {context.plannedAbsences.length} absence(s) prévue(s) sur cette période — prises en compte automatiquement
+          </div>
+        )}
+
+        {/* ══ ÉTAPE 6 : Validation Intelligente (Pré-Check) ══════════════ */}
+        {step === 5 && (
+          <div>
+            <h3 style={{ margin: '0 0 6px', fontSize: 19, fontWeight: 800, color: 'var(--text-primary)' }}>
+              🔍 Étape 6 : Pré-Validation Intelligente
+            </h3>
+            <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 13 }}>
+              L'Assistant vérifie les conflits, absences, règles de repos et manque d'effectif avant la génération.
+            </p>
+
+            {anomalies.length === 0 ? (
+              <div style={{ padding: 20, borderRadius: 14, background: '#ECFDF5', border: '1.5px solid #10B981', textAlign: 'center' }}>
+                <span style={{ fontSize: 36 }}>✅</span>
+                <h4 style={{ margin: '8px 0 4px', fontSize: 15, color: '#047857', fontWeight: 800 }}>Aucune anomalie détectée !</h4>
+                <p style={{ margin: 0, fontSize: 12, color: '#065F46' }}>L'équipe et les contraintes sont parfaitement configurées pour générer le planning.</p>
+              </div>
+            ) : (
+              <div>
+                <div style={{ padding: 14, borderRadius: 12, background: '#FEF2F2', border: '1.5px solid #EF4444', marginBottom: 14 }}>
+                  <strong style={{ color: '#991B1B', fontSize: 13 }}>⚠️ {anomalies.length} anomalie(s) ou avertissement(s) détecté(s) :</strong>
+                  <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#B91C1C', lineHeight: 1.6 }}>
+                    {anomalies.map(a => <li key={a.id}>{a.message}</li>)}
+                  </ul>
+                </div>
+                {!autoFixed && (
+                  <button type="button" onClick={autoFixAnomalies} style={{ width: '100%', padding: '10px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #10B981, #059669)', color: '#fff', fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>
+                    🛠️ Corriger automatiquement les anomalies
+                  </button>
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* ── STEP 5 : Résultat ── */}
-        {step === 5 && result && (
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 56, marginBottom: 14 }}>
-              {result.data?.evaluation?.errors?.length === 0 ? '🎉' : '⚠️'}
-            </div>
-            <h3 style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 800, color: result.data?.evaluation?.errors?.length === 0 ? '#10B981' : '#F59E0B' }}>
-              {result.data?.evaluation?.errors?.length === 0 ? 'Planning généré avec succès !' : 'Planning généré avec avertissements'}
+        {/* ══ ÉTAPE 7 : Choix parmi 3 Propositions (A, B, C) ═════════════ */}
+        {step === 6 && (
+          <div>
+            <h3 style={{ margin: '0 0 6px', fontSize: 19, fontWeight: 800, color: 'var(--text-primary)' }}>
+              🎉 Étape 7 : Choix parmi les 3 Propositions
             </h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 22 }}>
-              {result.data?.generatedCount || 0} gardes créées · {algoOptions.find(a => a.id === cfg.algo)?.label}
+            <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 13 }}>
+              L'Assistant a construit 3 variantes optimisées. Comparez et sélectionnez la meilleure option pour votre service.
             </p>
-            {result.data?.evaluation && (
-              <div style={{ textAlign: 'left', marginBottom: 20 }}>
-                {(result.data.evaluation.errors || []).map((e, i) => (
-                  <div key={i} style={{ padding: '10px 14px', background: '#FEF2F2', borderRadius: 8, marginBottom: 6, fontSize: 12, color: '#EF4444' }}>{e.message}</div>
-                ))}
-                {(result.data.evaluation.warnings || []).map((w, i) => (
-                  <div key={i} style={{ padding: '10px 14px', background: '#FFFBEB', borderRadius: 8, marginBottom: 6, fontSize: 12, color: '#D97706' }}>{w.message}</div>
-                ))}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-              <button style={btnPrimary} onClick={() => onDone(result.data?.scheduleId)}>Voir le planning</button>
-              <button style={btnSecondary} onClick={() => { setStep(0); setResult(null); setCfg(c => ({ ...c, startDate: '', endDate: '', name: '', weekSlices: [], requiredPosts: [], externalStaff: [] })); }}>
-                Nouveau planning
-              </button>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 18 }}>
+              {proposals.map(prop => {
+                const isSelected = selectedProposalKey === prop.key;
+                return (
+                  <div key={prop.key} onClick={() => setSelectedProposalKey(prop.key)} style={{ padding: 14, borderRadius: 14, border: `2px solid ${isSelected ? 'var(--color-primary)' : 'var(--border-subtle)'}`, background: isSelected ? 'rgba(27,79,202,.06)' : 'var(--bg-card)', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                    <div>
+                      <strong style={{ fontSize: 13, color: isSelected ? 'var(--color-primary)' : 'var(--text-primary)' }}>{prop.title}</strong>
+                      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '6px 0 12px', lineHeight: 1.4 }}>{prop.description}</p>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--border-subtle)', paddingTop: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Couverture :</span>
+                        <strong style={{ color: '#10B981' }}>{prop.metrics?.coveragePct}%</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Score d'équité :</span>
+                        <strong style={{ color: 'var(--color-primary)' }}>{prop.metrics?.equityScore}%</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Gardes totales :</span>
+                        <strong>{prop.metrics?.totalShifts}</strong>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
       </div>
 
-      {/* Navigation */}
-      {step < 5 && (
-        <div>
-          {/* Error banner — shown when user tries to advance with missing fields */}
-          {stepError && (
-            <div style={{ padding: '10px 14px', borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA', fontSize: 12, color: '#EF4444', marginBottom: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-              ⚠ {stepError}
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <button style={btnSecondary} onClick={() => { setStepError(''); step === 0 ? onBack() : setStep(s => s - 1); }}>
-              {step === 0 ? '← Changer de méthode' : '← Retour'}
-            </button>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Étape {step + 1} / {stepLabels.length}</div>
-            {step < 4 ? (
-              <button
-                style={{ ...btnPrimary, background: canNext() ? 'var(--color-primary)' : '#9CA3AF', cursor: canNext() ? 'pointer' : 'not-allowed' }}
-                onClick={() => {
-                  const err = getStepError();
-                  if (err) { setStepError(err); return; }
-                  setStepError('');
-                  setStep(s => s + 1);
-                }}>
-                Suivant →
-              </button>
-            ) : (
-              <button style={{ ...btnPrimary, opacity: loading ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 8 }}
-                disabled={loading} onClick={generate}>
-                {loading && <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,.3)', borderTopColor: '#fff', animation: 'spin 1s linear infinite' }} />}
-                {loading ? 'Génération...' : '🚀 Générer le planning'}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Footer Navigation Buttons */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <button type="button" onClick={() => step === 0 ? onBack() : setStep(s => s - 1)} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+          {step === 0 ? '← Retour' : '← Étape précédente'}
+        </button>
+
+        {step < 5 && (
+          <button type="button" disabled={!canNext()} onClick={() => { setStep(s => s + 1); if (step === 4) runPreCheck(); }} style={{ padding: '9px 24px', borderRadius: 8, border: 'none', background: canNext() ? 'var(--color-primary)' : '#9CA3AF', color: '#fff', fontWeight: 800, fontSize: 12, cursor: canNext() ? 'pointer' : 'not-allowed' }}>
+            Suivant →
+          </button>
+        )}
+
+        {step === 5 && (
+          <button type="button" disabled={generating} onClick={handleGenerateProposals} style={{ padding: '9px 26px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #1B4FCA, #7C3AED)', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 14px rgba(27,79,202,.3)' }}>
+            {generating ? 'Génération des 3 propositions...' : '🚀 Générer les 3 propositions →'}
+          </button>
+        )}
+
+        {step === 6 && (
+          <button type="button" disabled={loading} onClick={handleConfirmSelectedProposal} style={{ padding: '9px 26px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #10B981, #059669)', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 14px rgba(16,185,129,.3)' }}>
+            {loading ? 'Création...' : '📊 Valider & Ouvrir dans le Tableur'}
+          </button>
+        )}
+      </div>
     </div>
   );
 };
-
 
 // ─── Status meta (full set) ─────────────────────────────────────
 const STATUS_FULL = {
@@ -1085,12 +933,7 @@ function ScheduleActionMenu({ schedule, onView, onRefresh }) {
       </button>
       {open && (
         <div style={{
-          position: 'absolute', right: 0, top: '110%', zIndex: 200, minWidth: 190,
-          background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-          borderRadius: 10, padding: '4px 0',
-          boxShadow: '0 12px 40px rgba(0,0,0,.18)',
-          animation: 'fadeIn .1s ease',
-        }}>
+          position: 'absolute', right: 0, top: '110%', zIndex: 200, minWidth: 190, background: 'var(--bg-card)', borderRadius: 10, padding: '4px 0' }}>
           <ActItem icon="👁" label="Ouvrir" onClick={() => { setOpen(false); onView(schedule.id); }} />
           <ActItem icon="⧉" label="Dupliquer" onClick={() => doAction('duplicate', 'Planning dupliqué !')} />
           <div style={{ height: 1, background: 'var(--border-subtle)', margin: '3px 0' }} />
@@ -1123,7 +966,6 @@ const ScheduleList = ({ departmentId, onView, onNew }) => {
   const { data, isLoading } = useQuery({
     queryKey: ['schedules', departmentId],
     queryFn:  () => schedulesAPI.getAll({ departmentId, limit: 50 }),
-    enabled:  !!departmentId,
   });
 
   const allItems = data?.data?.data || data?.data || [];
@@ -1236,6 +1078,9 @@ const ScheduleList = ({ departmentId, onView, onNew }) => {
 // ─── MAIN COMPONENT ───────────────────────────────────────────
 export default function ChefDeServiceDashboard() {
   const { user } = useAuthStore();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [proposalScheduleId, setProposalScheduleId] = useState(null);
   const [activeTab,    setActiveTab]    = useState('overview');
   const [selectedDept, setSelectedDept] = useState(null);
   const [view,         setView]         = useState('list');
@@ -1243,11 +1088,23 @@ export default function ChefDeServiceDashboard() {
   const [showImport, setShowImport] = useState(false);
   // 2-step flow: stores {id, name, startDate, endDate} after step 1
   const [scheduleInfo, setScheduleInfo] = useState(null);
+  useEffect(() => {
+    const scheduleId = new URLSearchParams(location.search).get('scheduleId');
+    if (!scheduleId) return;
+    setSelectedScheduleId(scheduleId);
+    setProposalScheduleId(scheduleId);
+    setActiveTab('schedules');
+    setView('spreadsheet');
+    navigate('/chef-de-service', { replace: true });
+  }, [location.search, navigate]);
 
-  // Departments dont ce chef est responsable
+  // Departments dont ce chef est responsable (ou tous les services pour le Surveillant Général)
+  const isSG = user?.roleCode === 'general_supervisor';
   const { data: deptData, isLoading: deptLoading } = useQuery({
-    queryKey: ['myDepartments', user?.id],
-    queryFn:  () => departmentsAPI.getAll({ head: user?.id }),
+    queryKey: ['myDepartments', user?.id, user?.roleCode],
+    queryFn:  () => isSG
+      ? departmentsAPI.getAll()
+      : departmentsAPI.getAll({ head: user?.id }),
   });
   const departments = deptData?.data?.data || deptData?.data || [];
 
@@ -1285,11 +1142,20 @@ export default function ChefDeServiceDashboard() {
   });
   const todayShifts = todayData?.data?.data || todayData?.data || [];
 
+  const roleLabel = isSG
+    ? 'Surveillant Général — Consultation Hôpital'
+    : user?.roleCode === 'service_supervisor'
+    ? 'Surveillant de Service'
+    : 'Chef de Service';
+  const pageSub = isSG
+    ? 'Consultez les plannings et formulez des propositions de modification pour les services'
+    : 'Gérez les plannings et l’équipe de votre service';
+
   const tabs = [
-    { id: 'overview',  label: "Vue d'ensemble", emoji: '??' },
-    { id: 'schedules', label: 'Plannings',       emoji: '??' },
-    { id: 'team',      label: 'Equipe',          emoji: '??' },
-    { id: 'absences',  label: 'Absences',        emoji: '??' },
+    { id: 'overview',  label: "Vue d'ensemble", emoji: '👁️' },
+    { id: 'schedules', label: 'Plannings',       emoji: '📋' },
+    { id: 'team',      label: 'Équipe',          emoji: '👥' },
+    { id: 'absences',  label: 'Absences',        emoji: '🏖️' },
   ];
 
   const cardSt = { background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 24 };
@@ -1526,6 +1392,7 @@ export default function ChefDeServiceDashboard() {
               scheduleId={selectedScheduleId}
               departmentId={selectedDept}
               onBack={() => setView('list')}
+              onManageProposals={() => setProposalScheduleId(selectedScheduleId)}
             />
           )}
 
@@ -1553,6 +1420,8 @@ export default function ChefDeServiceDashboard() {
       )}
 
       {/* ── EQUIPE ─────────────────────────────────────────── */}
+      {proposalScheduleId && <ScheduleChangeProposals scheduleId={proposalScheduleId} onClose={() => setProposalScheduleId(null)} />}
+
       {activeTab === 'team' && (
         <div style={cardSt}>
           <h3 style={{ margin: '0 0 18px', fontSize: 17, fontWeight: 700 }}>Personnel du service</h3>

@@ -8,8 +8,11 @@ const getNotifications = async (req, res) => {
   if (unreadOnly === 'true') conditions.push('is_read = FALSE');
 
   const result = await query(
-    `SELECT * FROM notifications WHERE ${conditions.join(' AND ')}
-     ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+    `SELECT n.*, COALESCE(p.schedule_id, CASE WHEN n.entity_type='schedules' THEN n.entity_id END) AS target_schedule_id
+     FROM notifications n
+     LEFT JOIN schedule_change_proposals p ON n.entity_type='schedule_change_proposals' AND p.id=n.entity_id
+     WHERE ${conditions.map(condition => condition.replace(/^recipient_id/, 'n.recipient_id').replace(/^is_read/, 'n.is_read')).join(' AND ')}
+     ORDER BY n.created_at DESC LIMIT $2 OFFSET $3`,
     [req.user.id, parseInt(limit), offset]
   );
 

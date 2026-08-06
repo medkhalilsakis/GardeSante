@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { schedulesAPI } from '../../../api';
 
@@ -102,6 +102,7 @@ export default function HospitalStaffPicker({
   onDragStart,  // (member) => void — pour drag-drop externe
   ownDeptId,    // id du service du chef (pour badge "Externe")
   title = 'Ajouter du personnel',
+  excludeUserIds = [], // Array or Set of user IDs to exclude because they are already added
 }) {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -135,8 +136,12 @@ export default function HospitalStaffPicker({
     staleTime: 30000,
   });
 
-  const staff = data?.data?.data || data?.data || [];
-  const total = data?.data?.total || staff.length;
+  const rawStaff = data?.data?.data || data?.data || [];
+  const excludeSet = useMemo(() => new Set(excludeUserIds || []), [excludeUserIds]);
+  const staff = useMemo(() => {
+    return rawStaff.filter(m => !excludeSet.has(m.id));
+  }, [rawStaff, excludeSet]);
+  const total = staff.length;
 
   // Collect unique roles & departments for filters
   const roles = [...new Map(staff.map(m => [m.role_id, { id: m.role_id, name: m.role_name }])).values()].filter(r => r.id);
@@ -257,7 +262,7 @@ export default function HospitalStaffPicker({
             </div>
           ) : staff.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)', fontSize: 13 }}>
-              Aucun résultat
+              {rawStaff.length > 0 ? '✓ Tout le personnel correspondant est déjà présent dans le tableur.' : 'Aucun résultat'}
             </div>
           ) : (
             Object.entries(grouped).map(([deptName, members]) => (

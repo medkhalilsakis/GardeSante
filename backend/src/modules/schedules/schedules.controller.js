@@ -150,6 +150,12 @@ const getSchedules = async (req, res) => {
   if (from) { conditions.push(`sch.start_date >= $${idx}`); params.push(from); idx++; }
   if (to) { conditions.push(`sch.end_date <= $${idx}`); params.push(to); idx++; }
 
+  // Les brouillons sont strictement privés : seul leur chef créateur peut les voir.
+  if (req.user.roleCode === 'department_head') {
+    conditions.push(`(sch.status <> 'draft' OR sch.created_by = $${idx})`); params.push(req.user.id); idx++;
+  } else {
+    conditions.push(`sch.status <> 'draft'`);
+  }
   // Filtrer par service pour les chefs
   if (!req.user.isSuperAdmin && ['department_head', 'service_supervisor'].includes(req.user.roleCode)) {
     const deptResult = await query(
@@ -197,6 +203,8 @@ const getSchedule = async (req, res) => {
     [req.params.id]
   );
   if (!result.rows[0]) return res.status(404).json({ success: false, message: 'Planning introuvable' });
+  const schedule = result.rows[0];
+  if (schedule.establishment_id !== req.user.establishmentId || (schedule.status === 'draft' && (req.user.roleCode !== 'department_head' || schedule.created_by !== req.user.id))) return res.status(403).json({ success: false, message: 'Accès non autorisé à ce planning.' });
 
   const shifts = await query(
     `SELECT s.*, u.first_name, u.last_name, u.speciality,
@@ -229,7 +237,8 @@ const createSchedule = async (req, res) => {
   const deptId       = req.body.department_id || req.body.departmentId;
   const startDate    = req.body.start_date    || req.body.startDate;
   const endDate      = req.body.end_date      || req.body.endDate;
-  const { name, notes, workflowId, status, creation_mode } = req.body;
+  const scheduleType = req.body.schedule_type || req.body.scheduleType || (req.body.creation_mode === 'special_days' ? 'special_weekend_holiday' : 'normal');
+  const { name, notes, workflowId, status, creation_mode, metadata } = req.body;
   const eid = req.user.isSuperAdmin
     ? (req.body.establishmentId || req.body.establishment_id || req.user.establishmentId)
     : req.user.establishmentId;
@@ -239,9 +248,9 @@ const createSchedule = async (req, res) => {
   }
 
   const result = await query(
-    `INSERT INTO schedules (establishment_id, department_id, name, start_date, end_date, notes, workflow_id, status, creation_mode, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [eid, deptId, name, startDate, endDate, notes || null, workflowId || null, status || 'draft', creation_mode || null, req.user.id]
+    `INSERT INTO schedules (establishment_id, department_id, name, start_date, end_date, notes, workflow_id, status, creation_mode, metadata, created_by, schedule_type)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12) RETURNING *`,
+    [eid, deptId, name, startDate, endDate, notes || null, workflowId || null, status || 'draft', creation_mode || null, JSON.stringify(metadata || {}), req.user.id, scheduleType]
   );
   return res.status(201).json({ success: true, data: result.rows[0] });
 };

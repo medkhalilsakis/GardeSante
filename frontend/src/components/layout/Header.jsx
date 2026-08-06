@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUIStore, useAuthStore, useNotificationStore } from '../../store';
 import { notificationsAPI } from '../../api';
 import { useTranslation } from '../../utils/helpers';
@@ -42,7 +43,8 @@ const RefreshIcon = () => (
 export default function Header({ title, subtitle, actions }) {
   const { sidebarCollapsed, theme, toggleTheme } = useUIStore();
   const { user } = useAuthStore();
-  const { unreadCount, markAllRead } = useNotificationStore();
+  const { unreadCount, markAllRead, markAsRead } = useNotificationStore();
+  const navigate = useNavigate();
   const { t } = useTranslation();
   const [showNotif, setShowNotif] = React.useState(false);
   const [notifications, setNotifications] = React.useState([]);
@@ -78,6 +80,18 @@ export default function Header({ title, subtitle, actions }) {
   };
 
   const priorityColors = { urgent: '#EF4444', high: '#F59E0B', normal: '#6366F1', low: '#8BA3C7' };
+  const openNotificationAction = async (notif) => {
+    if (!notif.is_read) {
+      try { await notificationsAPI.markRead(notif.id); markAsRead(notif.id); } catch {}
+      setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
+    }
+    setShowNotif(false);
+    if (notif.target_schedule_id) {
+      navigate(`/chef-de-service?scheduleId=${notif.target_schedule_id}`);
+      return;
+    }
+    toast('Cette notification ne possède pas encore d’action associée.');
+  };
 
   return (
     <header className={`header ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -161,7 +175,7 @@ export default function Header({ title, subtitle, actions }) {
                 </div>
               ) : (
                 notifications.map((notif) => (
-                  <div key={notif.id} style={{
+                  <div key={notif.id} onClick={() => openNotificationAction(notif)} style={{
                     padding: '14px 20px',
                     borderBottom: '1px solid var(--border-subtle)',
                     background: notif.is_read ? 'transparent' : 'var(--color-primary-10)',

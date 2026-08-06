@@ -388,6 +388,122 @@ const getOnlineUsers = async (req, res) => {
   return res.json({ success: true, data, count: data.length });
 };
 
+// ══════════════════════════════════════════════════════════════
+// JOURS ET PÉRIODES FÉRIÉS (Super Admin)
+// ══════════════════════════════════════════════════════════════
+const getPublicHolidays = async (req, res) => {
+  const { year, startDate, endDate } = req.query;
+  const targetYear = parseInt(year || new Date().getFullYear());
+  const rangeStart = String(startDate || `${targetYear}-01-01`).slice(0, 10);
+  const rangeEnd = String(endDate || `${targetYear}-12-31`).slice(0, 10);
+  const holidays = await query(
+    `SELECT id, name, start_date::text AS start_date, end_date::text AS end_date, year, category, is_recurring, multiplier, notes, created_by, created_at, updated_at
+     FROM public_holidays
+     WHERE start_date <= $2::date AND end_date >= $1::date
+     ORDER BY start_date ASC`,
+    [rangeStart, rangeEnd]
+  );
+  return res.json({ success: true, data: holidays.rows, year: targetYear, startDate: rangeStart, endDate: rangeEnd });
+};
+
+const createPublicHoliday = async (req, res) => {
+  if (!req.user.isSuperAdmin) {
+    return res.status(403).json({ success: false, message: 'Réservé au Super Admin' });
+  }
+
+  const { name, startDate, endDate, year, category = 'national', isRecurring = false, multiplier = 1.5, notes = '' } = req.body;
+  if (!name || !startDate) {
+    return res.status(400).json({ success: false, message: 'Le nom et la date de début sont obligatoires' });
+  }
+
+  const start = String(startDate).split('T')[0];
+  const end = endDate ? String(endDate).split('T')[0] : start;
+  const hYear = parseInt(year || start.substring(0, 4));
+
+  const result = await query(
+    `INSERT INTO public_holidays (name, start_date, end_date, year, category, is_recurring, multiplier, notes, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING *`,
+    [name.trim(), start, end, hYear, category, Boolean(isRecurring), parseFloat(multiplier || 1.5), notes || null, req.user.id]
+  );
+
+  log({
+    userId: req.user.id, action: 'create_holiday', category: 'admin',
+    description: `Jour férié ajouté: ${name} (${start} → ${end})`,
+    entityType: 'public_holidays', entityId: result.rows[0].id, ipAddress: getIp(req)
+  });
+
+  return res.status(201).json({ success: true, data: result.rows[0], message: 'Jour/Période férié(e) enregistré(e)' });
+};
+
+const updatePublicHoliday = async (req, res) => {
+  if (!req.user.isSuperAdmin) {
+    return res.status(403).json({ success: false, message: 'Réservé au Super Admin' });
+  }
+
+  const { id } = req.params;
+  const { name, startDate, endDate, year, category, isRecurring, multiplier, notes } = req.body;
+
+  const start = String(startDate).split('T')[0];
+  const end = endDate ? String(endDate).split('T')[0] : start;
+  const hYear = parseInt(year || start.substring(0, 4));
+
+  const result = await query(
+    `UPDATE public_holidays
+     SET name = $1, start_date = $2, end_date = $3, year = $4, category = $5,
+         is_recurring = $6, multiplier = $7, notes = $8, updated_at = NOW()
+     WHERE id = $9
+     RETURNING *`,
+    [name.trim(), start, end, hYear, category || 'national', Boolean(isRecurring), parseFloat(multiplier || 1.5), notes || null, id]
+  );
+
+  if (!result.rows[0]) {
+    return res.status(404).json({ success: false, message: 'Jour férié introuvable' });
+  }
+
+  return res.json({ success: true, data: result.rows[0], message: 'Jour/Période férié(e) mis(e) à jour' });
+};
+
+const deletePublicHoliday = async (req, res) => {
+  if (!req.user.isSuperAdmin) {
+    return res.status(403).json({ success: false, message: 'Réservé au Super Admin' });
+  }
+
+  const { id } = req.params;
+  await query('DELETE FROM public_holidays WHERE id = $1', [id]);
+  return res.json({ success: true, message: 'Jour férié supprimé' });
+};
+
+const seedTunisiaHolidays = async (req, res) => {
+  if (!req.user.isSuperAdmin) {
+    return res.status(403).json({ success: false, message: 'Réservé au Super Admin' });
+  }
+
+  const targetYear = parseInt(req.body.year || new Date().getFullYear());
+
+  const presets = [
+    { name: 'Nouvel An', start: `${targetYear}-01-01`, end: `${targetYear}-01-01`, category: 'national', isRecurring: true, multiplier: 1.5 },
+    { name: 'Fête de la Révolution & Jeunesse', start: `${targetYear}-01-14`, end: `${targetYear}-01-14`, category: 'national', isRecurring: true, multiplier: 1.5 },
+    { name: "Fête de l'Indépendance", start: `${targetYear}-03-20`, end: `${targetYear}-03-20`, category: 'national', isRecurring: true, multiplier: 1.5 },
+    { name: 'Fête des Martyrs', start: `${targetYear}-04-09`, end: `${targetYear}-04-09`, category: 'national', isRecurring: true, multiplier: 1.5 },
+    { name: 'Fête du Travail', start: `${targetYear}-05-01`, end: `${targetYear}-05-01`, category: 'national', isRecurring: true, multiplier: 2.0 },
+    { name: 'Fête de la République', start: `${targetYear}-07-25`, end: `${targetYear}-07-25`, category: 'national', isRecurring: true, multiplier: 1.5 },
+    { name: 'Fête Nationale de la Femme', start: `${targetYear}-08-13`, end: `${targetYear}-08-13`, category: 'national', isRecurring: true, multiplier: 1.5 },
+    { name: "Fête de l'Évacuation", start: `${targetYear}-10-15`, end: `${targetYear}-10-15`, category: 'national', isRecurring: true, multiplier: 1.5 },
+  ];
+
+  for (const h of presets) {
+    await query(
+      `INSERT INTO public_holidays (name, start_date, end_date, year, category, is_recurring, multiplier, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [h.name, h.start, h.end, targetYear, h.category, h.isRecurring, h.multiplier, req.user.id]
+    );
+  }
+
+  const holidays = await query('SELECT id, name, start_date::text AS start_date, end_date::text AS end_date, year, category, is_recurring, multiplier, notes, created_by, created_at, updated_at FROM public_holidays WHERE year = $1 ORDER BY start_date ASC', [targetYear]);
+  return res.json({ success: true, data: holidays.rows, message: `Jours fériés tunisiens préchargés pour ${targetYear}` });
+};
+
 module.exports = {
   getGovernorates,
   getGlobalStats,
@@ -396,4 +512,9 @@ module.exports = {
   resetDirectorPassword,
   toggleDirectorStatus,
   getOnlineUsers,
+  getPublicHolidays,
+  createPublicHoliday,
+  updatePublicHoliday,
+  deletePublicHoliday,
+  seedTunisiaHolidays,
 };

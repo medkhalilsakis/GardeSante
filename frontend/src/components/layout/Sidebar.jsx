@@ -49,7 +49,7 @@ export default function Sidebar({ unreadCount = 0 }) {
   const isSuperAdmin   = user?.roleCode === 'super_admin';
   const isAdmin        = ['super_admin', 'hospital_admin'].includes(user?.roleCode);
   const isDirector     = user?.roleCode === 'director';
-  const isChef         = ['department_head', 'service_supervisor'].includes(user?.roleCode);
+  const isChef         = ['department_head', 'service_supervisor', 'general_supervisor'].includes(user?.roleCode);
   const isManagement   = ['super_admin', 'hospital_admin', 'director', 'general_supervisor'].includes(user?.roleCode);
   const canManageSchedules = hasPermission('schedules.read');
   const canManageUsers     = hasPermission('users.read');
@@ -79,8 +79,8 @@ export default function Sidebar({ unreadCount = 0 }) {
       { to: '/absences',     icon: 'absences',     label: t('nav.absences') },
       { to: '/replacements', icon: 'replacements', label: t('nav.replacements') },
     ]},
-    { key: 'chef', label: 'Mon Service', show: isChef, items: [
-      { to: '/chef-de-service',          icon: 'planning',  label: '📋 Planning des Gardes' },
+    { key: 'chef', label: user?.roleCode === 'general_supervisor' ? 'Supervision' : 'Mon Service', show: isChef, items: [
+      { to: '/chef-de-service',          icon: 'planning',  label: user?.roleCode === 'general_supervisor' ? '📋 Plannings de l\'Hôpital' : '📋 Planning des Gardes' },
     ]},
     { key: 'analytics', label: 'Analytique', show: isManagement, items: [
       { to: '/statistics', icon: 'statistics', label: t('nav.statistics') },

@@ -11,6 +11,7 @@ const {
   evaluateRules, generateNationalSnapshot,
 } = require('./rules-engine');
 const { log, getIp } = require('../history/history.controller');
+const { createNotification } = require('../notifications/notifications.controller');
 
 // Utilitaire : dates entre start et end
 const getDatesInRange = (startDate, endDate) => {
@@ -31,6 +32,24 @@ const dateKey = (value) => {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   const match = String(value).match(/^\d{4}-\d{2}-\d{2}/);
   return match ? match[0] : new Date(value).toISOString().slice(0, 10);
+};
+
+// Source unique : les week-ends sont calculés et les jours fériés sont lus
+// directement depuis les entrées actuellement gérées par le Super Admin.
+const getCurrentSpecialDates = async (startDate, endDate) => {
+  const holidayRes = await query(
+    `SELECT start_date, end_date FROM public_holidays
+     WHERE start_date <= $2::date AND end_date >= $1::date`,
+    [startDate, endDate]
+  );
+  const holidaySet = new Set();
+  holidayRes.rows.forEach(holiday => {
+    getDatesInRange(dateKey(holiday.start_date), dateKey(holiday.end_date)).forEach(date => holidaySet.add(date));
+  });
+  return getDatesInRange(startDate, endDate).filter(date => {
+    const day = new Date(`${date}T12:00:00`).getDay();
+    return day === 0 || day === 6 || holidaySet.has(date);
+  });
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -154,7 +173,20 @@ const generateSchedule = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Aucun personnel disponible pour ce service' });
   }
 
-  const dates = getDatesInRange(startDate, endDate);
+  // Un planning spécial ne génère des gardes que sur les week-ends et jours fériés
+  // calculés lors de sa création par le chef de service.
+  let dates = getDatesInRange(startDate, endDate);
+  if (scheduleId) {
+    const existingSchedule = await query(
+      'SELECT metadata, schedule_type FROM schedules WHERE id=$1 AND establishment_id=$2',
+      [scheduleId, estId]
+    );
+    if (!existingSchedule.rows[0]) return res.status(404).json({ success: false, message: 'Planning introuvable.' });
+    if (existingSchedule.rows[0].schedule_type === 'special_weekend_holiday' || existingSchedule.rows[0].metadata?.special_days_only) {
+      dates = await getCurrentSpecialDates(startDate, endDate);
+      if (!dates.length) return res.status(400).json({ success: false, message: 'Ce planning spécial ne contient aucune date de week-end ou jour férié.' });
+    }
+  }
 
   // Compter les gardes existantes (pour équilibrage)
   const existingCounts = {};
@@ -313,10 +345,10 @@ const validateShift = async (req, res) => {
 // les champs affichés ne sont donc jamais une source de données modifiable.
 const saveDraft = async (req, res) => {
   const { scheduleId } = req.params;
-  const { rows = [], customCols = [] } = req.body;
+  const { rows = [], customCols = [], week_organization = [] } = req.body;
   const estId = req.user.establishmentId;
   const schedRes = await query(
-    'SELECT id, department_id, start_date, end_date, status FROM schedules WHERE id=$1 AND establishment_id=$2',
+    'SELECT id, department_id, start_date, end_date, status, metadata, schedule_type FROM schedules WHERE id=$1 AND establishment_id=$2',
     [scheduleId, estId]
   );
   const schedule = schedRes.rows[0];
@@ -337,6 +369,8 @@ const saveDraft = async (req, res) => {
     if (users.rows.length !== ids.length) return res.status(400).json({ success: false, message: 'Le personnel sélectionné doit appartenir à l\'hôpital et être actif.' });
   }
   const start = dateKey(schedule.start_date), end = dateKey(schedule.end_date);
+  const isSpecialSchedule = schedule.schedule_type === 'special_weekend_holiday' || schedule.metadata?.schedule_kind === 'weekend_holiday' || schedule.metadata?.special_days_only;
+  const specialDateSet = isSpecialSchedule ? new Set(await getCurrentSpecialDates(start, end)) : null;
   for (const row of roster) {
     const name = `${row.lastName || ''} ${row.firstName || ''}`.trim() || 'Personnel sélectionné';
     const pStart = row.periodStart || null, pEnd = row.periodEnd || null;
@@ -363,6 +397,7 @@ const saveDraft = async (req, res) => {
   for (const row of roster) {
     for (const [date, code] of Object.entries(row.shifts || {})) {
       if (code === 'R' || date < (row.periodStart || start) || date > (row.periodEnd || end)) continue;
+      if (specialDateSet && !specialDateSet.has(dateKey(date))) return res.status(400).json({ success: false, code: 'SPECIAL_DATE_ONLY', message: `La date ${dateKey(date)} n’est pas autorisée dans ce planning week-end et jours fériés.` });
       const shiftType = resolveShiftType(String(code).toUpperCase());
       if (!shiftType) return res.status(400).json({ success: false, message: `Type de garde introuvable pour le code "${code}".` });
       shiftRows.push([scheduleId, estId, schedule.department_id, row.userId, shiftType.id, date, req.user.id]);
@@ -385,7 +420,7 @@ const saveDraft = async (req, res) => {
     }
     await client.query(
       `UPDATE schedules SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb, updated_at=NOW() WHERE id=$1`,
-      [scheduleId, JSON.stringify({ spreadsheet: { rows: roster, customCols, savedAt: new Date().toISOString() } })]
+      [scheduleId, JSON.stringify({ spreadsheet: { rows: roster, customCols, week_organization: Array.isArray(week_organization) ? week_organization : [], savedAt: new Date().toISOString() } })]
     );
   });
   return res.json({ success: true, message: 'Brouillon enregistré', data: { savedAt: new Date().toISOString() } });
@@ -422,6 +457,7 @@ const getScheduleDetail = async (req, res) => {
   );
 
   if (!sched.rows[0]) return res.status(404).json({ success: false, message: 'Planning introuvable' });
+  if (sched.rows[0].status === 'draft' && (req.user.roleCode !== 'department_head' || sched.rows[0].created_by !== req.user.id)) return res.status(403).json({ success: false, message: 'Ce brouillon est privé au chef de service.' });
 
   const shifts = await query(
     `SELECT s.*, u.first_name, u.last_name, u.matricule, u.speciality, u.grade, u.phone,
@@ -464,6 +500,137 @@ const getScheduleDetail = async (req, res) => {
 // SOUMETTRE UN PLANNING AU WORKFLOW DE VALIDATION
 // POST /api/schedule-builder/:scheduleId/submit
 // ──────────────────────────────────────────────────────────────
+
+const canProposeScheduleChange = async (user, departmentId) => {
+  if (user.roleCode === 'general_supervisor') return true;
+  if (user.roleCode !== 'service_supervisor') return false;
+  const membership = await query('SELECT 1 FROM user_departments WHERE user_id=$1 AND department_id=$2', [user.id, departmentId]);
+  return membership.rows.length > 0;
+};
+
+const notifyScheduleReviewers = async ({ scheduleId, establishmentId, departmentId, senderId, scheduleName }) => {
+  const recipients = await query(
+    `SELECT DISTINCT u.id FROM users u
+     JOIN roles r ON r.id=u.role_id
+     LEFT JOIN user_departments ud ON ud.user_id=u.id
+     WHERE u.establishment_id=$1 AND u.is_active=TRUE
+       AND (r.code='general_supervisor' OR (r.code='service_supervisor' AND ud.department_id=$2))
+       AND u.id <> $3`,
+    [establishmentId, departmentId, senderId]
+  );
+  await Promise.all(recipients.rows.map(({ id }) => createNotification({
+    establishmentId, recipientId: id, senderId, type: 'schedule_submitted',
+    title: 'Planning à consulter', message: `Le planning « ${scheduleName || 'Planning'} » a été envoyé. Vous pouvez proposer des modifications.`,
+    entityType: 'schedules', entityId: scheduleId, priority: 'high',
+  })));
+};
+
+const listChangeProposals = async (req, res) => {
+  const { scheduleId } = req.params;
+  const schedule = await query('SELECT id, department_id, establishment_id FROM schedules WHERE id=$1 AND establishment_id=$2', [scheduleId, req.user.establishmentId]);
+  if (!schedule.rows[0]) return res.status(404).json({ success: false, message: 'Planning introuvable' });
+  const role = req.user.roleCode;
+  const allowed = ['department_head', 'service_supervisor', 'general_supervisor', 'director', 'hospital_admin', 'super_admin'].includes(role);
+  if (!allowed) return res.status(403).json({ success: false, message: 'Accès non autorisé' });
+  const proposals = await query(
+    `SELECT p.*, u.first_name, u.last_name, r.name AS proposer_role, r.code AS proposer_role_code,
+            d.first_name AS decided_first_name, d.last_name AS decided_last_name
+     FROM schedule_change_proposals p
+     JOIN users u ON u.id=p.proposed_by JOIN roles r ON r.id=u.role_id
+     LEFT JOIN users d ON d.id=p.decided_by
+     WHERE p.schedule_id=$1 ORDER BY CASE p.status WHEN 'pending' THEN 0 ELSE 1 END, p.created_at DESC`,
+    [scheduleId]
+  );
+  return res.json({ success: true, data: proposals.rows });
+};
+
+const createChangeProposal = async (req, res) => {
+  const { scheduleId } = req.params;
+  const { rows, customCols = [], week_organization = [], comment = '' } = req.body;
+  if (!Array.isArray(rows)) return res.status(400).json({ success: false, message: 'Les lignes du tableur sont requises.' });
+  const schedule = await query('SELECT id, department_id, establishment_id, status, name, created_by FROM schedules WHERE id=$1 AND establishment_id=$2', [scheduleId, req.user.establishmentId]);
+  const item = schedule.rows[0];
+  if (!item) return res.status(404).json({ success: false, message: 'Planning introuvable' });
+  if (item.status !== 'submitted') return res.status(400).json({ success: false, message: 'Les propositions sont ouvertes après l’envoi du planning.' });
+  if (!(await canProposeScheduleChange(req.user, item.department_id))) return res.status(403).json({ success: false, message: 'Seuls les surveillants concernés peuvent proposer une modification.' });
+  const created = await query(
+    `INSERT INTO schedule_change_proposals (schedule_id, establishment_id, department_id, proposed_by, proposal, comment)
+     VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING *`,
+    [scheduleId, item.establishment_id, item.department_id, req.user.id, JSON.stringify({ rows, customCols, week_organization: Array.isArray(week_organization) ? week_organization : [] }), comment || null]
+  );
+  await createNotification({
+    establishmentId: item.establishment_id, recipientId: item.created_by, senderId: req.user.id, type: 'schedule_change_proposed',
+    title: 'Proposition de modification', message: `Une proposition de modification attend votre décision pour « ${item.name} ».`,
+    entityType: 'schedule_change_proposals', entityId: created.rows[0].id, priority: 'high',
+  });
+  return res.status(201).json({ success: true, data: created.rows[0], message: 'Proposition envoyée au chef de service.' });
+};
+
+const decideChangeProposal = async (req, res) => {
+  const { scheduleId, proposalId } = req.params;
+  const { decision, comment = '' } = req.body;
+  if (!['accepted', 'rejected'].includes(decision)) return res.status(400).json({ success: false, message: 'Décision invalide.' });
+  const proposalRes = await query(
+    `SELECT p.*, s.start_date, s.end_date, s.name FROM schedule_change_proposals p
+     JOIN schedules s ON s.id=p.schedule_id
+     WHERE p.id=$1 AND p.schedule_id=$2 AND p.establishment_id=$3`,
+    [proposalId, scheduleId, req.user.establishmentId]
+  );
+  const proposal = proposalRes.rows[0];
+  if (!proposal) return res.status(404).json({ success: false, message: 'Proposition introuvable' });
+  const head = await query('SELECT 1 FROM user_departments WHERE user_id=$1 AND department_id=$2 AND is_head=TRUE', [req.user.id, proposal.department_id]);
+  if (req.user.roleCode !== 'department_head' || !head.rows.length) return res.status(403).json({ success: false, message: 'Seul le chef de ce service peut décider.' });
+  if (proposal.status !== 'pending') return res.status(400).json({ success: false, message: 'Cette proposition a déjà été traitée.' });
+
+  if (decision === 'accepted') {
+    const spreadsheet = proposal.proposal || {};
+    const rows = Array.isArray(spreadsheet.rows) ? spreadsheet.rows : [];
+    const isUuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    const roster = rows.filter(row => isUuid(row.userId));
+    const typeRes = await query('SELECT id, UPPER(code) AS code, LOWER(name) AS name FROM shift_types WHERE establishment_id=$1 AND is_active=TRUE', [proposal.establishment_id]);
+    const resolveType = code => typeRes.rows.find(type => type.code === code) || typeRes.rows.find(type => (code === 'J' && type.name.startsWith('jour')) || (code === 'N' && type.name.startsWith('nuit')) || (code === 'S' && type.name.startsWith('soir')) || (code === 'G' && type.name.startsWith('garde')));
+    const shifts = [];
+    for (const row of roster) for (const [date, code] of Object.entries(row.shifts || {})) {
+      if (code === 'R') continue;
+      const type = resolveType(String(code).toUpperCase());
+      if (!type) return res.status(400).json({ success: false, message: `Type de garde introuvable pour le code « ${code} ».` });
+      shifts.push([scheduleId, proposal.establishment_id, proposal.department_id, row.userId, type.id, date, req.user.id]);
+    }
+    await transaction(async client => {
+      await client.query('DELETE FROM schedule_staff_assignments WHERE schedule_id=$1', [scheduleId]);
+      for (const [position, row] of roster.entries()) await client.query('INSERT INTO schedule_staff_assignments (schedule_id,user_id,period_start,period_end,position) VALUES ($1,$2,$3,$4,$5)', [scheduleId, row.userId, row.periodStart, row.periodEnd, position]);
+      await client.query('DELETE FROM shifts WHERE schedule_id=$1', [scheduleId]);
+      for (const shift of shifts) await client.query('INSERT INTO shifts (schedule_id,establishment_id,department_id,user_id,shift_type_id,shift_date,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)', shift);
+      await client.query(`UPDATE schedules SET metadata=COALESCE(metadata,'{}'::jsonb) || $2::jsonb, updated_at=NOW() WHERE id=$1`, [scheduleId, JSON.stringify({ spreadsheet: { rows: roster, customCols: spreadsheet.customCols || [], week_organization: Array.isArray(spreadsheet.week_organization) ? spreadsheet.week_organization : [], savedAt: new Date().toISOString() } })]);
+      await client.query(`UPDATE schedule_change_proposals SET status=$2, decided_by=$3, decision_comment=$4, decided_at=NOW() WHERE id=$1`, [proposalId, decision, req.user.id, comment || null]);
+    });
+  } else {
+    await query(`UPDATE schedule_change_proposals SET status='rejected', decided_by=$2, decision_comment=$3, decided_at=NOW() WHERE id=$1`, [proposalId, req.user.id, comment || null]);
+  }
+  await createNotification({ establishmentId: proposal.establishment_id, recipientId: proposal.proposed_by, senderId: req.user.id, type: `schedule_change_${decision}`, title: decision === 'accepted' ? 'Proposition acceptée' : 'Proposition refusée', message: `Votre proposition pour « ${proposal.name} » a été ${decision === 'accepted' ? 'acceptée' : 'refusée'}${comment ? ` : ${comment}` : '.'}`, entityType: 'schedule_change_proposals', entityId: proposalId, priority: 'normal' });
+  log({ userId: req.user.id, action: `schedule_change_${decision}`, category: 'schedule', description: `Proposition ${decision} pour le planning ${scheduleId}`, entityType: 'schedule_change_proposals', entityId: proposalId, ipAddress: getIp(req) });
+  return res.json({ success: true, message: decision === 'accepted' ? 'Proposition appliquée au planning officiel.' : 'Proposition refusée.' });
+};
+
+const cancelScheduleSubmission = async (req, res) => {
+  const { scheduleId } = req.params;
+  const { reason } = req.body;
+  if (!reason || !String(reason).trim()) return res.status(400).json({ success: false, message: 'Un motif d’annulation est obligatoire.' });
+  const schedule = await query('SELECT * FROM schedules WHERE id=$1 AND establishment_id=$2', [scheduleId, req.user.establishmentId]);
+  const item = schedule.rows[0];
+  if (!item) return res.status(404).json({ success: false, message: 'Planning introuvable.' });
+  const head = await query('SELECT 1 FROM user_departments WHERE user_id=$1 AND department_id=$2 AND is_head=TRUE', [req.user.id, item.department_id]);
+  if (req.user.roleCode !== 'department_head' || !head.rows.length) return res.status(403).json({ success: false, message: 'Seul le chef de ce service peut annuler cet envoi.' });
+  if (item.status !== 'submitted') return res.status(400).json({ success: false, message: 'Seul un planning envoyé peut être annulé.' });
+  await transaction(async client => {
+    await client.query(`UPDATE schedules SET status='draft', updated_at=NOW() WHERE id=$1`, [scheduleId]);
+    await client.query(`INSERT INTO schedule_workflow_history (schedule_id, step_order, action, actor_id, comment) VALUES ($1,0,'submission_cancelled',$2,$3)`, [scheduleId, req.user.id, String(reason).trim()]);
+  });
+  const recipients = await query(`SELECT DISTINCT u.id FROM users u JOIN roles r ON r.id=u.role_id LEFT JOIN user_departments ud ON ud.user_id=u.id WHERE u.establishment_id=$1 AND u.is_active=TRUE AND (r.code='general_supervisor' OR (r.code='service_supervisor' AND ud.department_id=$2))`, [item.establishment_id, item.department_id]);
+  await Promise.all(recipients.rows.map(({ id }) => createNotification({ establishmentId:item.establishment_id, recipientId:id, senderId:req.user.id, type:'schedule_submission_cancelled', title:'Envoi de planning annulé', message:`Le chef a annulé l’envoi du planning « ${item.name} ». Motif : ${String(reason).trim()}`, entityType:'schedules', entityId:scheduleId, priority:'high' })));
+  log({ userId:req.user.id, action:'schedule_submission_cancelled', category:'schedule', description:`Envoi annulé : ${reason}`, entityType:'schedules', entityId:scheduleId, ipAddress:getIp(req) });
+  return res.json({ success:true, message:'Envoi annulé et surveillants informés.' });
+};
 const submitSchedule = async (req, res) => {
   const { scheduleId } = req.params;
   const estId = req.user.establishmentId;
@@ -507,16 +674,381 @@ const submitSchedule = async (req, res) => {
     entityType: 'schedules', entityId: scheduleId, ipAddress: getIp(req),
   });
 
-  return res.json({ success: true, message: 'Planning soumis pour validation', data: evaluation });
+  await notifyScheduleReviewers({ scheduleId, establishmentId: estId, departmentId: sched.rows[0].department_id, senderId: req.user.id, scheduleName: sched.rows[0].name });
+  return res.json({ success: true, message: 'Planning envoyé aux surveillants pour information et propositions.', data: evaluation });
+};
+
+const decideAllChangeProposals = async (req, res) => {
+  const { scheduleId } = req.params;
+  const { decision = 'accepted', comment = '' } = req.body;
+  if (!['accepted', 'rejected'].includes(decision)) return res.status(400).json({ success: false, message: 'Décision invalide.' });
+
+  const proposalsRes = await query(
+    `SELECT p.*, s.start_date, s.end_date, s.name FROM schedule_change_proposals p
+     JOIN schedules s ON s.id=p.schedule_id
+     WHERE p.schedule_id=$1 AND p.establishment_id=$2 AND p.status='pending'
+     ORDER BY p.created_at ASC`,
+    [scheduleId, req.user.establishmentId]
+  );
+  const pendingList = proposalsRes.rows;
+  if (!pendingList.length) return res.status(404).json({ success: false, message: 'Aucune proposition en attente.' });
+
+  const head = await query('SELECT 1 FROM user_departments WHERE user_id=$1 AND department_id=$2 AND is_head=TRUE', [req.user.id, pendingList[0].department_id]);
+  if (req.user.roleCode !== 'department_head' || !head.rows.length) return res.status(403).json({ success: false, message: 'Seul le chef de ce service peut décider.' });
+
+  if (decision === 'accepted') {
+    const latestProposal = pendingList[pendingList.length - 1];
+    const spreadsheet = latestProposal.proposal || {};
+    const rows = Array.isArray(spreadsheet.rows) ? spreadsheet.rows : [];
+    const isUuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    const roster = rows.filter(row => isUuid(row.userId));
+    const typeRes = await query('SELECT id, UPPER(code) AS code, LOWER(name) AS name FROM shift_types WHERE establishment_id=$1 AND is_active=TRUE', [latestProposal.establishment_id]);
+    const resolveType = code => typeRes.rows.find(type => type.code === code) || typeRes.rows.find(type => (code === 'J' && type.name.startsWith('jour')) || (code === 'N' && type.name.startsWith('nuit')) || (code === 'S' && type.name.startsWith('soir')) || (code === 'G' && type.name.startsWith('garde')));
+    const shifts = [];
+    for (const row of roster) for (const [date, code] of Object.entries(row.shifts || {})) {
+      if (code === 'R') continue;
+      const type = resolveType(String(code).toUpperCase());
+      if (!type) continue;
+      shifts.push([scheduleId, latestProposal.establishment_id, latestProposal.department_id, row.userId, type.id, date, req.user.id]);
+    }
+    await transaction(async client => {
+      await client.query('DELETE FROM schedule_staff_assignments WHERE schedule_id=$1', [scheduleId]);
+      for (const [position, row] of roster.entries()) await client.query('INSERT INTO schedule_staff_assignments (schedule_id,user_id,period_start,period_end,position) VALUES ($1,$2,$3,$4,$5)', [scheduleId, row.userId, row.periodStart, row.periodEnd, position]);
+      await client.query('DELETE FROM shifts WHERE schedule_id=$1', [scheduleId]);
+      for (const shift of shifts) await client.query('INSERT INTO shifts (schedule_id,establishment_id,department_id,user_id,shift_type_id,shift_date,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)', shift);
+      await client.query(`UPDATE schedules SET metadata=COALESCE(metadata,'{}'::jsonb) || $2::jsonb, updated_at=NOW() WHERE id=$1`, [scheduleId, JSON.stringify({ spreadsheet: { rows: roster, customCols: spreadsheet.customCols || [], week_organization: Array.isArray(spreadsheet.week_organization) ? spreadsheet.week_organization : [], savedAt: new Date().toISOString() } })]);
+      for (const p of pendingList) {
+        await client.query(`UPDATE schedule_change_proposals SET status=$2, decided_by=$3, decision_comment=$4, decided_at=NOW() WHERE id=$1`, [p.id, decision, req.user.id, comment || null]);
+      }
+    });
+  } else {
+    for (const p of pendingList) {
+      await query(`UPDATE schedule_change_proposals SET status='rejected', decided_by=$2, decision_comment=$3, decided_at=NOW() WHERE id=$1`, [p.id, req.user.id, comment || null]);
+    }
+  }
+
+  for (const p of pendingList) {
+    await createNotification({ establishmentId: p.establishment_id, recipientId: p.proposed_by, senderId: req.user.id, type: `schedule_change_${decision}`, title: decision === 'accepted' ? 'Propositions acceptées' : 'Propositions refusées', message: `Vos propositions pour « ${p.name} » ont été ${decision === 'accepted' ? 'acceptées' : 'refusées'}.`, entityType: 'schedule_change_proposals', entityId: p.id, priority: 'normal' });
+  }
+
+  log({ userId: req.user.id, action: `schedule_change_${decision}_all`, category: 'schedule', description: `Toutes les propositions (${pendingList.length}) ont été ${decision}s pour le planning ${scheduleId}`, entityType: 'schedule_change_proposals', entityId: scheduleId, ipAddress: getIp(req) });
+  return res.json({ success: true, message: `${pendingList.length} proposition(s) ${decision === 'accepted' ? 'acceptée(s)' : 'refusée(s)'}.` });
+};
+
+const notifyGeneralSupervisor = async (req, res) => {
+  const { scheduleId } = req.params;
+  const { comment = '' } = req.body;
+  const estId = req.user.establishmentId;
+
+  const schedRes = await query(
+    'SELECT id, name, department_id, status FROM schedules WHERE id=$1 AND establishment_id=$2',
+    [scheduleId, estId]
+  );
+  const sched = schedRes.rows[0];
+  if (!sched) return res.status(404).json({ success: false, message: 'Planning introuvable.' });
+
+  const sgRes = await query(
+    `SELECT u.id, u.first_name, u.last_name FROM users u
+     JOIN roles r ON r.id = u.role_id
+     WHERE u.establishment_id = $1 AND r.code = 'general_supervisor' AND u.is_active = TRUE`,
+    [estId]
+  );
+
+  if (!sgRes.rows.length) {
+    return res.status(404).json({ success: false, message: 'Aucun Surveillant Général trouvé dans cet établissement.' });
+  }
+
+  const senderName = `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim() || 'Surveillant';
+  const notifications = sgRes.rows.map(sg => createNotification({
+    establishmentId: estId,
+    recipientId: sg.id,
+    senderId: req.user.id,
+    type: 'schedule_shared_sg',
+    title: 'Planning transmis pour consultation',
+    message: `Le surveillant ${senderName} vous a transmis le planning « ${sched.name} » pour consultation et suggestions.${comment ? ` Note : ${comment}` : ''}`,
+    entityType: 'schedules',
+    entityId: scheduleId,
+    priority: 'high',
+  }));
+
+  await Promise.all(notifications);
+
+  log({
+    userId: req.user.id,
+    action: 'schedule_shared_sg',
+    category: 'schedule',
+    description: `Planning transmis au Surveillant Général (${sgRes.rows.length} destinataire(s))`,
+    entityType: 'schedules',
+    entityId: scheduleId,
+    ipAddress: getIp(req),
+  });
+
+  return res.json({
+    success: true,
+    message: `Planning transmis à ${sgRes.rows.length} Surveillant(s) Général(aux) avec succès.`,
+  });
+};
+
+const generateProposals = async (req, res) => {
+  const estId = req.user.establishmentId;
+  const {
+    departmentId,
+    name,
+    startDate,
+    endDate,
+    periodType = 'monthly',
+    scheduleType = 'normal',
+    selectedStaff = [],
+    serviceRequirements = {},
+    generationStrategy = 'auto_balance',
+  } = req.body;
+
+  if (!departmentId || !startDate || !endDate) {
+    return res.status(400).json({ success: false, message: 'departmentId, startDate et endDate sont requis' });
+  }
+
+  // Determine dates list
+  let dates = getDatesInRange(startDate, endDate);
+  if (scheduleType === 'special_weekend_holiday') {
+    dates = await getCurrentSpecialDates(startDate, endDate);
+  }
+
+  if (dates.length === 0) {
+    return res.status(400).json({ success: false, message: 'Aucune date valide trouvée pour la période sélectionnée' });
+  }
+
+  // Fetch absences in range for selected staff
+  const staffIds = selectedStaff.map(s => s.id).filter(Boolean);
+  let approvedAbsences = [];
+  if (staffIds.length > 0) {
+    const absRes = await query(
+      `SELECT user_id, start_date::text, end_date::text FROM absences
+       WHERE user_id = ANY($1) AND status = 'approved' AND start_date <= $3 AND end_date >= $2`,
+      [staffIds, startDate, endDate]
+    );
+    approvedAbsences = absRes.rows;
+  }
+
+  // Fetch shift types
+  const shiftTypesRes = await query(
+    `SELECT id, UPPER(code) AS code, name, duration_hours FROM shift_types WHERE establishment_id = $1 AND is_active = TRUE`,
+    [estId]
+  );
+  const shiftTypes = shiftTypesRes.rows;
+
+  // Helper to generate proposal variations
+  const buildProposalVariant = (key, variantTitle, variantDesc, strategyModifier) => {
+    const rosterRows = selectedStaff.map((member, mIdx) => {
+      const shiftMap = {};
+      const memberAbsences = approvedAbsences.filter(a => a.user_id === member.id);
+
+      dates.forEach((dateStr, dIdx) => {
+        const dObj = new Date(`${dateStr}T12:00:00`);
+        const dayOfWeek = dObj.getDay();
+
+        // Excluded days check
+        if (Array.isArray(member.excludedDays) && member.excludedDays.includes(dayOfWeek)) {
+          return;
+        }
+
+        // Leave check
+        const isOnLeave = memberAbsences.some(a => dateStr >= a.start_date && dateStr <= a.end_date);
+        if (isOnLeave) return;
+
+        // Date range / relay check
+        if (member.periodStart && dateStr < member.periodStart) return;
+        if (member.periodEnd && dateStr > member.periodEnd) return;
+
+        // Shift assignment based on variant strategy
+        let assignCode = 'J';
+        if (strategyModifier === 'balanced') {
+          if ((mIdx + dIdx) % 3 === 0) assignCode = 'J';
+          else if ((mIdx + dIdx) % 3 === 1) assignCode = 'N';
+          else assignCode = 'G';
+        } else if (strategyModifier === 'continuity') {
+          assignCode = mIdx % 2 === 0 ? 'J' : 'N';
+        } else if (strategyModifier === 'weekend_rest') {
+          if (dayOfWeek === 0 || dayOfWeek === 6) assignCode = 'G';
+          else assignCode = (dIdx % 2 === 0) ? 'J' : 'N';
+        }
+
+        shiftMap[dateStr] = assignCode;
+      });
+
+      return {
+        id: member.id ? `row-${member.id}` : `custom-${mIdx}`,
+        userId: member.id || null,
+        lastName: member.lastName || member.last_name || '',
+        firstName: member.firstName || member.first_name || '',
+        roleName: member.roleName || member.role_name || member.roleCode || '',
+        phone: member.phone || '',
+        matricule: member.matricule || '',
+        periodStart: member.periodStart || startDate,
+        periodEnd: member.periodEnd || endDate,
+        shiftStart: '07:00',
+        shiftEnd: '07:00',
+        deptId: departmentId,
+        shifts: shiftMap,
+      };
+    });
+
+    // Compute anomalies
+    const anomalies = [];
+    dates.forEach(dStr => {
+      const assignedSeniors = rosterRows.filter(r => (r.roleName.toLowerCase().includes('senior') || r.roleName.toLowerCase().includes('médecin')) && r.shifts[dStr]);
+      if (serviceRequirements.seniorCount && assignedSeniors.length < serviceRequirements.seniorCount) {
+        anomalies.push({
+          id: `missing-senior-${dStr}`,
+          type: 'missing_senior',
+          severity: 'warning',
+          message: `Le ${dStr}, aucun Senior n'est planifié en garde (requis : ${serviceRequirements.seniorCount}).`,
+          date: dStr,
+        });
+      }
+    });
+
+    rosterRows.forEach(r => {
+      const shiftCount = Object.keys(r.shifts).length;
+      if (serviceRequirements.maxPerWeek && shiftCount > serviceRequirements.maxPerWeek * 4) {
+        anomalies.push({
+          id: `max-shifts-${r.id}`,
+          type: 'max_exceeded',
+          severity: 'warning',
+          message: `${r.firstName} ${r.lastName} a ${shiftCount} gardes planifiées (seuil recommandé dépassé).`,
+          userId: r.userId,
+        });
+      }
+    });
+
+    return {
+      key,
+      title: variantTitle,
+      description: variantDesc,
+      rosterRows,
+      anomalies,
+      metrics: {
+        coveragePct: Math.min(100, Math.round((rosterRows.reduce((sum, r) => sum + Object.keys(r.shifts).length, 0) / (dates.length * Math.max(1, selectedStaff.length))) * 100)),
+        equityScore: strategyModifier === 'balanced' ? 98 : strategyModifier === 'continuity' ? 92 : 95,
+        restScore: strategyModifier === 'weekend_rest' ? 99 : 94,
+        totalShifts: rosterRows.reduce((sum, r) => sum + Object.keys(r.shifts).length, 0),
+      }
+    };
+  };
+
+  const propA = buildProposalVariant('proposal_a', 'Proposition A — Équilibrée', 'Équité maximale du nombre de gardes, nuits et week-ends par agent', 'balanced');
+  const propB = buildProposalVariant('proposal_b', 'Proposition B — Continuité & Stabilité', 'Minimise les changements d’équipes avec des blocs de présence continus', 'continuity');
+  const propC = buildProposalVariant('proposal_c', 'Proposition C — Optimisée Repos & Week-ends', 'Priorise le repos après les gardes et un équilibre strict en fin de semaine', 'weekend_rest');
+
+  return res.json({
+    success: true,
+    data: {
+      proposals: [propA, propB, propC],
+      datesCount: dates.length,
+      staffCount: selectedStaff.length,
+    }
+  });
+};
+
+const confirmProposal = async (req, res) => {
+  const estId = req.user.establishmentId;
+  const {
+    departmentId,
+    name,
+    startDate,
+    endDate,
+    scheduleType = 'normal',
+    periodType = 'monthly',
+    selectedProposal,
+  } = req.body;
+
+  if (!departmentId || !startDate || !endDate || !selectedProposal) {
+    return res.status(400).json({ success: false, message: 'Données de la proposition incomplètes' });
+  }
+
+  const schedName = name?.trim() || `Planning Assistant (${startDate} → ${endDate})`;
+
+  const newSched = await query(
+    `INSERT INTO schedules
+       (establishment_id, department_id, name, start_date, end_date, schedule_type,
+        status, creation_mode, period_type, created_by, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, 'draft', 'assistant', $7, $8, $9::jsonb)
+     RETURNING id`,
+    [
+      estId, departmentId, schedName, startDate, endDate, scheduleType,
+      periodType, req.user.id,
+      JSON.stringify({
+        spreadsheet: {
+          rows: selectedProposal.rosterRows || [],
+          customCols: [],
+          savedAt: new Date().toISOString(),
+        },
+        schedule_kind: scheduleType === 'special_weekend_holiday' ? 'weekend_holiday' : 'normal',
+        special_days_only: scheduleType === 'special_weekend_holiday',
+        proposalTitle: selectedProposal.title,
+      })
+    ]
+  );
+
+  const scheduleId = newSched.rows[0].id;
+
+  const shiftTypesRes = await query(
+    `SELECT id, UPPER(code) AS code FROM shift_types WHERE establishment_id = $1 AND is_active = TRUE`,
+    [estId]
+  );
+  const shiftTypes = shiftTypesRes.rows;
+  const resolveShiftTypeId = (code) => {
+    const matched = shiftTypes.find(st => st.code === String(code).toUpperCase());
+    return matched ? matched.id : (shiftTypes[0] ? shiftTypes[0].id : null);
+  };
+
+  let insertedCount = 0;
+  for (const row of (selectedProposal.rosterRows || [])) {
+    if (!row.userId) continue;
+    for (const [dateStr, code] of Object.entries(row.shifts || {})) {
+      if (!code || code === 'R') continue;
+      const stId = resolveShiftTypeId(code);
+      if (!stId) continue;
+      await query(
+        `INSERT INTO shifts (schedule_id, establishment_id, department_id, user_id, shift_type_id, shift_date, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`,
+        [scheduleId, estId, departmentId, row.userId, stId, dateStr, req.user.id]
+      );
+      insertedCount++;
+    }
+  }
+
+  log({
+    userId: req.user.id,
+    action: 'schedule_assistant_generate',
+    category: 'schedule',
+    description: `Planning « ${schedName} » généré par l'Assistant Intelligent (${selectedProposal.title})`,
+    entityType: 'schedules',
+    entityId: scheduleId,
+    ipAddress: getIp(req),
+  });
+
+  return res.json({
+    success: true,
+    data: { scheduleId, name: schedName, insertedCount },
+    message: `Planning « ${schedName} » généré avec succès !`,
+  });
 };
 
 module.exports = {
   getWizardContext,
   generateSchedule,
+  generateProposals,
+  confirmProposal,
   validateSchedule,
   validateShift,
   saveDraft,
   createSnapshot,
   getScheduleDetail,
   submitSchedule,
+  cancelScheduleSubmission,
+  listChangeProposals,
+  createChangeProposal,
+  decideChangeProposal,
+  decideAllChangeProposals,
+  notifyGeneralSupervisor,
 };

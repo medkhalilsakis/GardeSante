@@ -21,4 +21,11 @@ router.put('/establishments/:id/activate',   ctrl.activateEstablishment);
 router.put('/establishments/:id/director/password',      ctrl.resetDirectorPassword);
 router.put('/establishments/:id/director/toggle-status', ctrl.toggleDirectorStatus);
 
+// ── Jours & Périodes Fériés ──────────────────────────────────
+router.get('/holidays',               ctrl.getPublicHolidays);
+router.post('/holidays',              ctrl.createPublicHoliday);
+router.put('/holidays/:id',           ctrl.updatePublicHoliday);
+router.delete('/holidays/:id',        ctrl.deletePublicHoliday);
+router.post('/holidays/seed-tunisia', ctrl.seedTunisiaHolidays);
+
 module.exports = router;

@@ -7,9 +7,11 @@ import React, {
   useState, useRef, useEffect, useMemo, useCallback,
 } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { scheduleBuilderAPI, schedulesAPI } from '../../../api';
+import { adminAPI, scheduleBuilderAPI, schedulesAPI } from '../../../api';
 import HospitalStaffPicker from './HospitalStaffPicker';
+import ImportModal from './ImportModal';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../../../store';
 
 // ── Icônes ──────────────────────────────────────────────────────────────
 const Ico = ({ d, s = 14 }) => (
@@ -47,6 +49,83 @@ const SHIFT_CODES = ['J', 'N', 'S', 'G', 'R'];
 const DOW_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 const MONTH_FR = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
 
+const PROPOSAL_COLOR_PALETTES = [
+  {
+    key: 'amber',
+    bg: '#FEF9C3',
+    bgDark: '#FEF08A',
+    badgeBg: '#FDE047',
+    border: '#EAB308',
+    borderDark: '#CA8A04',
+    text: '#854D0E',
+    textDark: '#713F12',
+    name: 'Ambre / Jaune',
+    dot: '🟡',
+  },
+  {
+    key: 'sky',
+    bg: '#E0F2FE',
+    bgDark: '#BAE6FD',
+    badgeBg: '#7DD3FC',
+    border: '#0284C7',
+    borderDark: '#0369A1',
+    text: '#0C4A6E',
+    textDark: '#0369A1',
+    name: 'Ciel / Bleu',
+    dot: '🔵',
+  },
+  {
+    key: 'purple',
+    bg: '#F3E8FF',
+    bgDark: '#E9D5FF',
+    badgeBg: '#C084FC',
+    border: '#9333EA',
+    borderDark: '#7E22CE',
+    text: '#581C87',
+    textDark: '#6B21A8',
+    name: 'Violet',
+    dot: '🟣',
+  },
+  {
+    key: 'emerald',
+    bg: '#D1FAE5',
+    bgDark: '#A7F3D0',
+    badgeBg: '#6EE7B7',
+    border: '#10B981',
+    borderDark: '#047857',
+    text: '#064E3B',
+    textDark: '#065F46',
+    name: 'Émeraude / Vert',
+    dot: '🟢',
+  },
+  {
+    key: 'rose',
+    bg: '#FFE4E6',
+    bgDark: '#FECDD3',
+    badgeBg: '#FDA4AF',
+    border: '#F43F5E',
+    borderDark: '#BE123C',
+    text: '#881337',
+    textDark: '#9F1239',
+    name: 'Rose',
+    dot: '🔴',
+  },
+  {
+    key: 'orange',
+    bg: '#FFEDD5',
+    bgDark: '#FED7AA',
+    badgeBg: '#FDBA74',
+    border: '#F97316',
+    borderDark: '#C2410C',
+    text: '#7C2D12',
+    textDark: '#9A3412',
+    name: 'Orange',
+    dot: '🟠',
+  },
+];
+
+const getProposalPalette = (index = 0) => PROPOSAL_COLOR_PALETTES[index % PROPOSAL_COLOR_PALETTES.length];
+
 const isWeekend = d => d.getDay() === 0 || d.getDay() === 6;
 
 function getDays(start, end) {
@@ -61,14 +140,25 @@ function getDays(start, end) {
 // compare toujours des clés YYYY-MM-DD, sans effet de fuseau horaire.
 const dateKey = (value) => {
   if (!value) return '';
+  if (typeof value === 'string') {
+    const direct = value.match(/^\d{4}-\d{2}-\d{2}/);
+    if (direct) return direct[0];
+  }
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
   const raw = String(value);
   const direct = raw.match(/^\d{4}-\d{2}-\d{2}/);
   if (direct) return direct[0];
   const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? '' : `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, '0')}-${String(parsed.getUTCDate()).padStart(2, '0')}`;
+  if (Number.isNaN(parsed.getTime())) return '';
+  const y = parsed.getFullYear();
+  const m = String(parsed.getMonth() + 1).padStart(2, '0');
+  const d = String(parsed.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 };
 
 // ── Status badge ────────────────────────────────────────────────────────
@@ -129,26 +219,56 @@ function ContextMenu({ x, y, rowIdx, onAction, onClose }) {
 }
 
 // ── Shift Code Cell ──────────────────────────────────────────────────────
-function ShiftCell({ code, onClick }) {
-  const m = code ? SHIFT_META[code] : null;
+function ShiftCell({ code, onClick, isProposed, isConflict, proposedCode, originalCode, proposerName, palette }) {
+  const displayCode = isProposed ? proposedCode : code;
+  const m = displayCode && displayCode.length === 1 ? SHIFT_META[displayCode] : null;
+  const pal = palette || { bg: '#FEF9C3', border: '#EAB308', borderDark: '#CA8A04', textDark: '#713F12', badgeBg: '#FDE047', dot: '🟡' };
+
   return (
-    <div onClick={onClick} title={m ? `${code} – ${m.label}\nCliquer pour changer` : 'Cliquer pour affecter une garde'}
+    <div onClick={onClick}
+      title={
+        isConflict
+          ? `⚡ CONFLIT : ${proposerName}\nCliquez pour inspecter et choisir la valeur !`
+          : isProposed
+          ? `⚠️ Proposition (${proposerName || 'Surveillant'}):\nAncienne garde : ${originalCode || 'Aucune'}\nNouvelle garde proposée : ${proposedCode}`
+          : m
+          ? `${code} – ${m.label}\nCliquer pour changer`
+          : 'Cliquer pour affecter une garde'
+      }
       style={{
-        width: 28, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        borderRadius: 5, cursor: 'pointer', fontWeight: 800, fontSize: 11, margin: '0 auto',
-        background: m ? m.bg : 'transparent', color: m ? m.text : 'var(--border-subtle)',
-        border: m ? `1px solid ${m.border}` : '1px dashed var(--border-subtle)',
-        transition: 'all .1s', userSelect: 'none',
+        width: isConflict ? 34 : 28, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 5, cursor: 'pointer', fontWeight: 800, fontSize: isConflict ? 10 : 11, margin: '0 auto',
+        background: isConflict
+          ? 'linear-gradient(135deg, #FEF9C3 0%, #E0F2FE 100%)'
+          : isProposed
+          ? pal.bg
+          : m ? m.bg : 'transparent',
+        color: isConflict ? '#581C87' : isProposed ? pal.textDark : m ? m.text : 'var(--border-subtle)',
+        border: isConflict
+          ? '2px dashed #9333EA'
+          : isProposed
+          ? `1.5px solid ${pal.borderDark}`
+          : m ? `1px solid ${m.border}` : '1px dashed var(--border-subtle)',
+        boxShadow: isConflict
+          ? '0 0 10px rgba(147, 51, 234, 0.4)'
+          : isProposed ? `0 0 8px ${pal.border}66` : 'none',
+        transition: 'all .1s', userSelect: 'none', position: 'relative'
       }}
-      onMouseEnter={e => { if (!m) e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-      onMouseLeave={e => { if (!m) e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
+      onMouseEnter={e => { if (!m && !isProposed && !isConflict) e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+      onMouseLeave={e => { if (!m && !isProposed && !isConflict) e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
     >
-      {m ? code : '·'}
+      {isProposed && (
+        <span style={{
+          position: 'absolute', top: -3, right: -3, width: 7, height: 7, borderRadius: '50%',
+          background: '#EAB308', border: '1px solid #713F12', boxShadow: '0 0 4px rgba(234,179,8,0.8)'
+        }} />
+      )}
+      {displayCode || '·'}
     </div>
   );
 }
 
-function PeriodCalendar({ value, min, max, anchor, onSelect, onClose }) {
+function PeriodCalendar({ value, min, max, anchor, onSelect, onClose, isSpecialSchedule, holidays = [] }) {
   const toDate = (key) => new Date(`${key}T12:00:00`);
   const initial = value || min;
   const [cursor, setCursor] = useState(() => toDate(initial));
@@ -159,27 +279,106 @@ function PeriodCalendar({ value, min, max, anchor, onSelect, onClose }) {
   const nextEnabled = new Date(year, month + 1, 1) <= toDate(max);
   const cells = Array.from({ length: firstDay + daysInMonth }, (_, i) => i < firstDay ? null : i - firstDay + 1);
   const keyFor = (day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
   return (
-    <div style={{ position: 'fixed', zIndex: 5000, top: Math.min((anchor?.bottom || 0) + 6, window.innerHeight - 360), left: Math.min(anchor?.left || 8, window.innerWidth - 290), width: 276, padding: 12, borderRadius: 10, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', boxShadow: '0 12px 30px rgba(0,0,0,.2)' }}>
+    <div style={{
+      position: 'fixed', zIndex: 5000,
+      top: Math.min((anchor?.bottom || 0) + 6, window.innerHeight - 410),
+      left: Math.min(anchor?.left || 8, window.innerWidth - 320),
+      width: 300, padding: 14, borderRadius: 12,
+      background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+      boxShadow: '0 16px 36px rgba(0,0,0,.25)'
+    }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
         <button type="button" disabled={!prevEnabled} onClick={() => setCursor(new Date(year, month - 1, 1))} style={{ ...calendarNav, opacity: prevEnabled ? 1 : .35 }}>‹</button>
-        <strong style={{ fontSize: 12 }}>{MONTH_FR[month]} {year}</strong>
+        <strong style={{ fontSize: 13 }}>{MONTH_FR[month]} {year}</strong>
         <button type="button" disabled={!nextEnabled} onClick={() => setCursor(new Date(year, month + 1, 1))} style={{ ...calendarNav, opacity: nextEnabled ? 1 : .35 }}>›</button>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2, textAlign: 'center' }}>
-        {['D','L','M','M','J','V','S'].map((day, i) => <span key={`${day}-${i}`} style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-muted)', padding: 3 }}>{day}</span>)}
+
+      {isSpecialSchedule && (
+        <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(234, 179, 8, 0.12)', border: '1px solid #CA8A04', fontSize: 10, fontWeight: 700, color: '#713F12', marginBottom: 10, textAlign: 'center' }}>
+          ⚡ Planning Spécial : Seuls les Week-ends et Jours Fériés sont sélectionnables.
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3, textAlign: 'center' }}>
+        {['D','L','M','M','J','V','S'].map((day, i) => <span key={`${day}-${i}`} style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', padding: 2 }}>{day}</span>)}
         {cells.map((day, i) => {
           if (!day) return <span key={`empty-${i}`} />;
-          const key = keyFor(day), disabled = key < min || key > max, selected = key === value;
-          return <button type="button" key={key} disabled={disabled} onClick={() => { onSelect(key); onClose(); }} style={{ border: 'none', borderRadius: 6, minHeight: 27, cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 11, fontWeight: selected ? 800 : 500, background: selected ? 'var(--color-primary)' : disabled ? 'transparent' : 'var(--bg-elevated)', color: selected ? '#fff' : disabled ? 'var(--text-muted)' : 'var(--text-primary)', opacity: disabled ? .3 : 1 }}>{day}</button>;
+          const key = keyFor(day);
+          const dateObj = new Date(`${key}T12:00:00`);
+          const isWeekendDay = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+          const matchingHolidays = holidays.filter(h => {
+            const hStart = String(h.start_date).slice(0, 10);
+            const hEnd = String(h.end_date).slice(0, 10);
+            return key >= hStart && key <= hEnd;
+          });
+          const isHolidayDay = matchingHolidays.length > 0;
+          const isSpecialDay = isWeekendDay || isHolidayDay;
+
+          const outOfRange = key < min || key > max;
+          const disabled = outOfRange || (isSpecialSchedule && !isSpecialDay);
+          const selected = key === value;
+
+          let cellBg = selected ? 'var(--color-primary)' : 'var(--bg-elevated)';
+          let cellColor = selected ? '#fff' : 'var(--text-primary)';
+          let cellBorder = 'none';
+
+          if (!selected && !disabled) {
+            if (isHolidayDay) {
+              cellBg = '#FEF9C3';
+              cellColor = '#713F12';
+              cellBorder = '1px solid #CA8A04';
+            } else if (isWeekendDay) {
+              cellBg = '#F3E8FF';
+              cellColor = '#581C87';
+              cellBorder = '1px solid #C084FC';
+            }
+          }
+
+          return (
+            <button
+              type="button"
+              key={key}
+              disabled={disabled}
+              onClick={() => { onSelect(key); onClose(); }}
+              title={
+                isHolidayDay
+                  ? `🟡 Jour Férié : ${matchingHolidays.map(h => h.name).join(', ')}`
+                  : isWeekendDay
+                  ? '🟣 Week-end'
+                  : isSpecialSchedule
+                  ? '🚫 Jour de semaine (non sélectionnable)'
+                  : undefined
+              }
+              style={{
+                border: cellBorder, borderRadius: 6, minHeight: 30,
+                cursor: disabled ? 'not-allowed' : 'pointer',
+                fontSize: 11, fontWeight: selected || isSpecialDay ? 800 : 500,
+                background: cellBg, color: cellColor,
+                opacity: disabled ? (isSpecialSchedule ? .18 : .3) : 1,
+                transition: 'all 0.15s',
+                position: 'relative'
+              }}>
+              {day}
+              {isHolidayDay && !selected && (
+                <span style={{ position: 'absolute', top: 1, right: 2, fontSize: 8 }}>🟡</span>
+              )}
+            </button>
+          );
         })}
       </div>
-      <div style={{ marginTop: 9, fontSize: 9, color: 'var(--text-muted)', textAlign: 'center' }}>Dates autorisées : {min} au {max}</div>
+
+      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border-subtle)', fontSize: 9, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <span>🟣 Week-end</span>
+        <span>🟡 Férié</span>
+        {isSpecialSchedule && <span style={{ opacity: 0.6 }}>⚪ Non-férié (désactivé)</span>}
+      </div>
     </div>
   );
 }
 
-function PeriodTimeline({ rows, start, end }) {
+export function PeriodTimeline({ rows, start, end }) {
   const toDay = (value) => new Date(`${dateKey(value)}T12:00:00`).getTime() / 86400000;
   const first = toDay(start), last = toDay(end), total = Math.max(1, last - first + 1);
   const monthMarkers = [];
@@ -224,360 +423,211 @@ const STAFF_PALETTE = [
   '#DC2626', // Red
 ];
 
-function DetailedCalendar({ rows, days, start, end }) {
+export function DetailedCalendar({ rows, days, start, end, holidays = [], weekOrganization = [] }) {
   const [selectedDay, setSelectedDay] = useState(null);
-  const [filterType, setFilterType] = useState('ALL');
-  const [filterUserKey, setFilterUserKey] = useState('ALL');
-
-  // Mapping unique de chaque personnel vers sa puce de couleur et ses jours d'affectation
-  const staffColorMap = useMemo(() => {
-    const map = {};
-    const activeRows = rows.filter(r => r.userId || r.lastName);
-    activeRows.forEach((r, idx) => {
-      const key = r.userId || r.id;
-      const color = STAFF_PALETTE[idx % STAFF_PALETTE.length];
-      const shiftDates = Object.entries(r.shifts || {})
-        .filter(([_, code]) => code && code !== 'R')
-        .map(([dStr]) => dStr)
-        .sort();
-
-      map[key] = {
-        key,
-        color,
-        name: `${r.lastName} ${r.firstName}`.trim() || 'Agent',
-        role: r.roleName || 'Personnel',
-        shiftCount: shiftDates.length,
-        firstDate: shiftDates[0] || null,
-        lastDate: shiftDates[shiftDates.length - 1] || null,
-      };
-    });
-    return map;
-  }, [rows]);
+  const staff = useMemo(() => rows
+    .filter(row => row.userId || row.lastName)
+    .map((row, index) => ({
+      row,
+      key: row.userId || row.id,
+      color: STAFF_PALETTE[index % STAFF_PALETTE.length],
+      name: `${row.lastName} ${row.firstName}`.trim() || 'Agent',
+      role: row.roleName || 'Fonction non renseignée',
+      periodStart: dateKey(row.periodStart) || dateKey(start),
+      periodEnd: dateKey(row.periodEnd) || dateKey(end),
+    })), [rows, start, end]);
 
   const dailyMap = useMemo(() => {
-    const map = {};
-    days.forEach(d => {
-      const dStr = dateKey(d);
-      map[dStr] = [];
-    });
-
-    rows.filter(r => r.userId || r.lastName).forEach(r => {
-      const userKey = r.userId || r.id;
-      const staffInfo = staffColorMap[userKey] || { color: '#3B82F6', name: `${r.lastName} ${r.firstName}` };
-
-      Object.entries(r.shifts || {}).forEach(([dStr, code]) => {
-        if (map[dStr]) {
-          map[dStr].push({
-            user: r,
-            userKey,
-            staffInfo,
-            code,
-            shiftStart: r.shiftStart || '07:00',
-            shiftEnd: r.shiftEnd || '07:00',
-          });
-        }
+    const map = Object.fromEntries(days.map(day => [dateKey(day), []]));
+    staff.forEach(person => {
+      days.forEach(day => {
+        const key = dateKey(day);
+        if (key >= person.periodStart && key <= person.periodEnd) map[key].push(person);
       });
     });
-
     return map;
-  }, [rows, days, staffColorMap]);
+  }, [days, staff]);
 
-  const totalShiftsCount = useMemo(() => {
-    let count = 0;
-    Object.values(dailyMap).forEach(list => {
-      count += list.filter(item => item.code && item.code !== 'R').length;
-    });
-    return count;
-  }, [dailyMap]);
-
-  const activeStaffList = useMemo(() => {
-    return Object.values(staffColorMap);
-  }, [staffColorMap]);
+  const totalPresences = useMemo(() => Object.values(dailyMap).reduce((total, people) => total + people.length, 0), [dailyMap]);
 
   return (
     <div style={{ padding: 20, background: 'var(--bg-card)', borderRadius: 12, minHeight: 400 }}>
-      {/* Concept & Executive Summary Banner ("L'idée qui décrit tout") */}
-      <div style={{
-        padding: '16px 20px',
-        borderRadius: 12,
-        background: 'linear-gradient(135deg, rgba(27,79,202,0.08) 0%, rgba(124,58,237,0.08) 100%)',
-        border: '1px solid rgba(27,79,202,0.2)',
-        marginBottom: 20
-      }}>
+      <div style={{ padding: '16px 20px', borderRadius: 12, background: 'linear-gradient(135deg, rgba(27,79,202,.08), rgba(124,58,237,.08))', border: '1px solid rgba(27,79,202,.2)', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 800, color: 'var(--color-primary)' }}>
-              <span>📅</span> Calendrier Détaillé des Gardes (avec Puces de Couleur par Agent)
-            </div>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-secondary)', maxWidth: 780 }}>
-              <strong>Vue synthétique & identifiée :</strong> Chaque agent du tableur est identifié par un <strong>point de couleur spécifique</strong>. Retrouvez facilement sur chaque carte quotidienne les jours de présence attribués à chaque personnel.
-            </p>
+            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--color-primary)' }}>Calendrier détaillé des présences</div>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-secondary)', maxWidth: 760 }}>Vue de présentation : chaque membre du tableur possède une couleur. Son point apparaît sur tous les jours compris entre son début et sa fin de période.</p>
           </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)', textAlign: 'center' }}>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Total Gardes</div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--color-primary)' }}>{totalShiftsCount}</div>
-            </div>
-            <div style={{ background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)', textAlign: 'center' }}>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Agents Mobilisés</div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: '#7C3AED' }}>{activeStaffList.length}</div>
-            </div>
-            <div style={{ background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)', textAlign: 'center' }}>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Plage Planning</div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: '#10B981' }}>{days.length} jours</div>
-            </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)', textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Personnel</div><div style={{ fontWeight: 800, color: '#7C3AED' }}>{staff.length}</div></div>
+            <div style={{ background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)', textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Présences</div><div style={{ fontWeight: 800, color: 'var(--color-primary)' }}>{totalPresences}</div></div>
           </div>
         </div>
-
-        {/* Personnel Color Legend / Guide */}
-        {activeStaffList.length > 0 && (
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span>🎨</span> Puces de Couleur par Agent (Légende du Personnel) :
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => setFilterUserKey('ALL')}
-                style={{
-                  padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-                  border: '1px solid var(--border-subtle)', cursor: 'pointer',
-                  background: filterUserKey === 'ALL' ? 'var(--color-primary)' : 'var(--bg-card)',
-                  color: filterUserKey === 'ALL' ? '#fff' : 'var(--text-secondary)'
-                }}>
-                Tous les agents
-              </button>
-              {activeStaffList.map(st => {
-                const active = filterUserKey === st.key;
-                return (
-                  <button
-                    key={st.key}
-                    type="button"
-                    onClick={() => setFilterUserKey(active ? 'ALL' : st.key)}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6,
-                      padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-                      border: `1.5px solid ${st.color}`, cursor: 'pointer',
-                      background: active ? st.color : 'var(--bg-card)',
-                      color: active ? '#fff' : 'var(--text-primary)',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <span style={{ width: 9, height: 9, borderRadius: '50%', background: active ? '#fff' : st.color, display: 'inline-block' }} />
-                    <span>{st.name}</span>
-                    <span style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>
-                      ({st.shiftCount}j {st.firstDate ? `• ${st.firstDate.slice(5)} → ${st.lastDate.slice(5)}` : ''})
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Shift Code Filter Pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px dashed var(--border-subtle)', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Filtrer par type de garde :</span>
-          <button type="button" onClick={() => setFilterType('ALL')} style={{ padding: '3px 9px', borderRadius: 6, fontSize: 10, fontWeight: 700, border: '1px solid var(--border-subtle)', cursor: 'pointer', background: filterType === 'ALL' ? 'var(--color-primary)' : 'var(--bg-card)', color: filterType === 'ALL' ? '#fff' : 'var(--text-secondary)' }}>Tous types</button>
-          {SHIFT_CODES.map(code => {
-            const m = SHIFT_META[code];
-            const active = filterType === code;
-            return (
-              <button key={code} type="button" onClick={() => setFilterType(active ? 'ALL' : code)} style={{ padding: '3px 9px', borderRadius: 6, fontSize: 10, fontWeight: 700, border: `1px solid ${m.border}`, cursor: 'pointer', background: active ? m.text : m.bg, color: active ? '#fff' : m.text }}>
-                {code} ({m.label})
-              </button>
-            );
-          })}
-        </div>
+        {staff.length > 0 && <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {staff.map(person => <span key={person.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 20, background: 'var(--bg-card)', border: `1px solid ${person.color}55`, fontSize: 11, fontWeight: 700 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: person.color }} />{person.name} <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>· {person.role}</span></span>)}
+        </div>}
       </div>
 
-      {/* Days Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 14 }}>
-        {days.map(d => {
-          const dStr = dateKey(d);
-          const rawAssigned = dailyMap[dStr] || [];
-          const assigned = rawAssigned.filter(a => {
-            const passType = filterType === 'ALL' || a.code === filterType;
-            const passUser = filterUserKey === 'ALL' || a.userKey === filterUserKey;
-            return passType && passUser;
+      {weekOrganization.length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '10px 12px', marginBottom: 14, borderRadius: 10, background: 'var(--bg-elevated)' }}>{weekOrganization.map((group, index) => <div key={group.id || index} style={{ borderLeft: `5px solid ${group.color || '#6366F1'}`, padding: '6px 10px', borderRadius: 6, background: `${group.color || '#6366F1'}12`, fontSize: 11 }}><strong style={{ color: group.color || '#6366F1' }}>{group.name}</strong><div style={{ color: 'var(--text-muted)', marginTop: 2 }}>{group.startDate} → {group.endDate}</div></div>)}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 14 }}>
+        {days.map(day => {
+          const key = dateKey(day);
+          const people = dailyMap[key] || [];
+          const weekend = isWeekend(day);
+          const matchingHolidays = holidays.filter(h => {
+            const hStart = dateKey(h.start_date);
+            const hEnd = dateKey(h.end_date);
+            return key >= hStart && key <= hEnd;
           });
-          const isWk = isWeekend(d);
+          const isHolidayDay = matchingHolidays.length > 0;
+          const holidayNames = matchingHolidays.map(h => h.name).filter(Boolean).join(', ') || 'Jour Férié';
+
+          let borderStyle = '1px solid var(--border-subtle)';
+          let bgStyle = 'var(--bg-card)';
+
+          if (isHolidayDay) {
+            borderStyle = '1.5px solid #F59E0B';
+            bgStyle = 'rgba(245, 158, 11, 0.06)';
+          } else if (weekend) {
+            borderStyle = '1.5px solid #C7D2FE';
+            bgStyle = 'rgba(99,102,241,.03)';
+          }
 
           return (
-            <div
-              key={dStr}
-              onClick={() => setSelectedDay({ dateStr: dStr, dateObj: d, items: rawAssigned })}
-              style={{
-                borderRadius: 10,
-                border: isWk ? '1.5px solid #C7D2FE' : '1px solid var(--border-subtle)',
-                background: isWk ? 'rgba(99,102,241,0.03)' : 'var(--bg-card)',
-                padding: 12,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                display: 'flex',
-                flexDirection: 'column',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.08)'; }}
-              onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.02)'; }}
-            >
-              {/* Card Header */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 6 }}>
-                <div>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: isWk ? '#4F46E5' : 'var(--text-primary)' }}>
-                    {DOW_FR[d.getDay()]} {d.getDate()} {MONTH_FR[d.getMonth()]}
-                  </span>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{dStr}</div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {/* Colored dots preview in card header for on-duty staff */}
-                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                    {rawAssigned.map((item, idx) => (
-                      <span
-                        key={idx}
-                        style={{
-                          width: 8, height: 8, borderRadius: '50%',
-                          background: item.staffInfo.color,
-                          display: 'inline-block'
-                        }}
-                        title={`${item.staffInfo.name} (${item.code})`}
-                      />
-                    ))}
-                  </div>
-                  {isWk && (
-                    <span style={{ fontSize: 9, fontWeight: 800, background: '#EEF2FF', color: '#4F46E5', padding: '2px 6px', borderRadius: 4, border: '1px solid #C7D2FE' }}>
-                      🌟
-                    </span>
-                  )}
-                </div>
+            <button type="button" key={key} onClick={() => setSelectedDay({ day, people, isHolidayDay, holidayNames, weekend })} style={{ textAlign: 'left', borderRadius: 10, border: borderStyle, background: bgStyle, padding: 12, cursor: 'pointer', color: 'var(--text-primary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 7, marginBottom: 8, borderBottom: '1px solid var(--border-subtle)' }}>
+                <strong style={{ color: isHolidayDay ? '#B45309' : weekend ? '#4F46E5' : 'var(--text-primary)' }}>
+                  {DOW_FR[day.getDay()]} {day.getDate()} {MONTH_FR[day.getMonth()]}
+                </strong>
+                <span style={{ fontSize: 10, color: isHolidayDay ? '#B45309' : weekend ? '#4F46E5' : 'var(--text-muted)', fontWeight: isHolidayDay || weekend ? 800 : 400 }}>
+                  {isHolidayDay ? `🟡 Jour Férié (${holidayNames})` : weekend ? '🟣 Week-end' : people.length + ' présent(s)'}
+                </span>
               </div>
-
-              {/* Shift Assignments List */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minHeight: 40 }}>
-                {assigned.length === 0 ? (
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px 0', textAlign: 'center' }}>
-                    {rawAssigned.length === 0 ? 'Aucune garde affectée' : 'Aucun résultat pour ce filtre'}
-                  </div>
-                ) : (
-                  assigned.map((item, idx) => {
-                    const m = SHIFT_META[item.code] || SHIFT_META.G;
-                    const stColor = item.staffInfo.color;
-                    return (
-                      <div key={idx} style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '6px 8px', borderRadius: 6, background: m.bg, border: `1px solid ${m.border}`,
-                        borderLeft: `4px solid ${stColor}`, color: m.text
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
-                          {/* Personnel Colored Dot */}
-                          <span
-                            style={{
-                              width: 10, height: 10, borderRadius: '50%',
-                              background: stColor, display: 'inline-block', flexShrink: 0,
-                              boxShadow: `0 0 0 2px ${stColor}33`
-                            }}
-                            title={`Agent: ${item.staffInfo.name}`}
-                          />
-                          <span style={{ fontSize: 9, fontWeight: 900, width: 16, height: 16, borderRadius: '50%', background: m.text, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            {item.code}
-                          </span>
-                          <div style={{ fontSize: 11, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {item.user.lastName} {item.user.firstName}
-                          </div>
-                        </div>
-                        <div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85, flexShrink: 0, marginLeft: 4 }}>
-                          {item.shiftStart} - {item.shiftEnd}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Card Footer */}
-              <div style={{ marginTop: 10, paddingTop: 6, borderTop: '1px dashed var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)' }}>
-                <span>{assigned.length} agent(s)</span>
-                <span style={{ color: 'var(--color-primary)', fontWeight: 700 }}>Inspecter →</span>
-              </div>
-            </div>
+              {people.length ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{people.map(person => <span key={person.key} title={`${person.name} — ${person.role}`} style={{ width: 12, height: 12, borderRadius: '50%', background: person.color, boxShadow: `0 0 0 2px ${person.color}22` }} />)}</div> : <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>Aucun personnel sur cette période</span>}
+            </button>
           );
         })}
       </div>
 
-      {/* Selected Day Inspector Modal */}
       {selectedDay && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 6000, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={() => setSelectedDay(null)}>
-          <div style={{ background: 'var(--bg-card)', borderRadius: 16, width: '100%', maxWidth: 520, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', border: '1px solid var(--border-subtle)' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 6000, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={() => setSelectedDay(null)}>
+          <div style={{ background: 'var(--bg-card)', borderRadius: 16, width: '100%', maxWidth: 520, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,.3)', border: '1px solid var(--border-subtle)' }} onClick={event => event.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>
-                  📋 Détail des gardes du {DOW_FR[selectedDay.dateObj.getDay()]} {selectedDay.dateObj.getDate()} {MONTH_FR[selectedDay.dateObj.getMonth()]} {selectedDay.dateObj.getFullYear()}
-                </h3>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                  Plage globale du planning : {dateKey(start)} au {dateKey(end)}
-                </div>
+                <strong>Personnel présent le {DOW_FR[selectedDay.day.getDay()]} {selectedDay.day.getDate()} {MONTH_FR[selectedDay.day.getMonth()]}</strong>
+                {selectedDay.isHolidayDay && <div style={{ fontSize: 11, color: '#B45309', fontWeight: 800, marginTop: 2 }}>🟡 {selectedDay.holidayNames}</div>}
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Consultation uniquement — aucune modification du tableur.</div>
               </div>
-              <button type="button" onClick={() => setSelectedDay(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+              <button type="button" onClick={() => setSelectedDay(null)} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer' }}>✕</button>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 360, overflowY: 'auto' }}>
-              {selectedDay.items.length === 0 ? (
-                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                  Aucun membre du personnel n'est affecté à une garde pour cette date.
-                </div>
-              ) : (
-                selectedDay.items.map((item, i) => {
-                  const m = SHIFT_META[item.code] || SHIFT_META.G;
-                  const stColor = item.staffInfo.color;
-                  return (
-                    <div key={i} style={{ padding: 12, borderRadius: 10, background: 'var(--bg-elevated)', border: `1px solid ${m.border}`, borderLeft: `5px solid ${stColor}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        {/* Colored Dot Badge */}
-                        <div style={{ width: 36, height: 36, borderRadius: '50%', background: stColor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 13, boxShadow: `0 3px 8px ${stColor}44` }}>
-                          {item.code}
-                        </div>
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: 13, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: stColor, display: 'inline-block' }} />
-                            {item.user.lastName} {item.user.firstName}
-                          </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            {item.user.roleName || 'Fonction non renseignée'} {item.user.phone ? `• Tél: ${item.user.phone}` : ''}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 6, background: m.bg, color: m.text, fontWeight: 800, fontSize: 10 }}>
-                          {m.label}
-                        </span>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginTop: 4 }}>
-                          ⏰ {item.shiftStart} → {item.shiftEnd}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            <div style={{ marginTop: 20, paddingTop: 12, borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setSelectedDay(null)} style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--color-primary)', color: '#fff', border: 'none', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-                Fermer
-              </button>
-            </div>
+            {selectedDay.people.length ? <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>{selectedDay.people.map(person => <div key={person.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, borderRadius: 8, background: 'var(--bg-elevated)', borderLeft: `5px solid ${person.color}` }}><span style={{ width: 12, height: 12, borderRadius: '50%', background: person.color }} /><div><strong style={{ fontSize: 13 }}>{person.name}</strong><div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{person.role} · {person.periodStart} → {person.periodEnd}</div></div></div>)}</div> : <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>Aucun personnel prévu ce jour.</div>}
           </div>
         </div>
       )}
     </div>
   );
 }
+function CellProposalModal({ cellInfo, onClose, onApplyValue }) {
+  if (!cellInfo) return null;
+  const { rowName, colLabel, originalVal, proposals } = cellInfo;
 
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.65)', backdropFilter: 'blur(4px)', zIndex: 3500, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}>
+      <div style={{ background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border-subtle)', padding: 24, width: 490, maxWidth: '94vw', boxShadow: '0 24px 60px rgba(0,0,0,.35)' }}
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#9333EA', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>⚡</span> <span>Propositions & Conflits sur cette case</span>
+            </div>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 900, color: 'var(--text-primary)' }}>
+              {rowName}
+            </h3>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+              Champ : <strong>{colLabel}</strong>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}>✕</button>
+        </div>
+
+        {/* Valeur officielle actuelle */}
+        <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Officiel Actuel :</span>
+          <strong style={{ fontSize: 13, color: 'var(--text-primary)', padding: '2px 8px', borderRadius: 6, background: 'rgba(0,0,0,.06)' }}>
+            {originalVal || 'Non renseigné'}
+          </strong>
+        </div>
+
+        {/* Liste des propositions side by side */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 320, overflowY: 'auto', marginBottom: 20 }}>
+          {proposals.map((prop, idx) => (
+            <div key={prop.proposalId || idx} style={{
+              padding: 14, borderRadius: 12,
+              background: prop.palette.bg,
+              border: `2px solid ${prop.palette.borderDark}`,
+              boxShadow: `0 4px 14px ${prop.palette.border}33`,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 15 }}>{prop.palette.dot}</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: prop.palette.textDark }}>
+                    {prop.proposerName}
+                  </span>
+                  <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 12, background: prop.palette.badgeBg, color: prop.palette.textDark, border: `1px solid ${prop.palette.borderDark}` }}>
+                    {prop.roleIcon} {prop.roleTitle}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: 13, fontWeight: 900, color: prop.palette.textDark, marginTop: 4 }}>
+                  Proposé : <span style={{ textDecoration: 'underline', background: prop.palette.badgeBg, padding: '2px 8px', borderRadius: 6 }}>{prop.proposedVal || prop.proposedCode}</span>
+                </div>
+
+                {prop.comment && (
+                  <div style={{ fontSize: 11, color: prop.palette.text, marginTop: 6, fontStyle: 'italic', background: 'rgba(255,255,255,.5)', padding: '4px 8px', borderRadius: 6 }}>
+                    💬 "{prop.comment}"
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onApplyValue(prop.proposedVal || prop.proposedCode);
+                  onClose();
+                }}
+                style={{
+                  padding: '9px 16px', borderRadius: 8, border: 'none',
+                  background: prop.palette.borderDark, color: '#fff',
+                  fontSize: 12, fontWeight: 800, cursor: 'pointer', flexShrink: 0,
+                  boxShadow: '0 3px 10px rgba(0,0,0,.2)'
+                }}>
+                ✓ Appliquer
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+            Fermer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const weekInputStyle = { padding: '6px 8px', borderRadius: 6, border: '1px solid #C4B5FD', background: '#fff', color: 'var(--text-primary)', fontSize: 11 };
 const calendarNav = { border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', borderRadius: 6, cursor: 'pointer', width: 25, height: 24, fontSize: 18, lineHeight: 1 };
 
 // ── Main ─────────────────────────────────────────────────────────────────
-export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
+export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onManageProposals }) {
   const qc = useQueryClient();
+  const { user } = useAuthStore();
 
   // ── State ──
   const [rows, setRows]               = useState([]);
@@ -600,13 +650,42 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
   const [draggingRow, setDraggingRow] = useState(null);
   // Colonnes dynamiques
   const [customCols, setCustomCols]   = useState([]);
+  const [weekOrganization, setWeekOrganization] = useState([]);
+  const [showWeekOrganization, setShowWeekOrganization] = useState(false);
   const [showAddCol, setShowAddCol]   = useState(false);
   const [newColName, setNewColName]   = useState('');
   const [newColType, setNewColType]   = useState('text');
   const [editingColHeader, setEditingColHeader] = useState(null); // key of col being renamed
   const [colHeaderVal, setColHeaderVal] = useState('');
+  const [showImportModal, setShowImportModal] = useState(false);
   const inputRef = useRef(null);
   const saveVersion = useRef(0);
+  const downloadScheduleExport = async (format) => {
+    const requests = {
+      pdf: scheduleBuilderAPI.exportPDF,
+      excel: scheduleBuilderAPI.exportExcel,
+      csv: scheduleBuilderAPI.exportCSV,
+      calendar: scheduleBuilderAPI.exportCalendarPDF,
+    };
+    const names = { pdf: 'tableur-garde.pdf', excel: 'tableur-garde.xlsx', csv: 'tableur-garde.csv', calendar: 'calendrier-detaille-garde.pdf' };
+    try {
+      const response = await requests[format](scheduleId);
+      const disposition = response.headers?.['content-disposition'] || '';
+      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || names[format];
+      const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Export telecharge avec succes.');
+    } catch (error) {
+      toast.error('Impossible de generer cet export.');
+    }
+  };
 
   // ── Data fetch ──
   const { data: schedData, isLoading } = useQuery({
@@ -619,8 +698,231 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
   const scheduleDetail = schedData?.data?.data || schedData?.data;
   const schedule = scheduleDetail?.schedule || scheduleDetail;
 
-  const days = useMemo(() => getDays(schedule?.start_date, schedule?.end_date), [schedule]);
+  // Change proposals fetch (du surveillant)
+  const { data: propData } = useQuery({
+    queryKey: ['schedule-change-proposals', scheduleId],
+    queryFn: () => scheduleBuilderAPI.getChangeProposals(scheduleId),
+    enabled: !!scheduleId,
+  });
+  const proposals = propData?.data?.data || propData?.data || [];
+  const pendingProposals = useMemo(() => {
+    return proposals.filter(p => p.status === 'pending');
+  }, [proposals]);
+
+  const [activeProposalId, setActiveProposalId] = useState(null);
+  const [cellModalInfo, setCellModalInfo]       = useState(null);
+
+  const proposalsWithPalettes = useMemo(() => {
+    return pendingProposals.map((prop, idx) => {
+      const palette = getProposalPalette(idx);
+      const isSG = prop.proposer_role_code === 'general_supervisor' || (prop.proposer_role && prop.proposer_role.toLowerCase().includes('général'));
+      const roleTitle = isSG ? 'Surveillant Général' : (prop.proposer_role || 'Surveillant de Service');
+      const roleIcon = isSG ? '🛡️' : '📋';
+      const mapByUserId = {};
+      (prop.proposal?.rows || []).forEach(r => {
+        const uId = r.userId || r.user_id || r.id;
+        if (uId) mapByUserId[uId] = r;
+      });
+      return {
+        ...prop,
+        idx,
+        palette,
+        roleTitle,
+        roleIcon,
+        isSG,
+        mapByUserId,
+        proposerName: `${prop.first_name || ''} ${prop.last_name || ''}`.trim() || roleTitle,
+      };
+    });
+  }, [pendingProposals]);
+
+  const activeProposalsToEvaluate = useMemo(() => {
+    if (!activeProposalId || activeProposalId === 'all') {
+      return proposalsWithPalettes;
+    }
+    return proposalsWithPalettes.filter(p => p.id === activeProposalId);
+  }, [proposalsWithPalettes, activeProposalId]);
+
+  const pendingProposal = useMemo(() => {
+    if (!pendingProposals.length) return null;
+    if (activeProposalId === 'all') return pendingProposals[0];
+    return pendingProposals.find(p => p.id === activeProposalId) || pendingProposals[0];
+  }, [pendingProposals, activeProposalId]);
+
+  const activeProposalIndex = useMemo(() => {
+    if (!pendingProposal || !pendingProposals.length) return 0;
+    const idx = pendingProposals.findIndex(p => p.id === pendingProposal.id);
+    return idx >= 0 ? idx : 0;
+  }, [pendingProposal, pendingProposals]);
+
+  const activePalette = useMemo(() => getProposalPalette(activeProposalIndex), [activeProposalIndex]);
+
+  const [notifyingSG, setNotifyingSG] = useState(false);
+  const handleNotifySG = async () => {
+    const comment = window.prompt('Note ou message pour le Surveillant Général (optionnel) :');
+    if (comment === null) return;
+    setNotifyingSG(true);
+    try {
+      const res = await scheduleBuilderAPI.notifySG(scheduleId, { comment });
+      toast.success(res.data?.message || 'Planning transmis au Surveillant Général avec succès !');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Erreur lors de la transmission au SG');
+    } finally {
+      setNotifyingSG(false);
+    }
+  };
+
+  const [decidingProposal, setDecidingProposal] = useState(false);
+  const refreshProposalData = async () => {
+    await qc.refetchQueries({ queryKey: ['schedule-change-proposals', scheduleId] });
+    await qc.refetchQueries({ queryKey: ['schedule-detail', scheduleId] });
+  };
+
+  const resolveProposalLocally = (proposalId, status) => {
+    qc.setQueryData(['schedule-change-proposals', scheduleId], old => {
+      if (!old?.data?.data || !Array.isArray(old.data.data)) return old;
+      return { ...old, data: { ...old.data, data: old.data.data.map(p => p.id === proposalId ? { ...p, status } : p) } };
+    });
+  };
+
+  const getMultiCellProposals = useCallback((row, colKey) => {
+    if (!activeProposalsToEvaluate.length) return [];
+    const cellProps = [];
+
+    activeProposalsToEvaluate.forEach(prop => {
+      if (row.isProposedNewRow) {
+        const proposedVal = String(row[colKey] || '').trim();
+        if (proposedVal) {
+          cellProps.push({
+            proposalId: prop.id,
+            proposerName: prop.proposerName,
+            roleTitle: prop.roleTitle,
+            roleIcon: prop.roleIcon,
+            originalVal: 'Non présent dans l’officiel',
+            proposedVal,
+            palette: prop.palette,
+            comment: prop.comment
+          });
+        }
+      } else {
+        const propRow = prop.mapByUserId[row.userId || row.id];
+        if (propRow) {
+          const currentVal = String(row[colKey] || '').trim();
+          const proposedVal = String(propRow[colKey] || propRow[colKey === 'periodStart' ? 'period_start' : colKey === 'periodEnd' ? 'period_end' : colKey] || '').trim();
+          if (proposedVal && proposedVal !== currentVal) {
+            cellProps.push({
+              proposalId: prop.id,
+              proposerName: prop.proposerName,
+              roleTitle: prop.roleTitle,
+              roleIcon: prop.roleIcon,
+              originalVal: currentVal || 'Non renseigné',
+              proposedVal,
+              palette: prop.palette,
+              comment: prop.comment
+            });
+          }
+        }
+      }
+    });
+
+    return cellProps;
+  }, [activeProposalsToEvaluate]);
+
+  const getMultiShiftProposals = useCallback((row, dateStr) => {
+    if (!activeProposalsToEvaluate.length) return [];
+    const shiftProps = [];
+
+    activeProposalsToEvaluate.forEach(prop => {
+      if (row.isProposedNewRow) {
+        const proposedCode = (row.shifts?.[dateStr] || '').toUpperCase();
+        if (proposedCode) {
+          shiftProps.push({
+            proposalId: prop.id,
+            proposerName: prop.proposerName,
+            roleTitle: prop.roleTitle,
+            roleIcon: prop.roleIcon,
+            originalCode: 'Aucune',
+            proposedCode,
+            palette: prop.palette,
+            comment: prop.comment
+          });
+        }
+      } else {
+        const propRow = prop.mapByUserId[row.userId || row.id];
+        if (propRow) {
+          const currentCode = (row.shifts[dateStr] || '').toUpperCase();
+          const proposedCode = (propRow.shifts?.[dateStr] || '').toUpperCase();
+          if (proposedCode && proposedCode !== currentCode) {
+            shiftProps.push({
+              proposalId: prop.id,
+              proposerName: prop.proposerName,
+              roleTitle: prop.roleTitle,
+              roleIcon: prop.roleIcon,
+              originalCode: currentCode || 'Libre',
+              proposedCode,
+              palette: prop.palette,
+              comment: prop.comment
+            });
+          }
+        }
+      }
+    });
+
+    return shiftProps;
+  }, [activeProposalsToEvaluate]);
+
+  const handleApplyProposalValue = (val) => {
+    if (!cellModalInfo) return;
+    const { rowId, colKey, dateStr, isShift } = cellModalInfo;
+    if (isShift) {
+      cycleShift(rowId, dateStr, val);
+    } else if (colKey && colKey.startsWith('custom_')) {
+      setRows(prev => prev.map(r => r.id === rowId ? { ...r, custom: { ...(r.custom || {}), [colKey]: val } } : r));
+      dirty();
+    } else if (colKey) {
+      updateRow(rowId, { [colKey]: val });
+    }
+    toast.success(`✓ Valeur "${val}" appliquée au planning !`);
+  };
+
+  const startYear = useMemo(() => schedule?.start_date ? new Date(schedule.start_date).getFullYear() : new Date().getFullYear(), [schedule]);
+  const endYear   = useMemo(() => schedule?.end_date ? new Date(schedule.end_date).getFullYear() : startYear, [schedule, startYear]);
+
+  const { data: holidaysRes } = useQuery({
+    queryKey: ['admin-holidays', dateKey(schedule?.start_date), dateKey(schedule?.end_date)],
+    queryFn: async () => {
+      const result = await adminAPI.getHolidays({ startDate: dateKey(schedule.start_date), endDate: dateKey(schedule.end_date) });
+      return result.data?.data || result.data || [];
+    },
+    enabled: !!schedule,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30000,
+  });
+  const publicHolidays = holidaysRes || [];
+
+  const isWeekendHolidaySchedule = schedule?.schedule_type === 'special_weekend_holiday' || schedule?.metadata?.schedule_kind === 'weekend_holiday' || schedule?.metadata?.special_days_only === true;
+
+  const days = useMemo(() => {
+    const allDays = getDays(schedule?.start_date, schedule?.end_date);
+    if (!isWeekendHolidaySchedule) return allDays;
+
+    return allDays.filter(day => {
+      const key = dateKey(day);
+      const dayOfWeek = day.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+      const isHoliday = publicHolidays.some(h => {
+        const hStart = dateKey(h.start_date);
+        const hEnd = dateKey(h.end_date);
+        return key >= hStart && key <= hEnd;
+      });
+      return isWeekend || isHoliday;
+    });
+  }, [schedule, isWeekendHolidaySchedule, publicHolidays]);
+
   const showDailyGrid = false;
+  const canProposeChanges = schedule?.status === 'submitted' && ['service_supervisor', 'general_supervisor'].includes(user?.roleCode);
+  const canCancelSubmission = schedule?.status === 'submitted' && user?.roleCode === 'department_head';
 
   // Build rows from schedule
   useEffect(() => {
@@ -628,12 +930,18 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
     const savedRows = schedule.metadata?.spreadsheet?.rows;
     const staffList = scheduleDetail?.staff || schedule.staff || [];
     const shifts    = scheduleDetail?.shifts || schedule.shifts || [];
-    const sourceRows = savedRows?.length ? savedRows : staffList;
+    const officialRows = savedRows?.length ? savedRows : staffList;
+    // Les membres ajoutés dans des propositions n’existent pas encore dans le planning officiel.
+    const allProposedRows = proposalsWithPalettes.flatMap(p => p.proposal?.rows || []);
+    const existingPersonnelIds = new Set(officialRows.map(m => m.userId || m.user_id || m.id).filter(Boolean));
+    const sourceRows = [...officialRows, ...allProposedRows.filter(m => {
+      const id = m.userId || m.user_id || m.id;
+      return id && !existingPersonnelIds.has(id);
+    })];
     const built = sourceRows.map(m => {
-      // Une ligne sauvegardee a un id de ligne temporaire (`new-...`) et
-      // l'UUID du personnel dans userId : ces deux identifiants sont distincts.
       const personnelId = m.userId || m.user_id || m.id;
-      const shiftMap = {};
+      const isProposedNewRow = Boolean(pendingProposal && !existingPersonnelIds.has(personnelId));
+      const shiftMap = { ...(m.shifts || {}) };
       shifts.filter(s => s.user_id === personnelId).forEach(s => {
         const d = String(s.shift_date).split('T')[0];
         shiftMap[d] = (s.shift_type_code || 'G').charAt(0).toUpperCase();
@@ -647,6 +955,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
         shiftStart: m.shiftStart || '07:00', shiftEnd: m.shiftEnd || '07:00',
         deptId: m.department_id || departmentId,
         shifts: shiftMap, isNew: false,
+        isProposedNewRow,
         custom: m.custom || {},
       };
     });
@@ -656,7 +965,8 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
     }
     setRows(built);
     setCustomCols(schedule.metadata?.spreadsheet?.customCols || []);
-  }, [schedule, scheduleDetail, departmentId]);
+    setWeekOrganization(schedule.metadata?.spreadsheet?.week_organization || []);
+  }, [schedule, scheduleDetail, departmentId, pendingProposal]);
 
   const emptyRow = (idx = Date.now()) => ({
     id: `new-${idx}`, userId: null,
@@ -721,12 +1031,20 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
 
   const dirty = useCallback(() => { saveVersion.current += 1; setIsDirty(true); }, []);
 
+  const existingUserIds = useMemo(() => {
+    return rows.map(r => r.userId).filter(Boolean);
+  }, [rows]);
+
   const { data: searchData } = useQuery({
     queryKey: ['spreadsheet-person-search', personSearch?.value],
-    queryFn: () => schedulesAPI.getHospitalStaff({ search: personSearch?.value, limit: 8 }),
+    queryFn: () => schedulesAPI.getHospitalStaff({ search: personSearch?.value, limit: 12 }),
     enabled: !!personSearch?.value?.trim(),
   });
-  const searchResults = searchData?.data?.data || searchData?.data || [];
+  const searchResults = useMemo(() => {
+    const raw = searchData?.data?.data || searchData?.data || [];
+    const set = new Set(existingUserIds);
+    return raw.filter(member => !set.has(member.id));
+  }, [searchData, existingUserIds]);
 
   // ── Row mutations ──
   const updateRow = (id, patch) => {
@@ -870,7 +1188,13 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
     const versionAtStart = saveVersion.current;
     setSaving(true);
     try {
-      await scheduleBuilderAPI.saveDraft(scheduleId, { rows, customCols });
+      if (canProposeChanges) {
+        await scheduleBuilderAPI.proposeChanges(scheduleId, { rows, customCols, week_organization: weekOrganization });
+        if (saveVersion.current === versionAtStart) setIsDirty(false);
+        if (!silent) toast.success('Proposition envoyée au chef de service');
+        return;
+      }
+      await scheduleBuilderAPI.saveDraft(scheduleId, { rows, customCols, week_organization: weekOrganization });
       // Une modification intervenue pendant la requête reste marquée à sauvegarder.
       if (saveVersion.current === versionAtStart) setIsDirty(false);
       qc.invalidateQueries({ queryKey: ['schedule-detail', scheduleId] });
@@ -885,7 +1209,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
     if (!isDirty || saving || schedule?.status !== 'draft') return undefined;
     const timer = setTimeout(() => saveDraft(true), 1200);
     return () => clearTimeout(timer);
-  }, [isDirty, rows, customCols]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isDirty, rows, customCols, weekOrganization]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const confirmSubmit = async () => {
     if (!confirm('Envoyer ce planning au surveillant du service ? Cette action est définitive.')) return;
@@ -897,6 +1221,16 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
       qc.invalidateQueries(['schedule-detail', scheduleId]);
     } catch { toast.error('Erreur lors de l\'envoi'); }
     finally { setSubmitting(false); }
+  };
+
+  const cancelSubmission = async () => {
+    const reason = window.prompt('Motif obligatoire de l’annulation :');
+    if (!reason?.trim()) return;
+    try {
+      await scheduleBuilderAPI.cancelSubmission(scheduleId, reason.trim());
+      toast.success('Envoi annulé : les surveillants ont été informés.');
+      qc.invalidateQueries({ queryKey: ['schedule-detail', scheduleId] });
+    } catch (err) { toast.error(err.response?.data?.message || 'Impossible d’annuler l’envoi.'); }
   };
 
   // ── Context menu handler ──
@@ -983,32 +1317,35 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
           ⊟ Colonnes
         </button>
 
-        {/* Validate */}
-        <button onClick={async () => {
-          try {
-            const r = await scheduleBuilderAPI.validate(scheduleId);
-            const ev = r.data.data;
-            if (ev.isValid) toast.success('✓ Aucun conflit !');
-            else toast(`${ev.errors?.length || 0} erreur(s) · ${ev.warnings?.length || 0} avert.`, { icon: '⚠️' });
-          } catch { toast.error('Erreur de validation'); }
-        }} style={{ ...btnGhost, color: '#10B981', borderColor: '#10B981' }}>
-          <IcoCheck /> Valider
-        </button>
-
-        {/* Export */}
-        <button onClick={() => {
-          const t = localStorage.getItem('token');
-          window.open(`${scheduleBuilderAPI.exportExcelUrl?.(scheduleId)}?token=${t}`, '_blank');
-        }} style={{ ...btnGhost, color: '#059669', borderColor: '#059669' }}>📊</button>
-        <button onClick={() => {
-          const t = localStorage.getItem('token');
-          window.open(`${scheduleBuilderAPI.exportPdfUrl?.(scheduleId)}?token=${t}`, '_blank');
-        }} style={{ ...btnGhost, color: '#EF4444', borderColor: '#EF4444' }}>📄</button>
-
+        {/* Exports du contenu du tableur et du calendrier detaille */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 6px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+          <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)' }}>Export</span>
+          <button type="button" onClick={() => downloadScheduleExport('pdf')} title="Exporter le contenu du tableur en PDF" style={{ ...btnGhost, padding: '5px 8px', color: '#DC2626', borderColor: '#FCA5A5' }}>PDF</button>
+          <button type="button" onClick={() => downloadScheduleExport('excel')} title="Exporter le contenu du tableur en Excel" style={{ ...btnGhost, padding: '5px 8px', color: '#059669', borderColor: '#6EE7B7' }}>Excel</button>
+          <button type="button" onClick={() => downloadScheduleExport('csv')} title="Exporter le contenu du tableur en CSV" style={{ ...btnGhost, padding: '5px 8px', color: '#2563EB', borderColor: '#93C5FD' }}>CSV</button>
+          <button type="button" onClick={() => downloadScheduleExport('calendar')} title="Exporter le calendrier detaille en PDF horizontal" style={{ ...btnGhost, padding: '5px 8px', color: '#7C3AED', borderColor: '#C4B5FD' }}>Calendrier PDF</button>
+        </div>
         {/* Add column button */}
         <button onClick={() => { setShowAddCol(true); setNewColName(''); setNewColType('text'); }} style={{ ...btnGhost, color: '#8B5CF6', borderColor: '#8B5CF6', display: 'flex', alignItems: 'center', gap: 5 }}>
           <IcoPlus /> Colonne
         </button>
+
+        {/* Transmettre au SG */}
+        {['service_supervisor', 'department_head'].includes(user?.roleCode) && schedule?.status === 'submitted' && (
+          <button
+            type="button"
+            onClick={handleNotifySG}
+            disabled={notifyingSG}
+            title="Envoyer une notification au Surveillant Général pour consultation et suggestions"
+            style={{
+              padding: '6px 12px', borderRadius: 7, border: '1px solid #7C3AED',
+              background: '#F3E8FF', color: '#6B21A8', fontSize: 11, fontWeight: 700,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5
+            }}
+          >
+            📧 Transmettre au SG
+          </button>
+        )}
 
         {/* Add staff button */}
         <button onClick={() => setPickerOpen(true)} style={{
@@ -1087,6 +1424,228 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
           )}
         </div>
       )}
+      {/* ══ BANNIÈRE CONSULTATION SURVEILLANT GÉNÉRAL ════════════════════ */}
+      {user?.roleCode === 'general_supervisor' && (
+        <div style={{
+          margin: '10px 14px', padding: '12px 16px', borderRadius: 12,
+          background: 'linear-gradient(135deg, #F3E8FF 0%, #E9D5FF 100%)',
+          border: '2px solid #9333EA', boxShadow: '0 4px 14px rgba(147, 51, 234, 0.2)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20 }}>👁️</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#581C87' }}>
+                Mode Consultation & Suggestions — Surveillant Général
+              </div>
+              <div style={{ fontSize: 11, color: '#6B21A8', marginTop: 2 }}>
+                Vous consultez ce planning de garde. Vous pouvez proposer des modifications qui seront immédiatement transmises au Chef de Service pour validation finale.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ BANNIÈRE PROPOSITION SURVEILLANT ════════════════════════════ */}
+      {pendingProposals.length > 0 && (
+        <div style={{
+          margin: '10px 14px', padding: '14px 18px', borderRadius: 12,
+          background: activeProposalId === 'all' || (!activeProposalId && pendingProposals.length > 1)
+            ? 'linear-gradient(135deg, #F3E8FF 0%, #E9D5FF 100%)'
+            : `linear-gradient(135deg, ${activePalette.bg} 0%, ${activePalette.bgDark} 100%)`,
+          border: `2px solid ${activeProposalId === 'all' || (!activeProposalId && pendingProposals.length > 1) ? '#9333EA' : activePalette.border}`,
+          boxShadow: `0 4px 16px ${activePalette.border}44`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12
+        }}>
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 800, color: activeProposalId === 'all' || (!activeProposalId && pendingProposals.length > 1) ? '#581C87' : activePalette.text }}>
+              <span style={{ fontSize: 16 }}>{activeProposalId === 'all' || (!activeProposalId && pendingProposals.length > 1) ? '🌈' : activePalette.dot}</span>
+              <span>
+                {pendingProposals.length > 1
+                  ? `${pendingProposals.length} propositions de modification en attente`
+                  : `Proposition de modification reçue de ${pendingProposal.first_name} ${pendingProposal.last_name} (${pendingProposal.proposer_role || 'Surveillant'})`}
+              </span>
+              <span style={{ padding: '2px 8px', borderRadius: 12, background: activeProposalId === 'all' || (!activeProposalId && pendingProposals.length > 1) ? '#E9D5FF' : activePalette.badgeBg, border: `1px solid ${activeProposalId === 'all' || (!activeProposalId && pendingProposals.length > 1) ? '#7E22CE' : activePalette.borderDark}`, fontSize: 10, fontWeight: 800, color: activeProposalId === 'all' || (!activeProposalId && pendingProposals.length > 1) ? '#6B21A8' : activePalette.textDark }}>
+                {pendingProposals.length > 1 ? (activeProposalId === 'all' || !activeProposalId ? 'Vue Combinée (Toutes)' : `Filtre: ${pendingProposal.first_name} ${pendingProposal.last_name}`) : 'En attente de décision'}
+              </span>
+            </div>
+
+            {/* Onglets si plusieurs propositions */}
+            {pendingProposals.length > 1 && (
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#581C87' }}>Mode d'affichage :</span>
+
+                {/* Tab vue combinée */}
+                <button
+                  type="button"
+                  onClick={() => setActiveProposalId('all')}
+                  style={{
+                    padding: '4px 12px', borderRadius: 14, fontSize: 11, fontWeight: 800, cursor: 'pointer',
+                    border: `1.5px solid ${activeProposalId === 'all' || !activeProposalId ? '#7E22CE' : '#C084FC'}`,
+                    background: activeProposalId === 'all' || !activeProposalId ? '#E9D5FF' : '#F3E8FF',
+                    color: '#581C87',
+                    boxShadow: activeProposalId === 'all' || !activeProposalId ? '0 2px 8px rgba(126,34,206,.3)' : 'none',
+                    display: 'flex', alignItems: 'center', gap: 5
+                  }}
+                >
+                  <span>🌈</span>
+                  <span>Toutes les propositions ({pendingProposals.length}) — Vue Combinée</span>
+                </button>
+
+                {/* Tabs individuels */}
+                {proposalsWithPalettes.map(prop => {
+                  const isSel = activeProposalId === prop.id;
+                  const pal = prop.palette;
+                  return (
+                    <button
+                      key={prop.id}
+                      type="button"
+                      onClick={() => setActiveProposalId(prop.id)}
+                      style={{
+                        padding: '4px 12px', borderRadius: 14, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        border: `1.5px solid ${isSel ? pal.borderDark : pal.border}`,
+                        background: isSel ? pal.badgeBg : pal.bg,
+                        color: pal.textDark,
+                        boxShadow: isSel ? `0 2px 8px ${pal.border}66` : 'none',
+                        display: 'flex', alignItems: 'center', gap: 5
+                      }}
+                    >
+                      <span>{pal.dot}</span>
+                      <span>{prop.proposerName} ({prop.roleTitle})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {pendingProposal.comment && (
+              <div style={{ fontSize: 11, color: activePalette.textDark, marginTop: 4, fontStyle: 'italic' }}>
+                💬 Note : "{pendingProposal.comment}"
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: activeProposalId === 'all' || (!activeProposalId && pendingProposals.length > 1) ? '#6B21A8' : activePalette.text, marginTop: 4, fontWeight: 600 }}>
+              💡 Chaque auteur a sa couleur propre. En cas de propositions multiples sur le même champ, la case s'affiche avec ⚡ (cliquez sur la case pour inspecter les propositions en conflit).
+            </div>
+          </div>
+
+          {user?.roleCode === 'department_head' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Bouton ACCEPTER TOUT si plusieurs propositions */}
+              {pendingProposals.length > 1 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      setDecidingProposal(true);
+                      await scheduleBuilderAPI.decideAllProposals(scheduleId, { decision: 'accepted' });
+                      toast.success(`✓ Les ${pendingProposals.length} propositions ont été acceptées et appliquées !`);
+                      refreshProposalData();
+                    } catch (err) {
+                      toast.error(err.response?.data?.message || 'Erreur lors de la décision générale');
+                    } finally {
+                      setDecidingProposal(false);
+                    }
+                  }}
+                  disabled={decidingProposal}
+                  style={{
+                    padding: '8px 16px', borderRadius: 8, border: 'none',
+                    background: 'linear-gradient(135deg, #15803D, #047857)', color: '#fff',
+                    fontWeight: 900, fontSize: 12, cursor: 'pointer', boxShadow: '0 4px 12px rgba(21, 128, 61, 0.4)',
+                    display: 'flex', alignItems: 'center', gap: 6
+                  }}
+                >
+                  ⚡ Accepter tout ({pendingProposals.length})
+                </button>
+              )}
+
+              {/* Bouton Approuver la proposition active */}
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    setDecidingProposal(true);
+                    await scheduleBuilderAPI.decideProposal(scheduleId, pendingProposal.id, { decision: 'accepted' });
+                    resolveProposalLocally(pendingProposal.id, 'accepted');
+                    toast.success(pendingProposals.length > 1 ? `✓ Proposition de ${pendingProposal.first_name} acceptée !` : '✓ Proposition acceptée et appliquée au planning !');
+                    refreshProposalData();
+                  } catch (err) {
+                    toast.error(err.response?.data?.message || 'Erreur lors de la décision');
+                  } finally {
+                    setDecidingProposal(false);
+                  }
+                }}
+                disabled={decidingProposal}
+                style={{
+                  padding: '8px 16px', borderRadius: 8, border: 'none',
+                  background: 'linear-gradient(135deg, #16A34A, #15803D)', color: '#fff',
+                  fontWeight: 800, fontSize: 12, cursor: 'pointer', boxShadow: '0 3px 10px rgba(22, 163, 74, 0.3)',
+                  display: 'flex', alignItems: 'center', gap: 6
+                }}
+              >
+                ✓ {pendingProposals.length > 1 ? 'Accepter cette proposition' : 'Approuver la proposition'}
+              </button>
+
+              {/* Bouton Rejeter tout si plusieurs propositions */}
+              {pendingProposals.length > 1 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      setDecidingProposal(true);
+                      await scheduleBuilderAPI.decideAllProposals(scheduleId, { decision: 'rejected' });
+                      toast.success('Toutes les propositions ont été refusées.');
+                      refreshProposalData();
+                    } catch (err) {
+                      toast.error(err.response?.data?.message || 'Erreur lors du refus');
+                    } finally {
+                      setDecidingProposal(false);
+                    }
+                  }}
+                  disabled={decidingProposal}
+                  style={{
+                    padding: '8px 14px', borderRadius: 8, border: '1px solid #DC2626',
+                    background: '#FEF2F2', color: '#991B1B',
+                    fontWeight: 800, fontSize: 12, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6
+                  }}
+                >
+                  ✕ Rejeter tout ({pendingProposals.length})
+                </button>
+              )}
+
+              {/* Bouton Rejeter la proposition active */}
+              {pendingProposals.length === 1 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      setDecidingProposal(true);
+                      await scheduleBuilderAPI.decideProposal(scheduleId, pendingProposal.id, { decision: 'rejected' });
+                      resolveProposalLocally(pendingProposal.id, 'rejected');
+                      toast.success('Proposition refusée.');
+                      refreshProposalData();
+                    } catch (err) {
+                      toast.error(err.response?.data?.message || 'Erreur lors du refus');
+                    } finally {
+                      setDecidingProposal(false);
+                    }
+                  }}
+                  disabled={decidingProposal}
+                  style={{
+                    padding: '8px 16px', borderRadius: 8, border: `1px solid ${activePalette.borderDark}`,
+                    background: activePalette.bg, color: activePalette.textDark,
+                    fontWeight: 800, fontSize: 12, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6
+                  }}
+                >
+                  ✕ Rejeter la proposition
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
 
       {/* ══ STATS BAR ════════════════════════════════════════════════════ */}
       <div style={{ display: 'flex', gap: 18, padding: '5px 14px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', fontSize: 11, alignItems: 'center' }}>
@@ -1117,20 +1676,25 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
         </div>
       )}
 
+      <div style={{ padding: '10px 14px', background: 'linear-gradient(90deg,#EEF2FF,#F5F3FF)', borderBottom: '1px solid #DDD6FE' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><strong style={{ fontSize: 12, color: '#4338CA' }}>Organisation temporelle</strong><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Groupes libres, sans modifier les gardes.</span><button type="button" onClick={() => setShowWeekOrganization(v => !v)} style={{ marginLeft: 'auto', padding: '5px 10px', borderRadius: 7, border: '1px solid #C4B5FD', background: '#fff', color: '#5B21B6', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>{showWeekOrganization ? 'Masquer' : 'Organiser les semaines'}</button></div>
+        {weekOrganization.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>{weekOrganization.map((group, index) => <span key={group.id || index} style={{ padding: '4px 9px', borderRadius: 20, background: `${group.color || '#6366F1'}18`, color: group.color || '#6366F1', border: `1px solid ${group.color || '#6366F1'}55`, fontSize: 10, fontWeight: 800 }}>{group.name} · {group.startDate} → {group.endDate}</span>)}</div>}
+        {showWeekOrganization && <div style={{ display: 'grid', gap: 7, marginTop: 10 }}>{weekOrganization.map((group, index) => <div key={group.id || index} style={{ display: 'grid', gridTemplateColumns: '28px minmax(90px,1fr) 140px 140px 26px', gap: 7 }}><input type="color" value={group.color || '#6366F1'} onChange={e => { setWeekOrganization(items => items.map((item, i) => i === index ? { ...item, color: e.target.value } : item)); dirty(); }} /><input value={group.name || ''} onChange={e => { setWeekOrganization(items => items.map((item, i) => i === index ? { ...item, name: e.target.value } : item)); dirty(); }} placeholder="Semaine A" style={weekInputStyle} /><input type="date" value={group.startDate || ''} onChange={e => { setWeekOrganization(items => items.map((item, i) => i === index ? { ...item, startDate: e.target.value } : item)); dirty(); }} style={weekInputStyle} /><input type="date" value={group.endDate || ''} onChange={e => { setWeekOrganization(items => items.map((item, i) => i === index ? { ...item, endDate: e.target.value } : item)); dirty(); }} style={weekInputStyle} /><button type="button" onClick={() => { setWeekOrganization(items => items.filter((_, i) => i !== index)); dirty(); }} style={{ border: 0, background: 'transparent', color: '#DC2626', cursor: 'pointer' }}>×</button></div>)}<button type="button" onClick={() => { setWeekOrganization(items => [...items, { id: `week-${Date.now()}`, name: `Semaine ${String.fromCharCode(65 + items.length)}`, startDate: dateKey(schedule.start_date), endDate: dateKey(schedule.end_date), color: ['#6366F1','#059669','#D97706','#DB2777'][items.length % 4] }]); dirty(); }} style={{ width: 'fit-content', padding: '6px 10px', borderRadius: 7, border: '1px dashed #8B5CF6', background: '#fff', color: '#6D28D9', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>+ Ajouter une semaine / groupe</button></div>}
+      </div>
       <div style={{ display: 'flex', gap: 6, padding: '8px 14px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
         <button type="button" onClick={() => setViewMode('table')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border-subtle)', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: viewMode === 'table' ? 'var(--color-primary)' : 'var(--bg-card)', color: viewMode === 'table' ? '#fff' : 'var(--text-secondary)' }}>📊 Tableur</button>
         <button type="button" onClick={() => setViewMode('calendar')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border-subtle)', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: viewMode === 'calendar' ? 'var(--color-primary)' : 'var(--bg-card)', color: viewMode === 'calendar' ? '#fff' : 'var(--text-secondary)' }}>📈 Calendrier synthétique</button>
         <button type="button" onClick={() => setViewMode('detailed')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border-subtle)', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: viewMode === 'detailed' ? 'var(--color-primary)' : 'var(--bg-card)', color: viewMode === 'detailed' ? '#fff' : 'var(--text-secondary)' }}>📅 Calendrier détaillé (par jour)</button>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', background: 'var(--color-primary-10)', borderBottom: '1px solid var(--color-primary-20)', color: 'var(--text-primary)', fontSize: 12 }}>
-        <span style={{ fontWeight: 800, color: 'var(--color-primary)' }}>Période globale du planning</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', background: isWeekendHolidaySchedule ? '#FFFBEB' : 'var(--color-primary-10)', borderBottom: isWeekendHolidaySchedule ? '1px solid #FDE68A' : '1px solid var(--color-primary-20)', color: 'var(--text-primary)', fontSize: 12 }}>
+        <span style={{ fontWeight: 800, color: isWeekendHolidaySchedule ? '#B45309' : 'var(--color-primary)' }}>{isWeekendHolidaySchedule ? 'Planning week-ends & jours fériés' : 'Période globale du planning'}</span>
         <span style={{ fontWeight: 700 }}>{dateKey(schedule.start_date) || '—'} 00:00:00 → {dateKey(schedule.end_date) || '—'} 23:59:59</span>
-        <span style={{ color: 'var(--text-muted)' }}>Le jour de début est inclus, et le jour de fin est le dernier jour de garde.</span>
+        <span style={{ color: 'var(--text-muted)' }}>{isWeekendHolidaySchedule ? `${days.length} date(s) autorisée(s) seulement : week-ends et jours fériés configurés.` : 'Le jour de début est inclus, et le jour de fin est le dernier jour de garde.'}</span>
       </div>
 
       {viewMode === 'calendar' && <PeriodTimeline rows={filteredRows} start={schedule.start_date} end={schedule.end_date} />}
-      {viewMode === 'detailed' && <DetailedCalendar rows={filteredRows} days={days} start={schedule.start_date} end={schedule.end_date} />}
+      {viewMode === 'detailed' && <DetailedCalendar rows={filteredRows} days={days} start={schedule.start_date} end={schedule.end_date} holidays={publicHolidays} weekOrganization={weekOrganization} />}
 
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0, display: viewMode === 'table' ? 'block' : 'none' }}>
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
@@ -1203,6 +1767,17 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
             {filteredRows.map((row, ri) => {
               const isDragging = draggingRow === ri;
               const isOver = dragOverRow === ri;
+              const rowProps = visibleCols.flatMap(c => getMultiCellProposals(row, c.key));
+              const hasRowConflict = visibleCols.some(c => getMultiCellProposals(row, c.key).length > 1) ||
+                customCols.some(c => getMultiCellProposals(row, c.key).length > 1) ||
+                Object.keys(row.shifts || {}).some(d => getMultiShiftProposals(row, d).length > 1);
+              const isRowProposedYellow = row.isProposedNewRow || rowProps.length > 0 ||
+                customCols.some(c => getMultiCellProposals(row, c.key).length > 0) ||
+                Object.keys(row.shifts || {}).some(d => getMultiShiftProposals(row, d).length > 0);
+
+              const firstRowProp = rowProps[0];
+              const rowPalette = firstRowProp ? firstRowProp.palette : activePalette;
+
               return (
                 <tr
                   key={row.id}
@@ -1213,55 +1788,137 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
                   onDrop={e => handleRowDrop(e, ri)}
                   onContextMenu={e => openContextMenu(e, ri)}
                   style={{
-                    background: isOver ? 'rgba(27,79,202,.07)' : ri % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-elevated)',
+                    background: isOver
+                      ? 'rgba(234,179,8,.25)'
+                      : hasRowConflict
+                      ? 'linear-gradient(135deg, rgba(254,249,195,.4) 0%, rgba(243,232,255,.5) 100%)'
+                      : isRowProposedYellow
+                      ? rowPalette.bg
+                      : ri % 2 === 0
+                      ? 'var(--bg-card)'
+                      : 'var(--bg-elevated)',
                     opacity: isDragging ? 0.4 : 1,
                     transition: 'background .1s',
-                    outline: isOver ? '2px solid var(--color-primary)' : 'none',
-                    boxShadow: isOver ? 'inset 0 0 0 2px rgba(27,79,202,.15)' : 'none',
+                    outline: isOver ? '2px solid var(--color-primary)' : hasRowConflict ? '2px dashed #9333EA' : isRowProposedYellow ? `1.5px solid ${rowPalette.borderDark}` : 'none',
+                    boxShadow: isOver ? 'inset 0 0 0 2px rgba(27,79,202,.15)' : isRowProposedYellow ? `inset 0 0 0 1px ${rowPalette.badgeBg}` : 'none',
                   }}
-                  onMouseEnter={e => { if (!isOver && !isDragging) e.currentTarget.style.background = 'rgba(27,79,202,.04)'; }}
-                  onMouseLeave={e => { if (!isOver) e.currentTarget.style.background = ri % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-elevated)'; }}
+                  onMouseEnter={e => { if (!isOver && !isDragging) e.currentTarget.style.background = isRowProposedYellow ? rowPalette.bgDark : 'rgba(27,79,202,.04)'; }}
+                  onMouseLeave={e => { if (!isOver) e.currentTarget.style.background = isRowProposedYellow ? rowPalette.bg : ri % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-elevated)'; }}
                 >
                   {/* Drag handle */}
-                  <td style={{ ...tdBase, cursor: 'grab', textAlign: 'center', color: 'var(--text-muted)', paddingLeft: 4 }}
+                  <td style={{ ...tdBase, cursor: 'grab', textAlign: 'center', color: isRowProposedYellow ? rowPalette.textDark : 'var(--text-muted)', paddingLeft: 4, background: isRowProposedYellow ? rowPalette.bgDark : undefined }}
                     onDragStart={e => handleRowDragStart(e, ri)}>
                     <IcoDrag />
                   </td>
 
                   {/* Row number */}
-                  <td style={{ ...tdBase, textAlign: 'center' }}>
-                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{ri + 1}</span>
+                  <td style={{ ...tdBase, textAlign: 'center', background: isRowProposedYellow ? rowPalette.bgDark : undefined }}>
+                    <span style={{ fontSize: 9, fontWeight: isRowProposedYellow ? 800 : 400, color: isRowProposedYellow ? rowPalette.textDark : 'var(--text-muted)' }}>{ri + 1}</span>
                   </td>
 
                   {/* Info columns — fixed + time */}
                   {visibleCols.map(col => {
                     const isEd = editingCell?.id === row.id && editingCell?.key === col.key;
                     const val = row[col.key] || '';
+                    const cellProps = getMultiCellProposals(row, col.key);
+                    const hasProps = cellProps.length > 0;
+                    const isConflict = cellProps.length > 1;
+                    const topProp = cellProps[0];
+                    const pal = topProp ? topProp.palette : activePalette;
+
+                    const cellBg = isConflict
+                      ? 'linear-gradient(135deg, #FEF9C3 0%, #E0F2FE 100%)'
+                      : hasProps ? pal.bgDark : undefined;
+
+                    const cellBorder = isConflict
+                      ? '2px dashed #9333EA'
+                      : hasProps ? `1.5px solid ${pal.borderDark}` : undefined;
+
+                    const tooltipTitle = isConflict
+                      ? `⚡ CONFLIT : ${cellProps.length} propositions sur ce champ :\n` + cellProps.map(p => `${p.palette.dot} ${p.proposerName} (${p.roleTitle}) : "${p.proposedVal}"${p.comment ? ` (${p.comment})` : ''}`).join('\n') + `\n\nCliquez pour inspecter et choisir la valeur !`
+                      : hasProps
+                      ? `⚠️ Proposition (${topProp.proposerName} - ${topProp.roleTitle}) :\nActuel : ${topProp.originalVal}\nProposé : ${topProp.proposedVal}`
+                      : undefined;
+
                     if (col.type === 'date') {
                       const isOpen = periodPicker?.rowId === row.id && periodPicker?.key === col.key;
+                      const displayVal = hasProps ? (isConflict ? cellProps.map(p => p.proposedVal).join(' / ') : topProp.proposedVal) : val;
                       return (
-                        <td key={col.key} style={{ ...tdBase }}>
-                          <button type="button" onClick={(event) => setPeriodPicker(isOpen ? null : { rowId: row.id, key: col.key, anchor: event.currentTarget.getBoundingClientRect() })}
-                            style={{ width: '100%', padding: '4px 5px', border: '1px solid var(--border-subtle)', borderRadius: 5, background: 'var(--bg-elevated)', color: val ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: 10, cursor: 'pointer', textAlign: 'left' }}>
-                            {val || 'Choisir une date'} 📅
+                        <td key={col.key} style={{ ...tdBase, background: cellBg, border: cellBorder }}>
+                          <button type="button"
+                            onClick={(event) => {
+                              if (hasProps) {
+                                setCellModalInfo({
+                                  rowId: row.id,
+                                  rowName: `${row.lastName} ${row.firstName}`.trim() || 'Personnel',
+                                  colKey: col.key,
+                                  colLabel: col.label,
+                                  originalVal: val || 'Non renseigné',
+                                  proposals: cellProps,
+                                  isShift: false
+                                });
+                              } else {
+                                setPeriodPicker(isOpen ? null : { rowId: row.id, key: col.key, anchor: event.currentTarget.getBoundingClientRect() });
+                              }
+                            }}
+                            title={tooltipTitle}
+                            style={{
+                              width: '100%', padding: '4px 5px', borderRadius: 5, fontSize: 10, cursor: 'pointer', textAlign: 'left',
+                              border: isConflict ? '1.5px solid #9333EA' : hasProps ? `1px solid ${pal.borderDark}` : '1px solid var(--border-subtle)',
+                              background: isConflict ? '#F3E8FF' : hasProps ? pal.bgDark : 'var(--bg-elevated)',
+                              color: isConflict ? '#581C87' : hasProps ? pal.textDark : val ? 'var(--text-primary)' : 'var(--text-muted)',
+                              fontWeight: hasProps ? 800 : 500
+                            }}>
+                            {displayVal || 'Choisir une date'} {isConflict ? '⚡' : hasProps ? pal.dot : '📅'}
                           </button>
                         </td>
                       );
                     }
                     if (col.type === 'time') {
-                      return <td key={col.key} style={{ ...tdBase }}>
-                        <input type="time" value={val || '07:00'} onChange={e => updateRow(row.id, { [col.key]: e.target.value })}
-                          style={{ fontSize: 10, border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', padding: 0, width: '100%', outline: 'none' }} />
-                      </td>;
+                      const displayTime = hasProps ? (isConflict ? topProp.proposedVal : topProp.proposedVal) : (val || '07:00');
+                      return (
+                        <td key={col.key} style={{ ...tdBase, background: cellBg, border: cellBorder }}
+                          onClick={() => {
+                            if (hasProps) {
+                              setCellModalInfo({
+                                rowId: row.id,
+                                rowName: `${row.lastName} ${row.firstName}`.trim() || 'Personnel',
+                                colKey: col.key,
+                                colLabel: col.label,
+                                originalVal: val || '07:00',
+                                proposals: cellProps,
+                                isShift: false
+                              });
+                            }
+                          }}
+                          title={tooltipTitle}>
+                          <input type="time" value={displayTime} onChange={e => updateRow(row.id, { [col.key]: e.target.value })}
+                            style={{ fontSize: 10, border: 'none', background: 'transparent', color: isConflict ? '#581C87' : hasProps ? pal.textDark : 'var(--text-primary)', fontWeight: hasProps ? 800 : 400, cursor: 'pointer', padding: 0, width: '100%', outline: 'none' }} />
+                        </td>
+                      );
                     }
                     const isPersonnelField = ['lastName', 'firstName', 'phone', 'matricule', 'roleName'].includes(col.key);
                     if (isPersonnelField) {
                       const isSearchCell = !row.userId && col.key === 'lastName';
+                      const displayPersonnelVal = hasProps ? (isConflict ? `${topProp.proposedVal} (+${cellProps.length - 1})` : topProp.proposedVal) : val;
                       return (
-                        <td key={col.key} style={{ ...tdBase, position: 'relative', maxWidth: col.w }}
+                        <td key={col.key} style={{ ...tdBase, position: 'relative', maxWidth: col.w, background: cellBg, border: cellBorder }}
+                          title={tooltipTitle}
                           onDragOver={e => e.preventDefault()}
                           onDrop={e => { const data = e.dataTransfer.getData('application/json'); if (data) { try { applyStaffToRow(row.id, JSON.parse(data)); } catch {} } }}
-                          onClick={() => { if (!row.userId) { setPickerRowId(row.id); setPickerOpen(true); } }}>
+                          onClick={() => {
+                            if (hasProps) {
+                              setCellModalInfo({
+                                rowId: row.id,
+                                rowName: `${row.lastName} ${row.firstName}`.trim() || 'Personnel',
+                                colKey: col.key,
+                                colLabel: col.label,
+                                originalVal: val || 'Non renseigné',
+                                proposals: cellProps,
+                                isShift: false
+                              });
+                            } else if (!row.userId) { setPickerRowId(row.id); setPickerOpen(true); }
+                          }}>
                           {isSearchCell ? (
                             <>
                               <input value={personSearch?.rowId === row.id ? personSearch.value : ''}
@@ -1278,21 +1935,36 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
                               )}
                             </>
                           ) : (
-                            <span title={row.userId ? 'Information verrouillée : issue de la fiche personnel' : 'Cliquez pour choisir un membre du personnel'} style={{ fontSize: 11, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: row.userId ? 'not-allowed' : 'pointer', color: val ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                              {val || 'Choisir...'}
+                            <span title={row.userId ? 'Information issue de la fiche personnel' : 'Cliquez pour choisir un membre du personnel'} style={{ fontSize: 11, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', color: isConflict ? '#581C87' : hasProps ? pal.textDark : val ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: hasProps ? 800 : 500 }}>
+                              {displayPersonnelVal || 'Choisir...'} {isConflict ? `⚡ (${cellProps.length} props)` : row.isProposedNewRow ? `${pal.dot} (Nouveau)` : hasProps ? pal.dot : ''}
                             </span>
                           )}
                         </td>
                       );
                     }
                     return (
-                      <td key={col.key} style={{ ...tdBase, position: 'relative', maxWidth: col.w }}
+                      <td key={col.key} style={{ ...tdBase, position: 'relative', maxWidth: col.w, background: cellBg, border: cellBorder }}
+                        title={tooltipTitle}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => {
                           const data = e.dataTransfer.getData('application/json');
                           if (data) { try { applyStaffToRow(row.id, JSON.parse(data)); } catch {} }
                         }}
-                        onClick={() => startEdit(row.id, col.key, val)}>
+                        onClick={() => {
+                          if (hasProps) {
+                            setCellModalInfo({
+                              rowId: row.id,
+                              rowName: `${row.lastName} ${row.firstName}`.trim() || 'Personnel',
+                              colKey: col.key,
+                              colLabel: col.label,
+                              originalVal: val || 'Non renseigné',
+                              proposals: cellProps,
+                              isShift: false
+                            });
+                          } else {
+                            startEdit(row.id, col.key, val);
+                          }
+                        }}>
                         {isEd ? (
                           <input ref={inputRef} value={editVal}
                             onChange={e => setEditVal(e.target.value)}
@@ -1300,8 +1972,8 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
                             onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); commitEdit(); } if (e.key === 'Escape') setEditingCell(null); }}
                             style={{ width: '100%', padding: '2px 4px', border: '2px solid var(--color-primary)', borderRadius: 4, fontSize: 11, background: 'var(--bg-card)', color: 'var(--text-primary)', outline: 'none' }} />
                         ) : (
-                          <span style={{ fontSize: 11, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'text', color: val ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                            {val || (row.isNew && col.key === 'lastName' ? '⊕ Glisser...' : '—')}
+                          <span style={{ fontSize: 11, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'text', color: isConflict ? '#581C87' : hasProps ? pal.textDark : val ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: hasProps ? 800 : 400 }}>
+                            {isConflict ? `${topProp.proposedVal} ⚡` : hasProps ? `${topProp.proposedVal} ${pal.dot}` : (val || (row.isNew && col.key === 'lastName' ? '⊕ Glisser...' : '—'))}
                           </span>
                         )}
                       </td>
@@ -1312,8 +1984,12 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
                   {customCols.map(col => {
                     const val = (row.custom || {})[col.key] || '';
                     const isEd = editingCell?.id === row.id && editingCell?.key === col.key;
+                    const propCustomVal = proposalMap?.mapByUserId[row.userId || row.id]?.custom?.[col.key];
+                    const isYellow = propCustomVal !== undefined && String(propCustomVal).trim() !== String(val).trim();
+
                     return (
-                      <td key={col.key} style={{ ...tdBase, maxWidth: col.w }}
+                      <td key={col.key} style={{ ...tdBase, maxWidth: col.w, background: isYellow ? activePalette.bgDark : undefined, border: isYellow ? `1.5px solid ${activePalette.borderDark}` : undefined }}
+                        title={isYellow ? `⚠️ Proposition du surveillant :\nActuel : ${val || '—'}\nProposé : ${propCustomVal}` : undefined}
                         onClick={() => startEdit(row.id, col.key, val)}>
                         {isEd ? (
                           <input ref={inputRef} type={col.type === 'number' ? 'number' : col.type === 'time' ? 'time' : 'text'}
@@ -1325,8 +2001,8 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
                             onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur(); }}
                             style={{ width: '100%', padding: '2px 4px', border: '2px solid var(--color-primary)', borderRadius: 4, fontSize: 11, background: 'var(--bg-card)', color: 'var(--text-primary)', outline: 'none' }} />
                         ) : (
-                          <span style={{ fontSize: 11, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'text', color: val ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                            {val || '—'}
+                          <span style={{ fontSize: 11, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'text', color: isYellow ? activePalette.textDark : val ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: isYellow ? 800 : 400 }}>
+                            {isYellow ? `${propCustomVal} ${activePalette.dot}` : (val || '—')}
                           </span>
                         )}
                       </td>
@@ -1337,13 +2013,21 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
                   {showDailyGrid && days.map(d => {
                     const dateStr = d.toISOString().split('T')[0];
                     const code = row.shifts[dateStr];
+                    const propShiftStatus = getProposedShiftStatus(row, dateStr);
                     return (
                       <td key={dateStr} style={{
                         ...tdBase, padding: '4px 3px', textAlign: 'center',
                         borderLeft: isWeekend(d) ? '1px solid rgba(99,102,241,.2)' : '1px solid var(--border-subtle)',
-                        background: isWeekend(d) && !code ? 'rgba(99,102,241,.04)' : undefined,
+                        background: propShiftStatus?.isProposed ? activePalette.bgDark : isWeekend(d) && !code ? 'rgba(99,102,241,.04)' : undefined,
                       }}>
-                        <ShiftCell code={code} onClick={() => cycleShift(row.id, dateStr)} />
+                        <ShiftCell
+                          code={code}
+                          isProposed={propShiftStatus?.isProposed}
+                          proposedCode={propShiftStatus?.proposedCode}
+                          originalCode={propShiftStatus?.originalCode}
+                          proposerName={propShiftStatus?.proposerName}
+                          onClick={() => cycleShift(row.id, dateStr)}
+                        />
                       </td>
                     );
                   })}
@@ -1404,10 +2088,10 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
 
         <button onClick={saveDraft} disabled={!isDirty || saving}
           style={{ ...btnGhost, opacity: isDirty ? 1 : 0.5, gap: 6, display: 'flex', alignItems: 'center', padding: '8px 16px' }}>
-          <IcoSave /> {saving ? 'Sauvegarde...' : 'Enregistrer brouillon'}
+          <IcoSave /> {saving ? 'Sauvegarde...' : canProposeChanges ? 'Envoyer la proposition' : 'Enregistrer brouillon'}
         </button>
 
-        <button onClick={confirmSubmit} disabled={submitting}
+        {schedule.status === 'draft' && <button onClick={confirmSubmit} disabled={submitting}
           style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '9px 20px',
             borderRadius: 9, border: 'none', background: 'linear-gradient(135deg, #059669, #047857)',
@@ -1415,7 +2099,9 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
             boxShadow: '0 4px 14px rgba(5,150,105,.3)', opacity: submitting ? 0.7 : 1,
           }}>
           <IcoSend /> {submitting ? 'Envoi...' : 'Confirmer — Envoyer au surveillant'}
-        </button>
+        </button>}
+        {canCancelSubmission && <button onClick={onManageProposals} style={{ ...btnGhost, color: 'var(--color-primary)', padding: '8px 14px' }}>Gérer les propositions</button>}
+        {canCancelSubmission && <button onClick={cancelSubmission} style={{ ...btnGhost, color: '#DC2626', borderColor: '#FCA5A5', padding: '8px 14px' }}>Annuler l’envoi</button>}
       </div>
 
       {/* ══ CONTEXT MENU ════════════════════════════════════════════════ */}
@@ -1438,7 +2124,45 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack }) {
         }}
         ownDeptId={departmentId}
         title="Ajouter du personnel"
+        excludeUserIds={existingUserIds}
       />
+
+      {/* ══ PERIOD DATE PICKER CALENDAR ════════════════════════════════ */}
+      {periodPicker && (
+        <PeriodCalendar
+          value={(rows.find(r => r.id === periodPicker.rowId) || {})[periodPicker.key]}
+          min={dateKey(schedule?.start_date)}
+          max={dateKey(schedule?.end_date)}
+          anchor={periodPicker.anchor}
+          isSpecialSchedule={isWeekendHolidaySchedule}
+          holidays={publicHolidays}
+          onSelect={(newDate) => {
+            updateRow(periodPicker.rowId, { [periodPicker.key]: newDate });
+            setPeriodPicker(null);
+          }}
+          onClose={() => setPeriodPicker(null)}
+        />
+      )}
+
+      {/* ══ CELL PROPOSAL CONFLICT MODAL ════════════════════════════════ */}
+      <CellProposalModal
+        cellInfo={cellModalInfo}
+        onClose={() => setCellModalInfo(null)}
+        onApplyValue={handleApplyProposalValue}
+      />
+
+      {showImportModal && (
+        <ImportModal
+          departmentId={departmentId || schedule?.department_id}
+          scheduleId={scheduleId}
+          onClose={() => setShowImportModal(false)}
+          onImported={() => {
+            setShowImportModal(false);
+            qc.invalidateQueries(['schedule-detail', scheduleId]);
+            refetch?.();
+          }}
+        />
+      )}
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }

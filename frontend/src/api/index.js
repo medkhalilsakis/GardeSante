@@ -255,6 +255,13 @@ export const adminAPI = {
   // Gestion directeur
   resetDirectorPwd:    (id, data) => api.put(`/admin/establishments/${id}/director/password`, data),
   toggleDirectorStatus:(id)       => api.put(`/admin/establishments/${id}/director/toggle-status`),
+
+  // Jours & Périodes Fériés
+  getHolidays:         (params)   => api.get('/admin/holidays', { params }),
+  createHoliday:       (data)     => api.post('/admin/holidays', data),
+  updateHoliday:       (id, data) => api.put(`/admin/holidays/${id}`, data),
+  deleteHoliday:       (id)       => api.delete(`/admin/holidays/${id}`),
+  seedTunisiaHolidays: (data)     => api.post('/admin/holidays/seed-tunisia', data),
 };
 
 // ── Schedule Builder API (Chef de Service) ───────────────────
@@ -262,20 +269,30 @@ export const scheduleBuilderAPI = {
   // Wizard
   getWizardContext: (params)        => api.get('/schedule-builder/wizard/context', { params }),
   // Génération
-  generate:         (data)          => api.post('/schedule-builder/generate', data),
+  generate:          (data)          => api.post('/schedule-builder/generate', data),
+  generateProposals: (data)          => api.post('/schedule-builder/generate-proposals', data),
+  confirmProposal:   (data)          => api.post('/schedule-builder/confirm-proposal', data),
   // Par planning
   getDetail:        (id)            => api.get(`/schedule-builder/${id}/detail`),
   validate:         (id)            => api.post(`/schedule-builder/${id}/validate`),
   validateShift:    (id, data)      => api.post(`/schedule-builder/${id}/validate-shift`, data),
   saveDraft:        (id, data)      => api.put(`/schedule-builder/${id}/draft`, data),
+  getChangeProposals: (id)          => api.get(`/schedule-builder/${id}/change-proposals`),
+  proposeChanges:   (id, data)      => api.post(`/schedule-builder/${id}/change-proposals`, data),
+  decideProposal:   (scheduleId, proposalId, data) => api.post(`/schedule-builder/${scheduleId}/change-proposals/${proposalId}/decision`, data),
+  decideAllProposals: (scheduleId, data) => api.post(`/schedule-builder/${scheduleId}/change-proposals/decide-all`, data),
   submit:           (id, data)      => api.post(`/schedule-builder/${id}/submit`, data),
+  notifySG:         (id, data)      => api.post(`/schedule-builder/${id}/notify-sg`, data),
+  cancelSubmission: (id, reason)    => api.post(`/schedule-builder/${id}/cancel-submission`, { reason }),
   createSnapshot:   (id)            => api.post(`/schedule-builder/${id}/snapshot`),
   // Import
   importPreview:    (formData)      => api.post('/schedule-builder/import/preview', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   importConfirm:    (data)          => api.post('/schedule-builder/import/confirm', data),
-  // Export
-  exportExcelUrl:   (id)            => `${api.defaults.baseURL}/schedule-builder/${id}/export/excel`,
-  exportPdfUrl:     (id)            => `${api.defaults.baseURL}/schedule-builder/${id}/export/pdf`,
+  // Export authentifie
+  exportExcel:      (id)            => api.get(`/schedule-builder/${id}/export/excel`, { responseType: 'blob' }),
+  exportCSV:        (id)            => api.get(`/schedule-builder/${id}/export/csv`, { responseType: 'blob' }),
+  exportPDF:        (id)            => api.get(`/schedule-builder/${id}/export/pdf`, { responseType: 'blob' }),
+  exportCalendarPDF:(id)            => api.get(`/schedule-builder/${id}/export/detailed-calendar-pdf`, { responseType: 'blob' }),
 };
 
 // ── Schedule Config API (Colonnes, Règles, Templates) ────────

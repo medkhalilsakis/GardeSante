@@ -212,6 +212,7 @@ function CreateScheduleModal({ departments, onClose, onSuccess }) {
     departmentId: departments[0]?.id || '',
     startDate: new Date().toISOString().split('T')[0],
     endDate: '',
+    scheduleType: 'normal',
     notes: '',
   });
   const [loading, setLoading] = useState(false);
@@ -226,6 +227,7 @@ function CreateScheduleModal({ departments, onClose, onSuccess }) {
         departmentId: form.departmentId,
         startDate: form.startDate,
         endDate: form.endDate,
+        scheduleType: form.scheduleType,
         notes: form.notes,
       });
       toast.success('Planning créé avec succès');
@@ -249,6 +251,13 @@ function CreateScheduleModal({ departments, onClose, onSuccess }) {
             <div className="form-group">
               <label className="form-label">{t('schedules.schedule_name')} *</label>
               <input className="form-control" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex: Planning Urgences Juillet 2025" required />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Type de planning *</label>
+              <select className="form-control" value={form.scheduleType} onChange={e => setForm(f => ({ ...f, scheduleType: e.target.value }))} required>
+                <option value="normal">📋 Planning Normal (Tous les jours)</option>
+                <option value="special_weekend_holiday">⚡ Planning Spécial (Week-ends & Jours Fériés uniquement)</option>
+              </select>
             </div>
             <div className="form-group">
               <label className="form-label">{t('common.department')} *</label>
