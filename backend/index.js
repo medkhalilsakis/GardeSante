@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const app = require('./src/app');
 const { initializeDatabase } = require('./src/config/database');
+const { startScheduleActivationJob } = require('./src/jobs/schedule-activation');
 
 const PORT = process.env.PORT || 5000;
 
@@ -54,6 +55,10 @@ app.set('userSockets', userSockets);
 const start = async () => {
   try {
     await initializeDatabase();
+
+    // Mise en marche automatique des plannings dont la date de début est
+    // atteinte : une passe immédiate, puis toutes les 30 minutes.
+    startScheduleActivationJob(app);
 
     const maxAttempts = 5;
     let attempt = 0;

@@ -3,6 +3,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { departmentsAPI, usersAPI, jobTitlesAPI } from '../../api';
 import UnifiedRoleSelect from '../../components/ui/UnifiedRoleSelect';
+import NoteComposer from '../../components/notes/NoteComposer';
+import NotesFeed from '../../components/notes/NotesFeed';
+import HospitalGuardCalendar from '../../components/calendar/HospitalGuardCalendar';
+import ScopedStatsPanel from '../../components/statistics/ScopedStatsPanel';
+import StaffLoanStatsPanel from '../../components/statistics/StaffLoanStatsPanel';
+import LeavesPanel from './components/LeavesPanel';
+import HospitalGuardsPanel from './components/HospitalGuardsPanel';
+import StaffHistoryPanel from './components/StaffHistoryPanel';
+import ContextBadge from '../../components/layout/ContextBadge';
 import { useAuthStore } from '../../store';
 import toast from 'react-hot-toast';
 
@@ -20,6 +29,14 @@ const BuildingIcon = () => <Icon path="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2
 const ShieldIcon = () => <Icon path="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />;
 const CheckIcon  = () => <Icon path="M20 6L9 17l-5-5" />;
 const XIcon      = () => <Icon path="M18 6L6 18M6 6l12 12" />;
+
+// Le surveillant général couvre l'hôpital entier : il n'appartient à aucun
+// service et ne peut donc être ni chef ni surveillant d'un service. Le serveur
+// refuse déjà ces affectations (hospital-wide-roles.js) ; on le retire aussi
+// des listes de candidats pour ne pas proposer une action vouée à échouer.
+const HOSPITAL_WIDE_ROLES = ['general_supervisor'];
+const deptCandidates = (members) =>
+  (members || []).filter(m => !HOSPITAL_WIDE_ROLES.includes(m.role_code));
 
 // ─── KPI Card ────────────────────────────────────────────────
 const KpiCard = ({ icon, label, value, sub, color }) => (
@@ -124,8 +141,15 @@ export default function DirectorDashboard() {
   const { section } = useParams();
   const navigate = useNavigate();
 
-  const activeTab = section === 'personnel' ? 'staff'
-                  : section === 'services'  ? 'departments'
+  const activeTab = section === 'personnel'  ? 'staff'
+                  : section === 'services'   ? 'departments'
+                  : section === 'notes'      ? 'notes'
+                  : section === 'calendrier' ? 'calendrier'
+                  : section === 'statistiques' ? 'stats'
+                  : section === 'prets'      ? 'loan-stats'
+                  : section === 'conges'     ? 'conges'
+                  : section === 'gardes'     ? 'gardes'
+                  : section === 'historique' ? 'historique'
                   : 'overview';
 
   // ── État des modals ──────────────────────────────────────
@@ -133,7 +157,7 @@ export default function DirectorDashboard() {
   const [headModal,       setHeadModal]       = useState(null);
   const [supervModal,     setSupervModal]     = useState(null);
   const [userModal,       setUserModal]       = useState(null);
-  const [staffFilter,     setStaffFilter]     = useState({ search: '', roleCode: '', isActive: '' });
+  const [staffFilter,     setStaffFilter]     = useState({ search: '', roleCode: '', isActive: '', departmentId: '' });
   const [deptForm,        setDeptForm]        = useState({});
   const [userForm,        setUserForm]        = useState({});
   const [selectedUserId,  setSelectedUserId]  = useState('');
@@ -151,6 +175,7 @@ export default function DirectorDashboard() {
     queryFn: () => usersAPI.getAll({
       search: staffFilter.search || undefined,
       roleCode: staffFilter.roleCode || undefined,
+      departmentId: staffFilter.departmentId || undefined,
       isActive: staffFilter.isActive !== '' ? staffFilter.isActive : undefined,
     }).then(r => r.data),
   });
@@ -159,6 +184,14 @@ export default function DirectorDashboard() {
   const { data: availableRoles = [] } = useQuery({
     queryKey: ['roles-available'],
     queryFn: () => usersAPI.rolesAvailable().then(r => r.data.data),
+  });
+  // Rôles métier cumulables avec le titre « Chef de service ». Clé distincte de
+  // ['roles-available'] : ce cache est partagé avec UnifiedRoleSelect, qui ne
+  // lit que `data` — deux queryFn sur une même clé se marcheraient dessus.
+  const { data: secondaryRoles = [] } = useQuery({
+    queryKey: ['roles-secondary'],
+    queryFn: () => usersAPI.rolesAvailable().then(r => r.data.secondaryRoles || []),
+    staleTime: 120000,
   });
   const { data: jobTitles = [] } = useQuery({
     queryKey: ['job-titles', 'all'],
@@ -203,6 +236,13 @@ export default function DirectorDashboard() {
     onSuccess: () => { toast.success('Surveillant désigné'); setSupervModal(null); invalidate(); },
     onError:   (e) => toast.error(e.response?.data?.message || 'Erreur'),
   });
+  // Un service peut compter PLUSIEURS surveillants : on retire donc une
+  // personne précise, sans toucher aux autres surveillants du service.
+  const removeSuperv = useMutation({
+    mutationFn: ({ deptId, userId }) => departmentsAPI.removeSupervisor(deptId, userId),
+    onSuccess: () => { toast.success('Surveillant retiré'); invalidate(); },
+    onError:   (e) => toast.error(e.response?.data?.message || 'Erreur'),
+  });
   const createUser = useMutation({
     mutationFn: (d) => usersAPI.create(d),
     onSuccess: (res) => { toast.success(res.data.message || 'Compte créé'); setUserModal(null); setUserForm({}); invalidate(); },
@@ -242,6 +282,8 @@ export default function DirectorDashboard() {
   const selectedTitle = jobTitles.find(t => t.id === userForm.jobTitleId);
   const personnelNeedsDept = ROLES_NEED_DEPT.includes(userForm.roleCode)
     || ['medical', 'paramedical'].includes(selectedTitle?.category);
+  // Rôle transversal (surveillant général) : aucun service, comme le directeur.
+  const roleIsHospitalWide = HOSPITAL_WIDE_ROLES.includes(userForm.roleCode);
   const submitUser = () => {
     if (!userForm.firstName || !userForm.lastName || !userForm.email || !userForm.roleCode) {
       return toast.error('Prenom, Nom, Email et Role/Titre sont obligatoires');
@@ -251,6 +293,13 @@ export default function DirectorDashboard() {
     }
     if (personnelNeedsDept && !userForm.departmentId) {
       return toast.error('Le personnel medical ou paramedical doit obligatoirement etre affecte a un service.');
+    }
+    // Le champ service est masqué pour les rôles transversaux, mais il peut
+    // rester renseigné si le rôle a été changé après coup : on le neutralise
+    // ici, sinon le serveur refuserait la création en 400.
+    if (roleIsHospitalWide) {
+      const { departmentId, ...rest } = userForm;
+      return createUser.mutate(rest);
     }
     createUser.mutate(userForm);
   };
@@ -268,6 +317,9 @@ export default function DirectorDashboard() {
 
   return (
     <div>
+      {/* Appartenance — hôpital dirigé et service(s) de rattachement. */}
+      <ContextBadge variant="header" />
+
       {/* ── En-tête ── */}
       <div className="page-header" style={{ marginBottom: 'var(--space-6)' }}>
         <div>
@@ -309,11 +361,19 @@ export default function DirectorDashboard() {
       <div style={{
         display: 'flex', gap: 4, background: 'var(--bg-elevated)',
         borderRadius: 10, padding: 4, marginBottom: 'var(--space-6)', width: 'fit-content',
+        flexWrap: 'wrap',
       }}>
         {[
           { id: 'overview',     label: '📊 Vue d\'ensemble', path: '/director' },
           { id: 'departments',  label: '🏥 Services',         path: '/director/services' },
           { id: 'staff',        label: '👤 Personnel',        path: '/director/personnel' },
+          { id: 'gardes',       label: '🛡️ Gardes',           path: '/director/gardes' },
+          { id: 'conges',       label: '🏖️ Congés',           path: '/director/conges' },
+          { id: 'notes',        label: '📢 Notes',            path: '/director/notes' },
+          { id: 'calendrier',   label: '📅 Calendrier',       path: '/director/calendrier' },
+          { id: 'stats',        label: '📊 Statistiques',     path: '/director/statistiques' },
+          { id: 'loan-stats',   label: '🤝 Prêts personnel',  path: '/director/prets' },
+          { id: 'historique',   label: '🕓 Historique',       path: '/director/historique' },
         ].map(t => (
           <button key={t.id} onClick={() => navigate(t.path)} style={{
             padding: '8px 20px', borderRadius: 8, border: 'none', cursor: 'pointer',
@@ -375,7 +435,7 @@ export default function DirectorDashboard() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
-                    {['Code','Service','Type','Étage','Chef de Service','Surveillant','Personnel','Actions'].map(h => (
+                    {['Code','Service','Type','Étage','Chef de Service','Surveillants','Personnel','Actions'].map(h => (
                       <th key={h} style={{
                         padding: '10px 16px', textAlign: 'left', fontSize: 11,
                         fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase',
@@ -427,21 +487,44 @@ export default function DirectorDashboard() {
                           </button>
                         )}
                       </td>
-                      {/* Surveillant */}
+                      {/* Surveillants — plusieurs possibles pour un même service */}
                       <td style={{ padding: '12px 16px' }}>
-                        {dept.supervisor_id ? (
-                          <div style={{ fontSize: 'var(--font-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
-                            {dept.supervisor_first_name} {dept.supervisor_last_name}
-                          </div>
-                        ) : (
-                          <button style={{
-                            fontSize: 11, padding: '3px 10px', borderRadius: 6,
-                            border: '1px dashed var(--color-info)', background: 'transparent',
-                            color: 'var(--color-info)', cursor: 'pointer', fontFamily: 'inherit',
-                          }} onClick={() => setSupervModal(dept.id)}>
-                            + Désigner
-                          </button>
-                        )}
+                        {(() => {
+                          // `supervisors` est agrégé par le backend ; `supervisor_id`
+                          // reste renseigné avec le premier pour compatibilité.
+                          const sup = Array.isArray(dept.supervisors) ? dept.supervisors
+                            : (dept.supervisor_id
+                              ? [{ id: dept.supervisor_id, firstName: dept.supervisor_first_name, lastName: dept.supervisor_last_name }]
+                              : []);
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                              {sup.map(s => (
+                                <span key={s.id} style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+                                  background: 'var(--color-info-10, #0EA5E920)', color: 'var(--color-info)',
+                                }}>
+                                  {s.firstName} {s.lastName}
+                                  <span
+                                    title="Retirer ce surveillant"
+                                    onClick={() => {
+                                      if (window.confirm(`Retirer ${s.firstName} ${s.lastName} des surveillants de "${dept.name}" ?`))
+                                        removeSuperv.mutate({ deptId: dept.id, userId: s.id });
+                                    }}
+                                    style={{ cursor: 'pointer', opacity: .65, fontWeight: 800, lineHeight: 1 }}
+                                  >×</span>
+                                </span>
+                              ))}
+                              <button style={{
+                                fontSize: 11, padding: '3px 10px', borderRadius: 6,
+                                border: '1px dashed var(--color-info)', background: 'transparent',
+                                color: 'var(--color-info)', cursor: 'pointer', fontFamily: 'inherit',
+                              }} onClick={() => setSupervModal(dept.id)}>
+                                {sup.length ? '+ Ajouter' : '+ Désigner'}
+                              </button>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                         <span style={{
@@ -509,6 +592,14 @@ export default function DirectorDashboard() {
                 <option key={r.id} value={r.code}>{r.name}</option>
               ))}
             </Select>
+            <Select value={staffFilter.departmentId}
+              onChange={e => setStaffFilter(f => ({ ...f, departmentId: e.target.value }))}
+              style={{ width: 190 }}>
+              <option value="">Tous les services</option>
+              {departments.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </Select>
             <Select value={staffFilter.isActive}
               onChange={e => setStaffFilter(f => ({ ...f, isActive: e.target.value }))}
               style={{ width: 150 }}>
@@ -527,7 +618,7 @@ export default function DirectorDashboard() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
-                    {['Matricule','Nom','Rôle','Spécialité','Accès','Statut','Actions'].map(h => (
+                    {['Matricule','Nom','Rôle','Service(s)','Spécialité','Accès','Statut','Actions'].map(h => (
                       <th key={h} style={{
                         padding: '10px 16px', textAlign: 'left', fontSize: 11,
                         fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase',
@@ -551,6 +642,42 @@ export default function DirectorDashboard() {
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <RoleBadge code={u.role_code} name={u.role_name} />
+                        {/* « Chef de service » est un titre : le rôle métier réel
+                            s'affiche à côté quand il est renseigné. */}
+                        {u.secondary_role_name && (
+                          <div style={{ marginTop: 4 }}>
+                            <span style={{
+                              fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+                              background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
+                              border: '1px dashed var(--border-default)',
+                            }} title="Rôle métier cumulé avec le titre de chef de service">
+                              + {u.secondary_role_name}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      {/* Service(s) d'appartenance */}
+                      <td style={{ padding: '12px 16px' }}>
+                        {(() => {
+                          const depts = Array.isArray(u.departments) ? u.departments : [];
+                          if (!depts.length) {
+                            return <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>Aucun service</span>;
+                          }
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+                              {depts.map(d => (
+                                <span key={d.id} style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+                                  background: d.isHead ? '#FEF3C7' : 'var(--bg-elevated)',
+                                  color: d.isHead ? '#B45309' : 'var(--text-secondary)',
+                                }} title={d.isHead ? `Chef du service ${d.name}` : d.name}>
+                                  {d.isHead && '⭐'}{d.name}
+                                </span>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td style={{ padding: '12px 16px', fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>
                         {u.speciality || '—'}
@@ -671,7 +798,7 @@ export default function DirectorDashboard() {
           <Field label="Personnel du service" required>
             <Select value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)}>
               <option value="">— Choisir —</option>
-              {(deptDetail?.members || []).map(m => (
+              {deptCandidates(deptDetail?.members).map(m => (
                 <option key={m.id} value={m.id}>
                   {m.first_name} {m.last_name} ({m.role_name})
                 </option>
@@ -696,14 +823,44 @@ export default function DirectorDashboard() {
 
       {/* ══ MODAL : Désigner Surveillant ══ */}
       {supervModal && (
-        <Modal title="Désigner le Surveillant de Service" onClose={() => setSupervModal(null)}>
-          <p style={{ fontSize: 'var(--font-sm)', color: 'var(--text-secondary)', marginBottom: 16 }}>
+        <Modal title="Désigner un Surveillant de Service" onClose={() => setSupervModal(null)}>
+          <p style={{ fontSize: 'var(--font-sm)', color: 'var(--text-secondary)', marginBottom: 8 }}>
             Sélectionnez l'acteur qui sera Surveillant de ce service.
           </p>
+          <div style={{
+            background: 'var(--color-info-10, #0EA5E915)', border: '1px solid var(--color-info-30, #0EA5E940)',
+            borderRadius: 8, padding: '8px 12px', marginBottom: 16,
+            fontSize: 'var(--font-xs)', color: 'var(--color-info)',
+          }}>
+            ℹ️ Un service ne peut avoir qu'<strong>un seul chef</strong>, mais il peut compter
+            <strong> plusieurs surveillants</strong>. Désigner une personne ici l'<strong>ajoute</strong> à
+            la liste sans retirer le rôle aux surveillants déjà en place.
+          </div>
+          {/* Surveillants déjà en place */}
+          {(() => {
+            const dept = departments.find(d => d.id === supervModal);
+            const sup  = Array.isArray(dept?.supervisors) ? dept.supervisors : [];
+            if (!sup.length) return null;
+            return (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 'var(--font-xs)', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                  Surveillants actuels ({sup.length})
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {sup.map(s => (
+                    <span key={s.id} style={{
+                      fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
+                      background: 'var(--bg-elevated)', color: 'var(--text-primary)',
+                    }}>{s.firstName} {s.lastName}</span>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           <Field label="Personnel du service" required>
             <Select value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)}>
               <option value="">— Choisir —</option>
-              {(deptDetail?.members || []).map(m => (
+              {deptCandidates(deptDetail?.members).map(m => (
                 <option key={m.id} value={m.id}>
                   {m.first_name} {m.last_name} ({m.role_name})
                 </option>
@@ -771,6 +928,8 @@ export default function DirectorDashboard() {
                   ...f,
                   roleCode:   rc  || null,
                   jobTitleId: jid || null,
+                  // Changer le role principal invalide un eventuel role secondaire
+                  secondaryRoleCode: rc === 'department_head' ? f.secondaryRoleCode : null,
                 }));
               }}
             />
@@ -780,6 +939,36 @@ export default function DirectorDashboard() {
               </div>
             )}
           </div>
+
+          {/* Role secondaire — « Chef de service » est un TITRE, pas un metier.
+              On garde donc la possibilite de cumuler le titre avec un vrai role
+              metier (medecin senior, resident...). Purement descriptif. */}
+          {userForm.roleCode === 'department_head' && (
+            <div style={{
+              marginBottom: 16, padding: '10px 14px',
+              background: '#FEF3C7', border: '1px solid #F59E0B55', borderRadius: 8,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 'var(--font-xs)', fontWeight: 700, color: '#92400E' }}>
+                  ⭐ « Chef de service » est un titre, pas un poste
+                </span>
+                <span style={{ fontSize: 10, color: '#B45309', fontWeight: 600 }}>Optionnel</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#92400E', marginBottom: 8 }}>
+                Choisissez le <strong>rôle métier</strong> réel de cette personne (ex : médecin sénior qui est chef de service). Le rôle secondaire n'ouvre aucun accès supplémentaire.
+              </div>
+              <Select
+                value={userForm.secondaryRoleCode || ''}
+                onChange={e => setUserForm(f => ({ ...f, secondaryRoleCode: e.target.value || null }))}
+                style={{ width: '100%', background: '#FFF' }}
+              >
+                <option value="">— Aucun rôle secondaire —</option>
+                {(secondaryRoles || []).map(r => (
+                  <option key={r.id} value={r.code}>{r.name}</option>
+                ))}
+              </Select>
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Field label="Grade">
               <Input value={userForm.grade || ''} onChange={e => setUserForm(f => ({ ...f, grade: e.target.value }))} />
@@ -791,7 +980,18 @@ export default function DirectorDashboard() {
               </Select>
             </Field>
           </div>
-          {/* Service — pleine largeur si requis */}
+          {/* Service — pleine largeur si requis. Masqué pour les rôles
+              transversaux : le surveillant général couvre tout l'hôpital. */}
+          {roleIsHospitalWide ? (
+            <div style={{
+              background: 'var(--color-info-10, #0EA5E915)', border: '1px solid var(--color-info-30, #0EA5E940)',
+              borderRadius: 8, padding: '10px 14px',
+              fontSize: 'var(--font-xs)', color: 'var(--color-info)',
+            }}>
+              ℹ️ Le <strong>surveillant général</strong> couvre l'hôpital entier, comme le directeur :
+              il n'est rattaché à <strong>aucun service</strong>.
+            </div>
+          ) : (
           <Field
             label={personnelNeedsDept ? 'Service (obligatoire *)' : 'Service (optionnel)'}
             required={personnelNeedsDept}
@@ -808,10 +1008,11 @@ export default function DirectorDashboard() {
             </Select>
             {personnelNeedsDept && (
               <div style={{ fontSize: 11, color: '#F59E0B', marginTop: 4, fontWeight: 600 }}>
-                Ce role necessite un service. Un seul chef et un seul surveillant par service.
+                Ce role necessite un service. Un seul chef de service par service, mais plusieurs surveillants sont possibles.
               </div>
             )}
           </Field>
+          )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
             <button className="btn btn-secondary" onClick={() => { setUserModal(null); setUserForm({}); }}>Annuler</button>
@@ -821,6 +1022,38 @@ export default function DirectorDashboard() {
           </div>
         </Modal>
       )}
+
+      {/* ══ TAB : NOTES & CIRCULAIRES ══ */}
+      {activeTab === 'notes' && (
+        <div>
+          <NoteComposer scopeLabel="tout le personnel de l'hôpital" />
+          <NotesFeed />
+        </div>
+      )}
+
+      {/* ══ TAB : CALENDRIER HÔPITAL (lecture seule) ══ */}
+      {activeTab === 'calendrier' && (
+        <HospitalGuardCalendar title="Calendrier des gardes de l'hôpital" />
+      )}
+
+      {/* ══ TAB : STATISTIQUES DE L'HÔPITAL ══ */}
+      {activeTab === 'stats' && (
+        <ScopedStatsPanel title="Statistiques de l'hôpital" />
+      )}
+
+      {/* ══ TAB : STATISTIQUES DES PRÊTS DE PERSONNEL ══ */}
+      {activeTab === 'loan-stats' && (
+        <StaffLoanStatsPanel title="Prêts de personnel — statistiques de l'hôpital" />
+      )}
+
+      {/* ══ TAB : GARDES DE L'HÔPITAL (lecture seule) ══ */}
+      {activeTab === 'gardes' && <HospitalGuardsPanel />}
+
+      {/* ══ TAB : CONGÉS DU PERSONNEL ══ */}
+      {activeTab === 'conges' && <LeavesPanel />}
+
+      {/* ══ TAB : HISTORIQUE DU PERSONNEL (immuable) ══ */}
+      {activeTab === 'historique' && <StaffHistoryPanel />}
     </div>
   );
 }

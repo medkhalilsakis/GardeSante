@@ -39,6 +39,14 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // Compte archivé par le Super Admin : la session en cours n'a plus aucun
+    // droit, on la ferme immédiatement plutôt que de laisser l'écran se vider.
+    if (error.response?.status === 403 && error.response?.data?.code === 'ACCOUNT_ARCHIVED') {
+      useAuthStore.getState().logout();
+      window.location.href = '/login';
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (error.response?.data?.code === 'TOKEN_EXPIRED') {
         if (isRefreshing) {
@@ -107,6 +115,15 @@ export const usersAPI = {
   rolesAvailable: () => api.get('/users/roles-available'),
 };
 
+// Archivage de comptes — Super Admin uniquement.
+// Archiver ≠ clôturer (`deactivate`) ≠ supprimer : le compte est bloqué
+// intégralement mais conservé, et réactivable à tout moment.
+export const userArchiveAPI = {
+  getAll:    (params)      => api.get('/user-archive', { params }),
+  archive:   (id, data)    => api.put(`/user-archive/${id}/archive`, data || {}),
+  unarchive: (id)          => api.put(`/user-archive/${id}/unarchive`),
+};
+
 export const jobTitlesAPI = {
   getAll:  (params) => api.get('/users/job-titles', { params }),
   create:  (data)   => api.post('/users/job-titles', data),
@@ -122,6 +139,7 @@ export const departmentsAPI = {
   delete: (id) => api.delete(`/departments/${id}`),
   setHead: (id, userId) => api.put(`/departments/${id}/head`, { userId }),
   setSupervisor: (id, userId) => api.put(`/departments/${id}/supervisor`, { userId }),
+  removeSupervisor: (id, userId) => api.delete(`/departments/${id}/supervisor/${userId}`),
   addMember: (id, data) => api.post(`/departments/${id}/members`, data),
   removeMember: (id, userId) => api.delete(`/departments/${id}/members/${userId}`),
 };
@@ -132,8 +150,8 @@ export const schedulesAPI = {
   create: (data) => api.post('/schedules', data),
   update: (id, data) => api.put(`/schedules/${id}`, data),
   submit: (id, data) => api.post(`/schedules/${id}/submit`, data),
-  approve: (id, data) => api.post(`/schedules/${id}/approve`, data),
-  reject: (id, data) => api.post(`/schedules/${id}/reject`, data),
+  // Plus d'approbation ni de refus : l'envoi met le planning en marche.
+  // Les surveillants proposent des modifications (scheduleBuilderAPI.createProposal).
   generate: (data) => api.post('/schedules/generate', data),
   getConflicts: (id) => api.get(`/schedules/${id}/conflicts`),
   // Nouvelles actions CRUD
@@ -164,12 +182,99 @@ export const absencesAPI = {
   cancel: (id) => api.put(`/absences/${id}/cancel`),
 };
 
+export const absencesShiftAPI = {
+  report: (data) => api.post('/absences-shift', data),
+  getAll: (params) => api.get('/absences-shift', { params }),
+};
+
+export const leavesAPI = {
+  getAll: (params) => api.get('/leaves', { params }),
+  getTypes: () => api.get('/leaves/types'),
+  create: (data) => api.post('/leaves', data),
+  // Annulation (Lot 6) : le congé passe en `cancelled`, la ligne n'est jamais
+  // supprimée — la trace reste lisible dans l'historique.
+  cancel: (id) => api.put(`/leaves/${id}/cancel`),
+};
+
+export const staffLoansAPI = {
+  request: (data) => api.post('/staff-loans', data),
+  getAll: (params) => api.get('/staff-loans', { params }),
+  decide: (id, data) => api.put(`/staff-loans/${id}/decide`, data),
+  // Portée décidée par le serveur (établissement pour un directeur, services
+  // dont on est chef pour un chef de service).
+  stats: (params) => api.get('/staff-loans/stats', { params }),
+};
+
+export const notesAPI = {
+  getAll: (params) => api.get('/notes', { params }),
+  getOne: (id) => api.get(`/notes/${id}`),
+  delete: (id) => api.delete(`/notes/${id}`),
+  publish: ({ title, body, category, priority, isPinned, attachments = [] }) => {
+    const form = new FormData();
+    form.append('title', title);
+    if (body) form.append('body', body);
+    if (category) form.append('category', category);
+    if (priority) form.append('priority', priority);
+    if (isPinned) form.append('isPinned', 'true');
+    attachments.forEach((f) => form.append('attachments', f));
+    return api.post('/notes', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
+// Calendrier hôpital et statistiques par portée (Lot 3) — lecture seule.
+export const hospitalCalendarAPI = {
+  get: (params) => api.get('/hospital-calendar', { params }),
+};
+
+export const scopedStatsAPI = {
+  get: (params) => api.get('/statistics/scoped', { params }),
+};
+
+// Journal de service et alertes (Lot 4).
+// Les absences et retards ne passent PAS par ici : voir absencesShiftAPI.
+export const journalAPI = {
+  getOverview: (params)     => api.get('/journal/overview', { params }),
+  getEvents:   (params)     => api.get('/journal',          { params }),
+  addEvent:    (data)       => api.post('/journal', data),
+  getAlerts:   (params)     => api.get('/journal/alerts',   { params }),
+  updateAlert: (id, action) => api.patch(`/journal/alerts/${id}`, { action }),
+};
+
+// Supervision hôpital (Lot 5) — surveillant général, directeur, super admin.
+// Lecture seule, sauf la transmission d'un rapport à la direction. La
+// confirmation d'un remplacement reste hors de cette surface, volontairement.
+export const supervisionAPI = {
+  getOverview:  (params) => api.get('/supervision/overview',  { params }),
+  getSchedules: (params) => api.get('/supervision/schedules', { params }),
+  getConflicts: (params) => api.get('/supervision/conflicts', { params }),
+  getLoans:     (params) => api.get('/supervision/loans',     { params }),
+  sendReport:   (data)   => api.post('/supervision/report',   data),
+};
+
+// Espace « Planning à consulter » (point 3) — portée : les services de
+// l'appelant pour le surveillant de service et le chef, l'établissement entier
+// pour le surveillant général, le directeur et l'admin hôpital.
+export const scheduleInboxAPI = {
+  getAll: (params) => api.get('/schedule-inbox', { params }),
+};
+
 export const replacementsAPI = {
   getAll: (params) => api.get('/replacements', { params }),
   create: (data) => api.post('/replacements', data),
   accept: (id, data) => api.post(`/replacements/${id}/accept`, data),
   reject: (id) => api.post(`/replacements/${id}/reject`),
   getCandidates: (id) => api.get(`/replacements/${id}/candidates`),
+
+  // Remplacements « overlay » sur garde courante
+  getEligibleSchedules: () => api.get('/replacements/eligible-schedules'),
+  getOverlay: (params) => api.get('/replacements/overlay', { params }),
+  createOverlay: (data) => api.post('/replacements/overlay', data),
+  confirmOverlay: (id) => api.post(`/replacements/overlay/${id}/confirm`),
+  rejectOverlay: (id, data) => api.post(`/replacements/overlay/${id}/reject`, data),
+  deleteOverlay: (id) => api.delete(`/replacements/overlay/${id}`),
+  getScheduleStaff: (scheduleId) => api.get(`/replacements/schedule/${scheduleId}/staff`),
 };
 
 export const statisticsAPI = {
@@ -183,6 +288,9 @@ export const notificationsAPI = {
   getAll:      (params) => api.get('/notifications', { params }),
   markRead:    (id)     => api.put(`/notifications/${id}/read`),
   markAllRead: ()       => api.put('/notifications/read-all'),
+  // Écran dédié (point 6) — suppression unitaire et purge des lues.
+  remove:      (id)     => api.delete(`/notifications/${id}`),
+  clearRead:   ()       => api.delete('/notifications/read'),
 };
 
 export const profileAPI = {
@@ -208,9 +316,26 @@ export const profileAPI = {
 export const historyAPI = {
   getMine:         (params)   => api.get('/history/mine',        { params }),
   getAll:          (params)   => api.get('/history/all',         { params }),
-  getCategories:   ()         => api.get('/history/categories'),
+  // `{ scope: 'establishment' }` (Lot 6) élargit la liste à l'établissement pour
+  // la direction ; sans paramètre, comportement inchangé.
+  getCategories:   (params)   => api.get('/history/categories', { params }),
   getUserHistory:  (id, p)    => api.get(`/history/users/${id}`, { params: p }),
   getUsersList:    ()         => api.get('/history/users'),
+};
+
+export const portfolioAPI = {
+  getAll:         (params)   => api.get('/portfolio',                    { params }),
+  getUserDetails: (userId)   => api.get(`/portfolio/${userId}/details`),
+};
+
+// Supervision plateforme (Lot 6) — Super Admin, CONSULTATION UNIQUEMENT.
+// Aucune méthode d'écriture n'est exposée, à dessein : le Super Admin voit
+// les gardes de chaque hôpital sans jamais pouvoir les modifier.
+export const adminOversightAPI = {
+  getEstablishments: (params) => api.get('/admin-oversight/establishments', { params }),
+  getSchedules:      (params) => api.get('/admin-oversight/schedules',      { params }),
+  getAbsences:       (params) => api.get('/admin-oversight/absences',       { params }),
+  getReplacements:   (params) => api.get('/admin-oversight/replacements',   { params }),
 };
 
 export const establishmentsAPI = {
@@ -315,6 +440,22 @@ export const scheduleConfigAPI = {
   deleteTemplate:       (id)         => api.delete(`/schedule-config/templates/${id}`),
   // Init
   init:                 ()           => api.post('/schedule-config/init'),
+};
+
+// ── Assistant Intelligent V2 (Lot 7) ─────────────────────────
+// Surface distincte de `scheduleBuilderAPI.generateProposals`, qui reste en place :
+// l'assistant V1 continue de fonctionner à l'identique.
+export const assistantAPI = {
+  getContext:  (params)     => api.get('/assistant/context', { params }),
+  generate:    (data)       => api.post('/assistant/generate', data),
+  validate:    (data)       => api.post('/assistant/validate', data),
+  applyFixes:  (data)       => api.post('/assistant/apply-fixes', data),
+  confirm:     (data)       => api.post('/assistant/confirm', data),
+  // Briefs réutilisables
+  listBriefs:  (params)     => api.get('/assistant/briefs', { params }),
+  saveBrief:   (data)       => api.post('/assistant/briefs', data),
+  useBrief:    (id, data)   => api.post(`/assistant/briefs/${id}/use`, data),
+  deleteBrief: (id)         => api.delete(`/assistant/briefs/${id}`),
 };
 
 export default api;

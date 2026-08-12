@@ -8,6 +8,15 @@ import VisualCalendar from './components/VisualCalendar';
 import ImportModal from './components/ImportModal';
 import HospitalStaffPicker from './components/HospitalStaffPicker';
 import ScheduleChangeProposals from './components/ScheduleChangeProposals';
+import StaffLoansPanel from './components/StaffLoansPanel';
+import WizardAssistantV2 from './components/WizardAssistantV2';
+// Absences déclarées à l'appel du jour (point 8) — panneau neuf, en lecture seule.
+import ShiftAbsencesPanel from './components/ShiftAbsencesPanel';
+import ReplacementsPanel from '../replacements/components/ReplacementsPanel';
+import HospitalGuardCalendar from '../../components/calendar/HospitalGuardCalendar';
+import ScopedStatsPanel from '../../components/statistics/ScopedStatsPanel';
+import StaffLoanStatsPanel from '../../components/statistics/StaffLoanStatsPanel';
+import ContextBadge from '../../components/layout/ContextBadge';
 import toast from 'react-hot-toast';
 
 // ─── Icons ────────────────────────────────────────────────────
@@ -33,11 +42,14 @@ const IconGrid     = () => <Svg d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v
 const StatusBadge = ({ status }) => {
   const map = {
     draft:        { label: 'Brouillon',   bg: '#F3F4F6', color: '#6B7280' },
-    submitted:    { label: 'Soumis',      bg: '#EFF6FF', color: '#3B82F6' },
+    // Un planning envoyé est effectif : « En vigueur » avant sa date de début,
+    // « En cours » une fois démarré. Les trois statuts suivants n'existent plus
+    // (migration 026) et ne restent que par sécurité pour d'anciennes lignes.
+    submitted:    { label: 'En vigueur',  bg: '#EFF6FF', color: '#3B82F6' },
     under_review: { label: 'En revision', bg: '#FFFBEB', color: '#F59E0B' },
     approved:     { label: 'Approuve',    bg: '#ECFDF5', color: '#10B981' },
     rejected:     { label: 'Rejete',      bg: '#FEF2F2', color: '#EF4444' },
-    active:       { label: 'Actif',       bg: '#ECFDF5', color: '#059669' },
+    active:       { label: 'En cours',    bg: '#ECFDF5', color: '#059669' },
   };
   const c = map[status] || { label: status, bg: '#F3F4F6', color: '#6B7280' };
   return (
@@ -84,6 +96,7 @@ const getPresence = (lastActivity) => {
 
 // ─── Step 1: Création planning (Nom + Dates) ─────────────────
 const PlanningStep1 = ({ departmentId, onCreated, onBack }) => {
+  const qc = useQueryClient();
   const [name, setName]         = useState('');
   const [startDate, setStart]   = useState('');
   const [endDate, setEnd]       = useState('');
@@ -112,6 +125,9 @@ const PlanningStep1 = ({ departmentId, onCreated, onBack }) => {
       const res = await schedulesAPI.create({ name: defaultName, start_date: startDate, end_date: endDate, department_id: departmentId, status: 'draft', schedule_type: specialDaysOnly ? 'special_weekend_holiday' : 'normal', creation_mode: specialDaysOnly ? 'special_days' : 'assistant', metadata: specialDaysOnly ? { schedule_kind: 'weekend_holiday', special_days_only: true } : { schedule_kind: 'normal' } });
       const id = res.data?.data?.id || res.data?.id;
       if (!id) throw new Error('ID de planning non reçu.');
+      // Le planning existe : la liste doit le refléter immédiatement, sinon il
+      // « disparaît » en revenant en arrière (cache react-query de 30 s).
+      await qc.invalidateQueries({ queryKey: ['schedules'] });
       onCreated(id, defaultName, startDate, endDate);
     } catch (e) {
       setError(e.response?.data?.message || e.message || 'Erreur lors de la création du planning.');
@@ -209,6 +225,14 @@ const MethodSelector = ({ onSelect }) => {
       title: 'Assistant Intelligent', tag: 'Recommandé',
       desc: 'L\'assistant vous guide étape par étape. Spécifiez l\'équipe, les contraintes et générez automatiquement le meilleur planning.',
       features: ['Assistant en 7 étapes', 'Règles métier & Relais', '3 propositions optimisées', 'Génération intelligente'],
+    },
+    {
+      id: 'assistant_v2', color: '#7C3AED',
+      gradient: 'linear-gradient(135deg,#7C3AED,#4C1D95)',
+      icon: '✨',
+      title: 'Assistant V2', tag: 'Nouveau',
+      desc: 'Les congés sont écartés dès la génération et la grille est contrôlée par le serveur avant de devenir un planning. Modifiable avant envoi.',
+      features: ['Congés respectés automatiquement', '5 modes de répartition', 'Anomalies + corrections en 1 clic', 'Briefs réutilisables'],
     },
     {
       id: 'spreadsheet', color: '#0891B2',
@@ -881,11 +905,12 @@ const STATUS_FULL = {
   preparing:          { label: 'En préparation',      bg: '#FFFBEB', color: '#D97706', icon: '⚙️' },
   pending_validation: { label: 'En attente',          bg: '#EFF6FF', color: '#2563EB', icon: '⏳' },
   validated:          { label: 'Validé',              bg: '#ECFDF5', color: '#059669', icon: '✅' },
-  submitted:          { label: 'Soumis',              bg: '#EFF6FF', color: '#3B82F6', icon: '📤' },
+  submitted:          { label: 'En vigueur',           bg: '#EFF6FF', color: '#3B82F6', icon: '📤' },
+  // Conservés en secours : plus aucun planning n'est créé dans ces statuts.
   under_review:       { label: 'En révision',         bg: '#FFFBEB', color: '#F59E0B', icon: '🔍' },
   approved:           { label: 'Approuvé',            bg: '#ECFDF5', color: '#10B981', icon: '✔️' },
   rejected:           { label: 'Rejeté',              bg: '#FEF2F2', color: '#EF4444', icon: '❌' },
-  active:             { label: 'Actif',               bg: '#ECFDF5', color: '#059669', icon: '🟢' },
+  active:             { label: 'En cours',            bg: '#ECFDF5', color: '#059669', icon: '🟢' },
   archived:           { label: 'Archivé',             bg: '#F9FAFB', color: '#9CA3AF', icon: '📦' },
 };
 
@@ -966,6 +991,9 @@ const ScheduleList = ({ departmentId, onView, onNew }) => {
   const { data, isLoading } = useQuery({
     queryKey: ['schedules', departmentId],
     queryFn:  () => schedulesAPI.getAll({ departmentId, limit: 50 }),
+    // Le retour à la liste doit toujours montrer l'état réel du serveur :
+    // sans cela un planning tout juste créé reste absent le temps du cache.
+    refetchOnMount: 'always',
   });
 
   const allItems = data?.data?.data || data?.data || [];
@@ -1086,10 +1114,31 @@ export default function ChefDeServiceDashboard() {
   const [view,         setView]         = useState('list');
   const [selectedScheduleId, setSelectedScheduleId] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [deepLinkScheduleId, setDeepLinkScheduleId] = useState(null);
   // 2-step flow: stores {id, name, startDate, endDate} after step 1
   const [scheduleInfo, setScheduleInfo] = useState(null);
   useEffect(() => {
-    const scheduleId = new URLSearchParams(location.search).get('scheduleId');
+    const params = new URLSearchParams(location.search);
+    const scheduleId = params.get('scheduleId');
+
+    // Deep-link depuis une notification de remplacement : on ouvre l'onglet
+    // Remplacements, surtout pas le tableur (qui ne doit pas être modifié).
+    if (params.get('tab') === 'remplacements') {
+      setActiveTab('remplacements');
+      if (scheduleId) setDeepLinkScheduleId(scheduleId);
+      navigate('/chef-de-service', { replace: true });
+      return;
+    }
+
+    // Deep-link depuis une notification de note ou circulaire. L'onglet n'existe
+    // plus ici (point 7) : on redirige vers l'écran indépendant. Les
+    // notifications déjà en base pointent encore sur `?tab=notes`, elles
+    // continuent donc de fonctionner.
+    if (params.get('tab') === 'notes') {
+      navigate('/notes', { replace: true });
+      return;
+    }
+
     if (!scheduleId) return;
     setSelectedScheduleId(scheduleId);
     setProposalScheduleId(scheduleId);
@@ -1156,6 +1205,11 @@ export default function ChefDeServiceDashboard() {
     { id: 'schedules', label: 'Plannings',       emoji: '📋' },
     { id: 'team',      label: 'Équipe',          emoji: '👥' },
     { id: 'absences',  label: 'Absences',        emoji: '🏖️' },
+    { id: 'remplacements', label: 'Remplacements', emoji: '🔄' },
+    // L'onglet « Notes » est parti vers l'écran indépendant /notes (point 7).
+    { id: 'calendrier', label: 'Calendrier hôpital', emoji: '📅' },
+    { id: 'stats',     label: 'Statistiques',    emoji: '📊' },
+    { id: 'loan-stats', label: 'Prêts personnel', emoji: '🤝' },
   ];
 
   const cardSt = { background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 24 };
@@ -1166,6 +1220,9 @@ export default function ChefDeServiceDashboard() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-base)', padding: 24 }}>
+
+      {/* Appartenance — hôpital et service(s) dont on est chef. */}
+      <ContextBadge variant="header" />
 
       {/* Header */}
       <div style={{ marginBottom: 26 }}>
@@ -1257,6 +1314,11 @@ export default function ChefDeServiceDashboard() {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Prêts de personnel inter-service (accord donné ou refusé par le chef propriétaire) */}
+          <div style={{ marginBottom: 20 }}>
+            <StaffLoansPanel />
           </div>
 
           {/* Gardes du jour */}
@@ -1386,6 +1448,24 @@ export default function ChefDeServiceDashboard() {
             />
           )}
 
+          {/* Assistant intelligent V2 — écran distinct, la V1 ci-dessus reste intacte */}
+          {view === 'assistant_v2' && (
+            <WizardAssistantV2
+              departmentId={selectedDept}
+              scheduleId={scheduleInfo?.id || selectedScheduleId}
+              startDate={scheduleInfo?.startDate}
+              endDate={scheduleInfo?.endDate}
+              name={scheduleInfo?.name}
+              onBack={() => setView('method')}
+              onDone={(schedId) => {
+                // L'assistant V2 crée son propre brouillon : on ouvre celui-là,
+                // pas celui préparé à l'étape 1.
+                if (schedId) { setSelectedScheduleId(schedId); setView('spreadsheet'); }
+                else setView('list');
+              }}
+            />
+          )}
+
           {/* Tableur — vue directe */}
           {view === 'spreadsheet' && selectedScheduleId && (
             <SmartSpreadsheet
@@ -1457,8 +1537,13 @@ export default function ChefDeServiceDashboard() {
       {/* ── ABSENCES ───────────────────────────────────────── */}
       {activeTab === 'absences' && (
         <div>
+          {/* Ce que l'appel du jour a réellement signalé (point 8). Le bloc des
+              congés en attente d'approbation reste en place juste en dessous :
+              les deux informations sont utiles et distinctes. */}
+          <ShiftAbsencesPanel departmentId={selectedDept} />
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Absences du service</h3>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Congés en attente d'approbation</h3>
             <button style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px', borderRadius: 10, border: 'none', cursor: 'pointer', background: '#F59E0B', color: '#fff', fontWeight: 700, fontSize: 13 }}>
               <IconPlus /> Declarer une absence
             </button>
@@ -1466,8 +1551,8 @@ export default function ChefDeServiceDashboard() {
           {pendingAbsences.length === 0 ? (
             <div style={{ ...cardSt, textAlign: 'center', padding: '48px 20px' }}>
               <div style={{ fontSize: 38, marginBottom: 10 }}>?</div>
-              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 5 }}>Aucune absence en attente</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Tout le personnel est disponible</div>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 5 }}>Aucune demande de congé en attente</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Aucune demande n'attend votre décision</div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -1488,6 +1573,40 @@ export default function ChefDeServiceDashboard() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ── REMPLACEMENTS ──────────────────────────────────── */}
+      {activeTab === 'remplacements' && (
+        <div>
+          <div style={{ marginBottom: 18 }}>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Remplacements</h3>
+            <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
+              Gardes courantes déjà soumises définitivement — le tableur n'est jamais modifié
+            </p>
+          </div>
+          <ReplacementsPanel initialScheduleId={deepLinkScheduleId} />
+        </div>
+      )}
+
+      {/* ── NOTES & CIRCULAIRES ─────────────────────────────
+          Déplacées vers l'écran indépendant `/notes` (point 7) : l'onglet et son
+          rendu ont été retirés d'ici. Les montages des autres tableaux de bord
+          (directeur, super admin, surveillant) restent en place — l'énoncé ne
+          demandait le retrait que depuis le planning des gardes. */}
+
+      {/* ── CALENDRIER HÔPITAL (lecture seule) ─────────────── */}
+      {activeTab === 'calendrier' && (
+        <HospitalGuardCalendar title="Calendrier des gardes — hôpital" />
+      )}
+
+      {/* ── STATISTIQUES DU SERVICE ────────────────────────── */}
+      {activeTab === 'stats' && (
+        <ScopedStatsPanel title="Statistiques de mes services" />
+      )}
+
+      {/* ── STATISTIQUES DES PRÊTS DE PERSONNEL ────────────── */}
+      {activeTab === 'loan-stats' && (
+        <StaffLoanStatsPanel title="Prêts de personnel — mes services" />
       )}
 
       {/* Import Modal */}

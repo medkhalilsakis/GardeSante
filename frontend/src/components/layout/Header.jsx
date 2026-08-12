@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUIStore, useAuthStore, useNotificationStore } from '../../store';
 import { notificationsAPI } from '../../api';
 import { useTranslation } from '../../utils/helpers';
+import { resolveNotificationTarget } from '../../utils/notificationTarget';
 import toast from 'react-hot-toast';
 import '../../styles/layout.css';
 
@@ -86,8 +87,12 @@ export default function Header({ title, subtitle, actions }) {
       setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
     }
     setShowNotif(false);
-    if (notif.target_schedule_id) {
-      navigate(`/chef-de-service?scheduleId=${notif.target_schedule_id}`);
+    // Les branches par type vivent désormais dans `utils/notificationTarget`,
+    // partagées avec la page dédiée aux notifications. Comportement identique
+    // pour les types déjà gérés, plus les demandes de prêt de personnel.
+    const target = resolveNotificationTarget(notif, user?.roleCode);
+    if (target) {
+      navigate(target.path);
       return;
     }
     toast('Cette notification ne possède pas encore d’action associée.');

@@ -1,5 +1,5 @@
 const { query, transaction } = require('../../config/database');
-const { SCHEDULE_STATUS, SHIFT_STATUS, NOTIFICATION_TYPES } = require('../../config/constants');
+const { SHIFT_STATUS, NOTIFICATION_TYPES } = require('../../config/constants');
 
 // ============================================================
 // DÉTECTION DES CONFLITS
@@ -146,25 +146,42 @@ const getSchedules = async (req, res) => {
   let params = [eid]; let idx = 2;
 
   if (status) { conditions.push(`sch.status = $${idx}`); params.push(status); idx++; }
-  if (departmentId) { conditions.push(`sch.department_id = $${idx}`); params.push(departmentId); idx++; }
+  // Un chef de service ne doit jamais « perdre » un planning qu'il a créé : le
+  // filtre par service ne s'applique pas à ses propres créations. Sans cela, un
+  // planning créé dans un service qui n'est plus le sien disparaissait de la
+  // liste alors qu'il existait toujours en base.
+  const isHead = req.user.roleCode === 'department_head';
+  if (departmentId) {
+    if (isHead) {
+      conditions.push(`(sch.department_id = $${idx} OR sch.created_by = $${idx + 1})`);
+      params.push(departmentId, req.user.id); idx += 2;
+    } else {
+      conditions.push(`sch.department_id = $${idx}`); params.push(departmentId); idx++;
+    }
+  }
   if (from) { conditions.push(`sch.start_date >= $${idx}`); params.push(from); idx++; }
   if (to) { conditions.push(`sch.end_date <= $${idx}`); params.push(to); idx++; }
 
   // Les brouillons sont strictement privés : seul leur chef créateur peut les voir.
-  if (req.user.roleCode === 'department_head') {
+  if (isHead) {
     conditions.push(`(sch.status <> 'draft' OR sch.created_by = $${idx})`); params.push(req.user.id); idx++;
   } else {
     conditions.push(`sch.status <> 'draft'`);
   }
-  // Filtrer par service pour les chefs
+  // Filtrer par service pour les chefs et surveillants
   if (!req.user.isSuperAdmin && ['department_head', 'service_supervisor'].includes(req.user.roleCode)) {
     const deptResult = await query(
       `SELECT department_id FROM user_departments WHERE user_id = $1`,
       [req.user.id]
     );
     if (deptResult.rows.length) {
-      conditions.push(`sch.department_id = ANY($${idx})`);
-      params.push(deptResult.rows.map(r => r.department_id)); idx++;
+      if (isHead) {
+        conditions.push(`(sch.department_id = ANY($${idx}) OR sch.created_by = $${idx + 1})`);
+        params.push(deptResult.rows.map(r => r.department_id), req.user.id); idx += 2;
+      } else {
+        conditions.push(`sch.department_id = ANY($${idx})`);
+        params.push(deptResult.rows.map(r => r.department_id)); idx++;
+      }
     }
   }
 
@@ -174,7 +191,10 @@ const getSchedules = async (req, res) => {
   const result = await query(
     `SELECT sch.*, d.name AS department_name, d.name_ar AS department_name_ar,
             u.first_name AS created_by_first, u.last_name AS created_by_last,
-            COUNT(s.id) AS total_shifts
+            COUNT(s.id) AS total_shifts,
+            TO_CHAR(sch.start_date, 'YYYY-MM-DD') AS start_date,
+            TO_CHAR(sch.end_date,   'YYYY-MM-DD') AS end_date,
+            planning_state(sch.status, sch.start_date, sch.end_date) AS state
      FROM schedules sch
      JOIN departments d ON sch.department_id = d.id
      JOIN users u ON sch.created_by = u.id
@@ -247,6 +267,32 @@ const createSchedule = async (req, res) => {
     return res.status(400).json({ success: false, message: 'department_id est requis pour créer un planning' });
   }
 
+  // Un chef ne peut créer un planning que dans un service dont il est chef.
+  // Sans ce garde-fou, un planning pouvait naître dans un service étranger puis
+  // devenir invisible dans sa liste — le planning « disparaissait » après création.
+  if (req.user.roleCode === 'department_head' && !req.user.isSuperAdmin) {
+    const owns = await query(
+      'SELECT 1 FROM user_departments WHERE user_id = $1 AND department_id = $2 AND is_head = TRUE',
+      [req.user.id, deptId]
+    );
+    if (!owns.rows.length) {
+      const fallback = await query(
+        `SELECT ud.department_id, d.name FROM user_departments ud
+           JOIN departments d ON d.id = ud.department_id
+          WHERE ud.user_id = $1 AND ud.is_head = TRUE ORDER BY d.name LIMIT 1`,
+        [req.user.id]
+      );
+      return res.status(403).json({
+        success: false,
+        code: 'NOT_DEPARTMENT_HEAD',
+        message: fallback.rows.length
+          ? `Vous ne dirigez pas ce service. Créez ce planning dans « ${fallback.rows[0].name} ».`
+          : 'Vous n\'êtes chef d\'aucun service : impossible de créer un planning.',
+        data: { suggestedDepartmentId: fallback.rows[0]?.department_id || null },
+      });
+    }
+  }
+
   const result = await query(
     `INSERT INTO schedules (establishment_id, department_id, name, start_date, end_date, notes, workflow_id, status, creation_mode, metadata, created_by, schedule_type)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12) RETURNING *`,
@@ -272,47 +318,32 @@ const updateSchedule = async (req, res) => {
   return res.json({ success: true, data: result.rows[0] });
 };
 
+// Envoi générique d'un planning. Comme dans le tableur (schedule-builder), il
+// n'y a ni approbation ni refus : le planning est en vigueur dès l'envoi, et
+// déjà « en cours » si sa période a commencé.
 const submitSchedule = async (req, res) => {
   const { comment } = req.body;
-  await query(`UPDATE schedules SET status = 'submitted', updated_at = NOW() WHERE id = $1`, [req.params.id]);
+  const updated = await query(
+    `UPDATE schedules
+        SET status = CASE WHEN start_date <= CURRENT_DATE THEN 'active' ELSE 'submitted' END,
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING status`,
+    [req.params.id]
+  );
+  if (!updated.rows[0]) return res.status(404).json({ success: false, message: 'Planning introuvable' });
   await query(
     `INSERT INTO schedule_workflow_history (schedule_id, step_order, action, actor_id, comment)
      VALUES ($1, 0, 'submitted', $2, $3)`,
     [req.params.id, req.user.id, comment]
   );
-  return res.json({ success: true, message: 'Planning soumis pour validation' });
-};
-
-const approveSchedule = async (req, res) => {
-  const { comment } = req.body;
-  const schedule = await query('SELECT * FROM schedules WHERE id = $1', [req.params.id]);
-  const sch = schedule.rows[0];
-
-  const newStatus = sch.current_workflow_step >= 1 ? SCHEDULE_STATUS.APPROVED : SCHEDULE_STATUS.UNDER_REVIEW;
-  const nextStep = (sch.current_workflow_step || 0) + 1;
-
-  await query(
-    `UPDATE schedules SET status = $1, current_workflow_step = $2, updated_at = NOW() WHERE id = $3`,
-    [newStatus, nextStep, req.params.id]
-  );
-  await query(
-    `INSERT INTO schedule_workflow_history (schedule_id, step_order, action, actor_id, comment) VALUES ($1,$2,'approved',$3,$4)`,
-    [req.params.id, nextStep, req.user.id, comment]
-  );
-  return res.json({ success: true, message: `Planning ${newStatus === SCHEDULE_STATUS.APPROVED ? 'approuvé' : 'transmis à l\'étape suivante'}` });
-};
-
-const rejectSchedule = async (req, res) => {
-  const { comment } = req.body;
-  await query(
-    `UPDATE schedules SET status = 'rejected', rejection_reason = $1, updated_at = NOW() WHERE id = $2`,
-    [comment, req.params.id]
-  );
-  await query(
-    `INSERT INTO schedule_workflow_history (schedule_id, step_order, action, actor_id, comment) VALUES ($1,$2,'rejected',$3,$4)`,
-    [req.params.id, 0, req.user.id, comment]
-  );
-  return res.json({ success: true, message: 'Planning rejeté' });
+  return res.json({
+    success: true,
+    message: updated.rows[0].status === 'active'
+      ? 'Planning envoyé et mis en marche : il est en cours dès maintenant.'
+      : 'Planning envoyé et mis en vigueur. Il démarrera à sa date de début.',
+    data: { status: updated.rows[0].status },
+  });
 };
 
 const getConflicts = async (req, res) => {
@@ -443,7 +474,7 @@ const getAllRoles = async (req, res) => {
 
 module.exports = {
   getSchedules, getSchedule, createSchedule, updateSchedule,
-  submitSchedule, approveSchedule, rejectSchedule, generateSchedule,
+  submitSchedule, generateSchedule,
   getConflicts, detectConflicts,
   scheduleAction, getHospitalStaff, getAllRoles,
 };

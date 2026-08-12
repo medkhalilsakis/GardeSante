@@ -24,6 +24,18 @@ const historyRoutes          = require('./modules/history/history.routes');
 const adminRoutes            = require('./modules/admin/admin.routes');
 const scheduleConfigRoutes   = require('./modules/schedules/schedule-config.routes');
 const scheduleBuilderRoutes  = require('./modules/schedules/schedule-builder.routes');
+const portfolioRoutes        = require('./modules/portfolio/portfolio.routes');
+const absencesShiftRoutes    = require('./modules/absences/absences-shift.routes');
+const leavesRoutes           = require('./modules/absences/leaves.routes');
+const staffLoansRoutes       = require('./modules/schedules/staff-loans.routes');
+const notesRoutes            = require('./modules/notes/notes.routes');
+const hospitalCalendarRoutes = require('./modules/schedules/hospital-calendar.routes');
+const journalRoutes          = require('./modules/journal/journal.routes');
+const supervisionRoutes      = require('./modules/supervision/supervision.routes');
+const adminOversightRoutes   = require('./modules/admin/admin-oversight.routes');
+const assistantRoutes        = require('./modules/schedules/assistant.routes');
+const userArchiveRoutes      = require('./modules/users/user-archive.routes');
+const scheduleInboxRoutes    = require('./modules/schedules/schedule-inbox.routes');
 
 const app = express();
 
@@ -96,6 +108,19 @@ app.use('/api/history',        historyRoutes);
 app.use('/api/admin',          adminRoutes);
 app.use('/api/schedule-config',  scheduleConfigRoutes);
 app.use('/api/schedule-builder', scheduleBuilderRoutes);
+app.use('/api/portfolio',        portfolioRoutes);
+app.use('/api/absences-shift',   absencesShiftRoutes);
+app.use('/api/leaves',           leavesRoutes);
+app.use('/api/staff-loans',      staffLoansRoutes);
+app.use('/api/notes',            notesRoutes);
+app.use('/api/hospital-calendar', hospitalCalendarRoutes);
+app.use('/api/journal',           journalRoutes);
+app.use('/api/supervision',       supervisionRoutes);
+app.use('/api/admin-oversight',   adminOversightRoutes);
+app.use('/api/assistant',         assistantRoutes);
+app.use('/api/user-archive',      userArchiveRoutes);
+// Espace « Planning à consulter » du surveillant de service (point 3)
+app.use('/api/schedule-inbox',    scheduleInboxRoutes);
 
 
 // Health check

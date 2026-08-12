@@ -376,6 +376,10 @@ export default function ImportModal({ departmentId, scheduleId, onClose, onImpor
                         <th style={{ padding: '7px 10px', textAlign: 'left' }}>Nom & Prénom</th>
                         <th style={{ padding: '7px 10px', textAlign: 'left' }}>Matricule</th>
                         <th style={{ padding: '7px 10px', textAlign: 'left' }}>Fonction</th>
+                        <th style={{ padding: '7px 10px', textAlign: 'center' }}
+                          title="Colonne « Garde a domicile » du fichier (facultative). Décochée = garde à l'hôpital, en présence. Vous pouvez la corriger ici avant de valider.">
+                          Domicile
+                        </th>
                         <th style={{ padding: '7px 10px', textAlign: 'center' }}>Gardes</th>
                       </tr>
                     </thead>
@@ -393,6 +397,24 @@ export default function ImportModal({ departmentId, scheduleId, onClose, onImpor
                           <td style={{ padding: '6px 10px', fontWeight: 700 }}>{row.lastName} {row.firstName}</td>
                           <td style={{ padding: '6px 10px', color: 'var(--text-muted)' }}>{row.matricule || '—'}</td>
                           <td style={{ padding: '6px 10px', color: 'var(--text-muted)' }}>{row.roleName || '—'}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                            {/* Les lignes de l'aperçu repartent verbatim à la
+                                validation : cocher ici suffit à corriger un
+                                fichier qui n'avait pas la colonne. */}
+                            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontWeight: 700, color: row.atHome === true ? '#7C3AED' : 'var(--text-muted)' }}
+                              title={row.atHome === true ? 'Garde à domicile (astreinte)' : "Garde à l'hôpital, en présence"}>
+                              <input type="checkbox" checked={row.atHome === true}
+                                onChange={(e) => {
+                                  const atHome = e.target.checked;
+                                  setPreview(prev => prev && ({
+                                    ...prev,
+                                    rows: prev.rows.map((r, j) => (j === i ? { ...r, atHome } : r)),
+                                  }));
+                                }}
+                                style={{ cursor: 'pointer', accentColor: '#7C3AED', margin: 0 }} />
+                              {row.atHome === true ? '🏠' : '—'}
+                            </label>
+                          </td>
                           <td style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 800, color: 'var(--color-primary)' }}>
                             {Object.keys(row.shifts || {}).length} date(s)
                           </td>

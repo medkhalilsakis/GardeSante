@@ -47,6 +47,18 @@ const login = async (req, res) => {
     });
   }
 
+  // Compte archivé par le Super Admin : aucune connexion possible tant qu'il
+  // n'est pas réactivé. Contrôlé APRÈS le mot de passe pour ne rien révéler
+  // sur l'existence du compte à un tiers.
+  if (user.archived_at) {
+    return res.status(403).json({
+      success: false,
+      code: 'ACCOUNT_ARCHIVED',
+      message: 'Ce compte est archivé. Contactez l\'administrateur de la plateforme.',
+      message_ar: 'هذا الحساب مؤرشف. يرجى الاتصال بمسؤول المنصة.',
+    });
+  }
+
   const { accessToken, refreshToken } = generateTokens(user.id, user.role_code, user.establishment_id);
 
   // Sauvegarder le refresh token et last_login
@@ -126,12 +138,23 @@ const refreshToken = async (req, res) => {
   }
 
   const result = await query(
-    'SELECT id, role_id, establishment_id, refresh_token, is_active FROM users WHERE id = $1',
+    'SELECT id, role_id, establishment_id, refresh_token, is_active, archived_at FROM users WHERE id = $1',
     [decoded.userId]
   );
 
   if (!result.rows[0] || result.rows[0].refresh_token !== token || !result.rows[0].is_active) {
     return res.status(401).json({ success: false, message: 'Session invalide' });
+  }
+
+  // Compte archivé : aucun jeton n'est renouvelé (l'archivage efface déjà le
+  // refresh_token, ce contrôle est la ceinture en plus des bretelles).
+  if (result.rows[0].archived_at) {
+    return res.status(403).json({
+      success: false,
+      code: 'ACCOUNT_ARCHIVED',
+      message: 'Ce compte est archivé. Contactez l\'administrateur de la plateforme.',
+      message_ar: 'هذا الحساب مؤرشف. يرجى الاتصال بمسؤول المنصة.',
+    });
   }
 
   const user = result.rows[0];

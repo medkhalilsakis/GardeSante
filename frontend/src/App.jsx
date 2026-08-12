@@ -23,6 +23,14 @@ const ProfilePage              = lazy(() => import('./pages/profile/ProfilePage'
 const ProfileRequestsAdminPage = lazy(() => import('./pages/profile/ProfileRequestsAdminPage'));
 const HistoryPage              = lazy(() => import('./pages/history/HistoryPage'));
 const ChefDeServiceDashboard   = lazy(() => import('./pages/schedules/ChefDeServiceDashboard'));
+const SurveillantDashboard     = lazy(() => import('./pages/surveillant/SurveillantDashboard'));
+const GeneralSupervisorDashboard = lazy(() => import('./pages/supervision/GeneralSupervisorDashboard'));
+const PlanningInboxPage        = lazy(() => import('./pages/surveillant/PlanningInboxPage'));
+const StaffLoansPage           = lazy(() => import('./pages/staff-loans/StaffLoansPage'));
+const NotificationsPage        = lazy(() => import('./pages/notifications/NotificationsPage'));
+const AppelDuJourPage          = lazy(() => import('./pages/appel/AppelDuJourPage'));
+const NotesPage                = lazy(() => import('./pages/notes/NotesPage'));
+const ServicePortfolioPage     = lazy(() => import('./pages/portfolio/ServicePortfolioPage'));
 
 // Query Client
 const queryClient = new QueryClient({
@@ -202,6 +210,67 @@ export default function App() {
               <Route path="/chef-de-service" element={
                 <ProtectedRoute>
                   <ChefDeServiceDashboard />
+                </ProtectedRoute>
+              } />
+
+              {/* Surveillant de service — journal, alertes et suivi des gardes courantes */}
+              <Route path="/surveillant" element={
+                <ProtectedRoute>
+                  <SurveillantDashboard />
+                </ProtectedRoute>
+              } />
+
+              {/* Surveillant général — supervision de tous les services de l'hôpital */}
+              <Route path="/supervision" element={
+                <ProtectedRoute>
+                  <GeneralSupervisorDashboard />
+                </ProtectedRoute>
+              } />
+
+              {/* Espace « Planning à consulter » — indépendant du dashboard surveillant */}
+              <Route path="/planning-a-consulter" element={
+                <ProtectedRoute>
+                  <PlanningInboxPage />
+                </ProtectedRoute>
+              } />
+
+              {/* Gestion des prêts de personnel — interface dédiée */}
+              <Route path="/staff-loans" element={
+                <ProtectedRoute>
+                  <StaffLoansPage />
+                </ProtectedRoute>
+              } />
+
+              {/* Gestion des notifications — interface dédiée, tous les rôles */}
+              <Route path="/notifications" element={
+                <ProtectedRoute>
+                  <NotificationsPage />
+                </ProtectedRoute>
+              } />
+
+              {/* Appel du jour — présence / absence en garde courante (point 6).
+                  Chef, surveillant, SG et directeur ; le filtrage fin est fait
+                  dans la page et, surtout, par le serveur. */}
+              <Route path="/appel-du-jour" element={
+                <ProtectedRoute>
+                  <AppelDuJourPage />
+                </ProtectedRoute>
+              } />
+
+              {/* Portfolio du service (point 5) — lecture seule.
+                  Ouverte à tous : `GET /api/portfolio` borne déjà la réponse au
+                  périmètre de l'appelant et refuse les rôles non autorisés. */}
+              <Route path="/portfolio" element={
+                <ProtectedRoute>
+                  <ServicePortfolioPage />
+                </ProtectedRoute>
+              } />
+
+              {/* Notes et circulaires — interface indépendante (point 7).
+                  Ouverte à tous : le serveur décide de ce que chacun voit. */}
+              <Route path="/notes" element={
+                <ProtectedRoute>
+                  <NotesPage />
                 </ProtectedRoute>
               } />
 

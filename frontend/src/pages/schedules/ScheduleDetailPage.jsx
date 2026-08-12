@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { schedulesAPI, shiftsAPI, departmentsAPI, usersAPI } from '../../api';
 import { useAuthStore } from '../../store';
-import { useTranslation, formatDate, getStatusBadgeClass } from '../../utils/helpers';
+import { useTranslation, formatDate } from '../../utils/helpers';
+import PlanningStateBadge from '../../components/planning/PlanningStateBadge';
 import toast from 'react-hot-toast';
 
 const DAYS_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
@@ -19,7 +20,6 @@ export default function ScheduleDetailPage() {
   const [showGenerate, setShowGenerate] = useState(false);
 
   const canEdit = hasPermission('schedules.update');
-  const canApprove = hasPermission('schedules.approve');
   const canGenerate = hasPermission('schedules.generate');
 
   const { data: schedule, isLoading: loadingSchedule } = useQuery({
@@ -43,18 +43,14 @@ export default function ScheduleDetailPage() {
 
   const submitMutation = useMutation({
     mutationFn: () => schedulesAPI.submit(id, {}),
-    onSuccess: () => { toast.success('Planning soumis pour validation'); qc.invalidateQueries(['schedule', id]); },
+    onSuccess: (res) => {
+      toast.success(res?.data?.message || 'Planning envoyé et mis en vigueur');
+      qc.invalidateQueries(['schedule', id]);
+    },
   });
 
-  const approveMutation = useMutation({
-    mutationFn: () => schedulesAPI.approve(id, {}),
-    onSuccess: () => { toast.success('Planning approuvé ✓'); qc.invalidateQueries(['schedule', id]); },
-  });
-
-  const rejectMutation = useMutation({
-    mutationFn: (reason) => schedulesAPI.reject(id, { comment: reason }),
-    onSuccess: () => { toast.success('Planning rejeté'); qc.invalidateQueries(['schedule', id]); },
-  });
+  // Il n'y a plus d'approbation ni de refus : l'envoi met le planning en
+  // marche directement. Les surveillants proposent des modifications.
 
   const generateMutation = useMutation({
     mutationFn: (config) => schedulesAPI.generate({ scheduleId: id, ...config }),
@@ -109,7 +105,13 @@ export default function ScheduleDetailPage() {
             <span>·</span>
             <span>{formatDate(schedule.start_date)} → {formatDate(schedule.end_date)}</span>
             <span>·</span>
-            <span className={`badge ${getStatusBadgeClass(schedule.status)}`}>{t(`status.${schedule.status}`)}</span>
+            <PlanningStateBadge
+              state={schedule.state}
+              status={schedule.status}
+              startDate={schedule.start_date}
+              endDate={schedule.end_date}
+              size="sm"
+            />
           </p>
         </div>
         <div className="quick-actions">
@@ -130,21 +132,8 @@ export default function ScheduleDetailPage() {
           )}
           {schedule.status === 'draft' && hasPermission('schedules.submit') && (
             <button className="btn btn-warning" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
-              Soumettre pour validation
+              Envoyer et mettre en marche
             </button>
-          )}
-          {(schedule.status === 'submitted' || schedule.status === 'under_review') && canApprove && (
-            <>
-              <button className="btn btn-success" onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending}>
-                ✓ Approuver
-              </button>
-              <button className="btn btn-danger" onClick={() => {
-                const r = prompt('Motif du rejet :');
-                if (r) rejectMutation.mutate(r);
-              }}>
-                ✗ Rejeter
-              </button>
-            </>
           )}
         </div>
       </div>

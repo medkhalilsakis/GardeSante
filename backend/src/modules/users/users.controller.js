@@ -1,6 +1,9 @@
 const { query, transaction } = require('../../config/database');
 const bcrypt = require('bcryptjs');
 const { CARE_CATEGORIES } = require('../../config/personnel-categories');
+// Garde-fou : les rôles transversaux à l'hôpital (surveillant général)
+// n'appartiennent à aucun service. Voir departments/hospital-wide-roles.js.
+const { isHospitalWideRole, REFUSAL: NO_DEPT_REFUSAL } = require('../departments/hospital-wide-roles');
 
 // -────────────────────────────────────────────────────────────
 // Hierarchie STRICTE de creation de comptes :
@@ -26,6 +29,56 @@ const NO_LOGIN_ROLES = ['senior_doctor', 'resident', 'autre'];
 
 // Roles qui DOIVENT etre associes a un service unique
 const ROLES_REQUIRING_DEPT = ['department_head', 'service_supervisor', 'senior_doctor', 'resident'];
+
+// -────────────────────────────────────────────────────────────
+// « Chef de service » est un TITRE, pas un metier.
+// Le role plateforme reste `department_head` (toutes les
+// permissions en dependent), et le metier reel de la personne
+// est porte par un role secondaire OPTIONNEL : un chef de
+// service peut etre medecin senior, resident, etc.
+// Le role secondaire est purement descriptif : il n'ouvre
+// aucun droit supplementaire.
+// -────────────────────────────────────────────────────────────
+const TITLE_ROLES = ['department_head'];
+const SECONDARY_ROLE_CODES = ['senior_doctor', 'resident', 'autre'];
+
+/**
+ * Resout le code du role secondaire en UUID.
+ * Retourne { error } si invalide, { id } sinon (id peut etre null pour « aucun »).
+ */
+const resolveSecondaryRole = async (secondaryRoleCode, primaryRoleCode, eid) => {
+  if (!secondaryRoleCode) return { id: null };
+
+  if (!TITLE_ROLES.includes(primaryRoleCode)) {
+    return { error: 'Un role secondaire ne peut etre associe qu\'au titre « Chef de service ».' };
+  }
+  if (secondaryRoleCode === primaryRoleCode) {
+    return { error: 'Le role secondaire doit etre different du role principal.' };
+  }
+  if (!SECONDARY_ROLE_CODES.includes(secondaryRoleCode)) {
+    return { error: `Role secondaire "${secondaryRoleCode}" non autorise. Valeurs possibles : ${SECONDARY_ROLE_CODES.join(', ')}.` };
+  }
+
+  const r = await query(
+    'SELECT id FROM roles WHERE establishment_id = $1 AND code = $2',
+    [eid, secondaryRoleCode]
+  );
+  if (!r.rows[0]) return { error: `Role secondaire "${secondaryRoleCode}" introuvable pour cet etablissement.` };
+  return { id: r.rows[0].id };
+};
+
+// Services d'un agent, agreges en JSONB (jsonb et non json : le `SELECT
+// DISTINCT` de getUsers a besoin d'un operateur d'egalite, que `json` n'a pas).
+const DEPARTMENTS_JSON = `
+  COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+             'id', d2.id, 'name', d2.name, 'nameAr', d2.name_ar, 'code', d2.code,
+             'isHead', ud2.is_head, 'isPrimary', ud2.is_primary
+           ) ORDER BY ud2.is_primary DESC, d2.name)
+      FROM user_departments ud2
+      JOIN departments d2 ON d2.id = ud2.department_id
+     WHERE ud2.user_id = u.id
+  ), '[]'::jsonb) AS departments`;
 
 
 // GET /api/users
@@ -72,10 +125,13 @@ const getUsers = async (req, res) => {
             u.email, u.phone, u.speciality, u.grade, u.is_active, u.is_on_leave, u.avatar_url,
             u.can_login, u.last_login, u.created_at,
             r.code AS role_code, r.name AS role_name, r.name_ar AS role_name_ar, r.level AS role_level,
+            r2.code AS secondary_role_code, r2.name AS secondary_role_name, r2.name_ar AS secondary_role_name_ar,
             jt.id AS job_title_id, jt.name AS job_title, jt.category AS personnel_category, jt.category_label AS personnel_category_label,
-            e.name AS establishment_name
+            e.name AS establishment_name,
+            ${DEPARTMENTS_JSON}
      FROM users u
      JOIN roles r ON u.role_id = r.id
+     LEFT JOIN roles r2 ON r2.id = u.secondary_role_id
      JOIN establishments e ON u.establishment_id = e.id
      LEFT JOIN job_titles jt ON jt.id = u.job_title_id
      LEFT JOIN user_departments ud ON u.id = ud.user_id
@@ -102,9 +158,11 @@ const getUser = async (req, res) => {
   const eid = req.user.isSuperAdmin ? null : req.user.establishmentId;
   const result = await query(
     `SELECT u.*, r.code AS role_code, r.name AS role_name, r.name_ar AS role_name_ar,
+            r2.code AS secondary_role_code, r2.name AS secondary_role_name, r2.name_ar AS secondary_role_name_ar,
             e.name AS establishment_name, e.code AS establishment_code
      FROM users u
      JOIN roles r ON u.role_id = r.id
+     LEFT JOIN roles r2 ON r2.id = u.secondary_role_id
      JOIN establishments e ON u.establishment_id = e.id
      WHERE u.id = $1 ${eid ? 'AND u.establishment_id = $2' : ''}`,
     eid ? [req.params.id, eid] : [req.params.id]
@@ -128,7 +186,7 @@ const createUser = async (req, res) => {
   const {
     email, password, firstName, lastName, firstNameAr, lastNameAr,
     matricule, phone, speciality, grade, roleCode, departmentId, jobTitleId,
-    preferredLanguage, establishmentId: bodyEstId,
+    preferredLanguage, establishmentId: bodyEstId, secondaryRoleCode,
   } = req.body;
 
   if (!email || !firstName || !lastName || !roleCode) {
@@ -185,7 +243,21 @@ const createUser = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Le personnel médical ou paramédical doit obligatoirement être affecté à un service.' });
   }
 
-  // ── Contrainte unicite : un seul chef et un seul surveillant par service ──
+  // Role secondaire optionnel (« Chef de service » est un titre : le metier
+  // reel est porte a cote). Purement descriptif, aucun droit supplementaire.
+  const secondary = await resolveSecondaryRole(secondaryRoleCode, roleCode, eid);
+  if (secondary.error) return res.status(400).json({ success: false, message: secondary.error });
+
+  // Quatrieme et dernier site d'ecriture de `user_departments` : le role est
+  // deja connu ici (corps de la requete), donc pas besoin d'aller le relire en
+  // base comme le fait `checkDepartmentMembership`.
+  if (departmentId && isHospitalWideRole(roleCode)) {
+    return res.status(400).json(NO_DEPT_REFUSAL);
+  }
+
+  // ── Contrainte unicite : un seul chef de service par service ──
+  // Les surveillants de service, eux, peuvent etre PLUSIEURS pour un meme
+  // service : aucune verification d'unicite n'est faite pour ce role.
   if (departmentId) {
     if (roleCode === 'department_head') {
       const existing = await query(
@@ -200,24 +272,6 @@ const createUser = async (req, res) => {
         return res.status(409).json({
           success: false,
           message: `Ce service a deja un chef de service : ${ex.first_name} ${ex.last_name}. Utilisez "Designer Chef de Service" pour le remplacer.`,
-        });
-      }
-    }
-
-    if (roleCode === 'service_supervisor') {
-      const existing = await query(
-        `SELECT u.id, u.first_name, u.last_name
-         FROM user_departments ud
-         JOIN users u ON ud.user_id = u.id
-         JOIN roles r ON u.role_id = r.id
-         WHERE ud.department_id = $1 AND r.code = 'service_supervisor' AND u.is_active = TRUE`,
-        [departmentId]
-      );
-      if (existing.rows.length > 0) {
-        const ex = existing.rows[0];
-        return res.status(409).json({
-          success: false,
-          message: `Ce service a deja un surveillant : ${ex.first_name} ${ex.last_name}. Utilisez "Designer Surveillant" pour le remplacer.`,
         });
       }
     }
@@ -242,13 +296,14 @@ const createUser = async (req, res) => {
     const u = await client.query(
       `INSERT INTO users (
          establishment_id, role_id, matricule, first_name, last_name, first_name_ar, last_name_ar,
-         email, phone, password_hash, speciality, grade, preferred_language, can_login, job_title_id
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         email, phone, password_hash, speciality, grade, preferred_language, can_login, job_title_id,
+         secondary_role_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING id, email, first_name, last_name, matricule, can_login, created_at`,
       [eid, roleResult.rows[0].id, matricule || null, firstName, lastName,
        firstNameAr || null, lastNameAr || null,
        email, phone || null, passwordHash, resolvedSpeciality, grade || null,
-       preferredLanguage || 'fr', canLogin, jobTitleId || null]
+       preferredLanguage || 'fr', canLogin, jobTitleId || null, secondary.id]
     );
 
     if (departmentId) {
@@ -282,6 +337,27 @@ const createUser = async (req, res) => {
 // PUT /api/users/:id — Modifier un utilisateur
 const updateUser = async (req, res) => {
   const { firstName, lastName, firstNameAr, lastNameAr, phone, speciality, grade, isOnLeave, preferredLanguage } = req.body;
+
+  // Role secondaire optionnel — traite a part pour ne rien changer a la requete
+  // existante. Absent du body = on n'y touche pas ; chaine vide / null = on retire.
+  if (Object.prototype.hasOwnProperty.call(req.body, 'secondaryRoleCode')) {
+    const target = await query(
+      `SELECT u.establishment_id, r.code AS role_code
+         FROM users u JOIN roles r ON r.id = u.role_id
+        WHERE u.id = $1`,
+      [req.params.id]
+    );
+    if (!target.rows[0]) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+    if (!req.user.isSuperAdmin && target.rows[0].establishment_id !== req.user.establishmentId) {
+      return res.status(403).json({ success: false, message: 'Utilisateur hors de votre etablissement.' });
+    }
+
+    const secondary = await resolveSecondaryRole(
+      req.body.secondaryRoleCode || null, target.rows[0].role_code, target.rows[0].establishment_id
+    );
+    if (secondary.error) return res.status(400).json({ success: false, message: secondary.error });
+    await query('UPDATE users SET secondary_role_id = $1, updated_at = NOW() WHERE id = $2', [secondary.id, req.params.id]);
+  }
 
   const result = await query(
     `UPDATE users SET
@@ -402,7 +478,18 @@ const getCreatableRoles = async (req, res) => {
      ORDER BY level`,
     [req.user.establishmentId, allowed]
   );
-  return res.json({ success: true, data: result.rows });
+
+  // Roles metier cumulables avec le titre « Chef de service ». Expose a cote de
+  // `data` pour ne rien changer a la forme deja consommee par le frontend.
+  const secondaryRoles = await query(
+    `SELECT id, code, name, name_ar, level
+     FROM roles
+     WHERE establishment_id = $1 AND code = ANY($2::text[])
+     ORDER BY level`,
+    [req.user.establishmentId, SECONDARY_ROLE_CODES]
+  );
+
+  return res.json({ success: true, data: result.rows, secondaryRoles: secondaryRoles.rows });
 };
 
 module.exports = {

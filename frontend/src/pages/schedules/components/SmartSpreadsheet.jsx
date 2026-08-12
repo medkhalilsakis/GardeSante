@@ -126,6 +126,16 @@ const PROPOSAL_COLOR_PALETTES = [
 
 const getProposalPalette = (index = 0) => PROPOSAL_COLOR_PALETTES[index % PROPOSAL_COLOR_PALETTES.length];
 
+// Teinte réservée aux agents empruntés à un autre service, tant que leur chef
+// n'a pas répondu. Volontairement distincte des palettes de propositions
+// (ambre/orange) pour qu'on ne confonde pas les deux signaux.
+const PENDING_EXT = {
+  bg: 'rgba(249, 115, 22, .10)',
+  bgDark: 'rgba(249, 115, 22, .20)',
+  border: '#F97316',
+  text: '#9A3412',
+};
+
 const isWeekend = d => d.getDay() === 0 || d.getDay() === 6;
 
 function getDays(start, end) {
@@ -698,6 +708,16 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
   const scheduleDetail = schedData?.data?.data || schedData?.data;
   const schedule = scheduleDetail?.schedule || scheduleDetail;
 
+  // Personnel emprunté à un autre service : l'accord du chef propriétaire est
+  // demandé automatiquement mais ne bloque rien. Tant qu'il n'a pas répondu, la
+  // ligne est teintée ; s'il accepte elle redevient normale ; s'il refuse le
+  // serveur la retire seul, sans toucher à l'état du planning.
+  const externalLoans = scheduleDetail?.externalLoans || {};
+  const pendingExternalCount = useMemo(
+    () => Object.values(externalLoans).filter(l => l.status === 'pending').length,
+    [externalLoans]
+  );
+
   // Change proposals fetch (du surveillant)
   const { data: propData } = useQuery({
     queryKey: ['schedule-change-proposals', scheduleId],
@@ -921,7 +941,12 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
   }, [schedule, isWeekendHolidaySchedule, publicHolidays]);
 
   const showDailyGrid = false;
-  const canProposeChanges = schedule?.status === 'submitted' && ['service_supervisor', 'general_supervisor'].includes(user?.roleCode);
+  // Un planning envoyé est en vigueur ('submitted') puis en cours ('active').
+  // Les deux ouvrent le droit de proposer une modification : sans 'active', les
+  // surveillants perdraient ce droit au moment même où le planning démarre.
+  const canProposeChanges = ['submitted', 'active'].includes(schedule?.status) && ['service_supervisor', 'general_supervisor'].includes(user?.roleCode);
+  // En revanche l'annulation d'envoi s'arrête au démarrage : un planning en
+  // cours ne peut plus revenir en brouillon.
   const canCancelSubmission = schedule?.status === 'submitted' && user?.roleCode === 'department_head';
 
   // Build rows from schedule
@@ -953,6 +978,9 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
         periodStart: dateKey(m.periodStart || m.period_start) || dateKey(schedule.start_date),
         periodEnd: dateKey(m.periodEnd || m.period_end) || dateKey(schedule.end_date),
         shiftStart: m.shiftStart || '07:00', shiftEnd: m.shiftEnd || '07:00',
+        // Garde à domicile — absent ⇒ false ⇒ garde à l'hôpital, en présence.
+        // Les plannings enregistrés avant cette colonne restent donc en présence.
+        atHome: (m.atHome ?? m.at_home) === true,
         deptId: m.department_id || departmentId,
         shifts: shiftMap, isNew: false,
         isProposedNewRow,
@@ -973,6 +1001,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
     lastName: '', firstName: '', roleName: '', phone: '', matricule: '',
     periodStart: dateKey(schedule?.start_date), periodEnd: dateKey(schedule?.end_date),
     shiftStart: '07:00', shiftEnd: '07:00',
+    atHome: false,
     deptId: departmentId, shifts: {}, isNew: true,
     custom: {},
   });
@@ -988,6 +1017,8 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
     { key: 'periodEnd',   label: 'Période - fin',   w: 118, type: 'date' },
     { key: 'shiftStart',  label: 'Durée - début', w: 105, type: 'time' },
     { key: 'shiftEnd',    label: 'Durée - fin',    w: 105, type: 'time' },
+    // Nature de la garde : décochée par défaut ⇒ garde à l'hôpital, en présence.
+    { key: 'atHome',      label: 'Garde à domicile', w: 112, type: 'bool' },
   ];
   const visibleFixedCols = fixedCols.filter(c => !hiddenCols.has(c.key));
   const visibleCols = visibleFixedCols; // backward compat alias
@@ -1138,13 +1169,11 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
       deptId:    member.dept_id || member.deptId || departmentId,
       isNew:     false,
     });
-    // Si personnel externe → notification
+    // Personnel externe : la demande d'accord part toute seule à l'enregistrement.
+    // Rien n'est bloqué ici — la ligne sera simplement teintée tant que le chef
+    // propriétaire n'a pas répondu.
     if (member.dept_id && member.dept_id !== departmentId) {
-      toast(`⚠️ Personnel externe (${member.dept_name}) — notification envoyée au chef du service`, { icon: '🔔' });
-      // Call backend to record external assignment
-      schedulesAPI.action?.(scheduleId, 'notify_external', {
-        userId: member.id, deptId: member.dept_id,
-      }).catch(() => {});
+      toast(`Personnel externe (${member.dept_name}) — une demande d'accord partira à son chef à l'enregistrement. Le tableur reste enregistrable et envoyable.`, { icon: '🔔', duration: 5000 });
     }
   };
 
@@ -1194,11 +1223,16 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
         if (!silent) toast.success('Proposition envoyée au chef de service');
         return;
       }
-      await scheduleBuilderAPI.saveDraft(scheduleId, { rows, customCols, week_organization: weekOrganization });
+      const res = await scheduleBuilderAPI.saveDraft(scheduleId, { rows, customCols, week_organization: weekOrganization });
       // Une modification intervenue pendant la requête reste marquée à sauvegarder.
       if (saveVersion.current === versionAtStart) setIsDirty(false);
       qc.invalidateQueries({ queryKey: ['schedule-detail', scheduleId] });
-      if (!silent) toast.success('Brouillon enregistré');
+      qc.invalidateQueries({ queryKey: ['staff-loans'] });
+      if (!silent) {
+        const waiting = res?.data?.data?.pendingExternal?.length || 0;
+        if (waiting) toast.success(`Brouillon enregistré — ${waiting} agent(s) externe(s) en attente de l'accord de leur chef`);
+        else toast.success('Brouillon enregistré');
+      }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Impossible d\'enregistrer le brouillon. Vérifiez la connexion au serveur.');
     } finally { setSaving(false); }
@@ -1275,6 +1309,13 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
             Période invalide : {periodErrors[0]}
           </div>
         )}
+        {pendingExternalCount > 0 && (
+          <div style={{ width: '100%', padding: '8px 10px', borderRadius: 7, background: PENDING_EXT.bg, border: `1px dashed ${PENDING_EXT.border}`, color: PENDING_EXT.text, fontSize: 11, fontWeight: 600 }}>
+            ⏳ {pendingExternalCount} personnel(s) d'un autre service en attente de l'accord de leur chef.
+            Les lignes concernées sont teintées. Vous pouvez enregistrer et envoyer ce planning normalement :
+            en cas de refus, seule la ligne concernée sera retirée automatiquement.
+          </div>
+        )}
         {/* Back */}
         <button onClick={onBack} style={btnGhost}>
           <IcoBack /> <span>Retour</span>
@@ -1330,8 +1371,9 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
           <IcoPlus /> Colonne
         </button>
 
-        {/* Transmettre au SG */}
-        {['service_supervisor', 'department_head'].includes(user?.roleCode) && schedule?.status === 'submitted' && (
+        {/* Transmettre au SG — possible tant que le planning est en vigueur
+            ('submitted' avant son démarrage, 'active' une fois en cours). */}
+        {['service_supervisor', 'department_head'].includes(user?.roleCode) && ['submitted', 'active'].includes(schedule?.status) && (
           <button
             type="button"
             onClick={handleNotifySG}
@@ -1719,6 +1761,8 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
                     ? <span title="Période individuelle de présence dans ce planning">{c.label} 📅</span>
                     : c.type === 'time'
                     ? <span title="Heures de début et fin de garde">{c.label} ⏰</span>
+                    : c.type === 'bool'
+                    ? <span title="Cochée : l'agent assure sa garde à domicile (astreinte). Décochée (par défaut) : garde à l'hôpital, en présence.">{c.label} 🏠</span>
                     : c.label
                   }
                 </th>
@@ -1778,10 +1822,22 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
               const firstRowProp = rowProps[0];
               const rowPalette = firstRowProp ? firstRowProp.palette : activePalette;
 
+              // Ligne d'un agent externe en attente de l'accord de son chef.
+              // Teinte distincte, uniquement si aucune proposition ne colore déjà la ligne.
+              const loanState = row.userId ? externalLoans[row.userId] : null;
+              const showPendingExternal = loanState?.status === 'pending' && !hasRowConflict && !isRowProposedYellow;
+              const pendingTitle = showPendingExternal
+                ? `En attente de l'accord de ${loanState.ownerChiefName || 'son chef de service'}${loanState.ownerDepartmentName ? ` (${loanState.ownerDepartmentName})` : ''}. Le tableur s'enregistre et s'envoie normalement ; en cas de refus cette ligne sera retirée automatiquement.`
+                : undefined;
+              const baseBg = showPendingExternal
+                ? PENDING_EXT.bg
+                : ri % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-elevated)';
+
               return (
                 <tr
                   key={row.id}
                   draggable
+                  title={pendingTitle}
                   onDragStart={e => handleRowDragStart(e, ri)}
                   onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = e.dataTransfer.types.includes('application/json') ? 'copy' : 'move'; setDragOverRow(ri); }}
                   onDragLeave={() => setDragOverRow(null)}
@@ -1794,16 +1850,14 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
                       ? 'linear-gradient(135deg, rgba(254,249,195,.4) 0%, rgba(243,232,255,.5) 100%)'
                       : isRowProposedYellow
                       ? rowPalette.bg
-                      : ri % 2 === 0
-                      ? 'var(--bg-card)'
-                      : 'var(--bg-elevated)',
+                      : baseBg,
                     opacity: isDragging ? 0.4 : 1,
                     transition: 'background .1s',
-                    outline: isOver ? '2px solid var(--color-primary)' : hasRowConflict ? '2px dashed #9333EA' : isRowProposedYellow ? `1.5px solid ${rowPalette.borderDark}` : 'none',
+                    outline: isOver ? '2px solid var(--color-primary)' : hasRowConflict ? '2px dashed #9333EA' : isRowProposedYellow ? `1.5px solid ${rowPalette.borderDark}` : showPendingExternal ? `1.5px dashed ${PENDING_EXT.border}` : 'none',
                     boxShadow: isOver ? 'inset 0 0 0 2px rgba(27,79,202,.15)' : isRowProposedYellow ? `inset 0 0 0 1px ${rowPalette.badgeBg}` : 'none',
                   }}
-                  onMouseEnter={e => { if (!isOver && !isDragging) e.currentTarget.style.background = isRowProposedYellow ? rowPalette.bgDark : 'rgba(27,79,202,.04)'; }}
-                  onMouseLeave={e => { if (!isOver) e.currentTarget.style.background = isRowProposedYellow ? rowPalette.bg : ri % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-elevated)'; }}
+                  onMouseEnter={e => { if (!isOver && !isDragging) e.currentTarget.style.background = isRowProposedYellow ? rowPalette.bgDark : showPendingExternal ? PENDING_EXT.bgDark : 'rgba(27,79,202,.04)'; }}
+                  onMouseLeave={e => { if (!isOver) e.currentTarget.style.background = isRowProposedYellow ? rowPalette.bg : baseBg; }}
                 >
                   {/* Drag handle */}
                   <td style={{ ...tdBase, cursor: 'grab', textAlign: 'center', color: isRowProposedYellow ? rowPalette.textDark : 'var(--text-muted)', paddingLeft: 4, background: isRowProposedYellow ? rowPalette.bgDark : undefined }}
@@ -1814,6 +1868,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
                   {/* Row number */}
                   <td style={{ ...tdBase, textAlign: 'center', background: isRowProposedYellow ? rowPalette.bgDark : undefined }}>
                     <span style={{ fontSize: 9, fontWeight: isRowProposedYellow ? 800 : 400, color: isRowProposedYellow ? rowPalette.textDark : 'var(--text-muted)' }}>{ri + 1}</span>
+                    {showPendingExternal && <span style={{ fontSize: 9, marginLeft: 2 }} aria-label="En attente d'accord">⏳</span>}
                   </td>
 
                   {/* Info columns — fixed + time */}
@@ -1894,6 +1949,26 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
                           title={tooltipTitle}>
                           <input type="time" value={displayTime} onChange={e => updateRow(row.id, { [col.key]: e.target.value })}
                             style={{ fontSize: 10, border: 'none', background: 'transparent', color: isConflict ? '#581C87' : hasProps ? pal.textDark : 'var(--text-primary)', fontWeight: hasProps ? 800 : 400, cursor: 'pointer', padding: 0, width: '100%', outline: 'none' }} />
+                        </td>
+                      );
+                    }
+                    // Garde à domicile — une simple case à cocher, décochée par
+                    // défaut. Cochée : astreinte à domicile ; décochée : garde à
+                    // l'hôpital, en présence. La valeur est un booléen, pas un
+                    // code : rien d'autre dans le tableur ne change.
+                    if (col.type === 'bool') {
+                      const checked = row[col.key] === true;
+                      return (
+                        <td key={col.key} style={{ ...tdBase, background: cellBg, border: cellBorder, textAlign: 'center' }}
+                          title={tooltipTitle || (checked
+                            ? 'Garde à domicile (astreinte) — décochez pour une garde à l’hôpital'
+                            : 'Garde à l’hôpital, en présence — cochez pour une garde à domicile')}>
+                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 10, fontWeight: 700, color: checked ? '#7C3AED' : 'var(--text-muted)' }}>
+                            <input type="checkbox" checked={checked}
+                              onChange={e => updateRow(row.id, { [col.key]: e.target.checked })}
+                              style={{ width: 14, height: 14, cursor: 'pointer', accentColor: '#7C3AED', margin: 0 }} />
+                            {checked ? '🏠 Domicile' : 'Présence'}
+                          </label>
                         </td>
                       );
                     }

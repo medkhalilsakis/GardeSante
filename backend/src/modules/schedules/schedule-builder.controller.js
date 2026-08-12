@@ -12,6 +12,8 @@ const {
 } = require('./rules-engine');
 const { log, getIp } = require('../history/history.controller');
 const { createNotification } = require('../notifications/notifications.controller');
+const { emitToEstablishment, emitToDepartment } = require('../../realtime/emit');
+const { SCHEDULE_IN_FORCE } = require('../../config/constants');
 
 // Utilitaire : dates entre start et end
 const getDatesInRange = (startDate, endDate) => {
@@ -348,7 +350,7 @@ const saveDraft = async (req, res) => {
   const { rows = [], customCols = [], week_organization = [] } = req.body;
   const estId = req.user.establishmentId;
   const schedRes = await query(
-    'SELECT id, department_id, start_date, end_date, status, metadata, schedule_type FROM schedules WHERE id=$1 AND establishment_id=$2',
+    'SELECT id, name, establishment_id, department_id, start_date, end_date, status, metadata, schedule_type FROM schedules WHERE id=$1 AND establishment_id=$2',
     [scheduleId, estId]
   );
   const schedule = schedRes.rows[0];
@@ -388,6 +390,44 @@ const saveDraft = async (req, res) => {
   if (roster.length > 0 && !roster.some(row => (row.periodEnd || end) === end)) {
     return res.status(400).json({ success: false, message: `Au moins un personnel doit couvrir la fin du planning (${end}).` });
   }
+
+  // RÈGLE I — Un personnel en congé ne peut pas être affecté à une garde pendant sa période de congé.
+  const { findLeaveViolations } = require('../absences/leave-check');
+  const leaveAssignments = [];
+  for (const row of roster) {
+    const pStart = row.periodStart || start, pEnd = row.periodEnd || end;
+    for (const date of Object.keys(row.shifts || {})) {
+      const code = row.shifts[date];
+      if (code === 'R' || date < pStart || date > pEnd) continue;
+      if (specialDateSet && !specialDateSet.has(dateKey(date))) continue;
+      leaveAssignments.push({ userId: row.userId, date: dateKey(date) });
+    }
+  }
+  const leaveViolations = await findLeaveViolations(leaveAssignments, start, end);
+  if (leaveViolations.length > 0) {
+    const first = leaveViolations[0];
+    const names = new Map(roster.filter(r => r.userId === first.userId).map(r => [r.userId, `${r.lastName || ''} ${r.firstName || ''}`.trim() || 'Personnel']));
+    const name = names.get(first.userId) || 'Ce personnel';
+    return res.status(400).json({
+      success: false,
+      code: 'LEAVE_CONFLICT',
+      message: `${name} est en ${first.typeName} du ${first.leaveStart} au ${first.leaveEnd} : impossible de l'affecter le ${first.date}. Retirez cette affectation ou posez-en une autre.`,
+      data: { violations: leaveViolations }
+    });
+  }
+
+  // RÈGLE II — Un agent d'un autre service demande l'accord de son chef, mais
+  // cet accord ne bloque PAS l'enregistrement : la demande part automatiquement,
+  // la ligne reste marquée « en attente » et le tableur s'enregistre et s'envoie
+  // normalement. Un refus retirera la seule ligne concernée (voir `decideLoan`).
+  const { syncExternalStaffLoans } = require('./external-staff');
+  const loanSync = await syncExternalStaffLoans({
+    schedule,
+    roster,
+    actor: req.user,
+    app: req.app,
+  });
+
   // Convertit aussi les codes du tableur en gardes réelles : le brouillon
   // reste exploitable par les règles métier et par la validation finale.
   const typeRes = await query('SELECT id, UPPER(code) AS code, LOWER(name) AS name FROM shift_types WHERE establishment_id=$1 AND is_active=TRUE', [estId]);
@@ -423,7 +463,15 @@ const saveDraft = async (req, res) => {
       [scheduleId, JSON.stringify({ spreadsheet: { rows: roster, customCols, week_organization: Array.isArray(week_organization) ? week_organization : [], savedAt: new Date().toISOString() } })]
     );
   });
-  return res.json({ success: true, message: 'Brouillon enregistré', data: { savedAt: new Date().toISOString() } });
+  const externalLoans = await require('./external-staff').getScheduleLoanStates(scheduleId);
+  const pendingCount = loanSync.pending.length;
+  return res.json({
+    success: true,
+    message: pendingCount
+      ? `Brouillon enregistré — ${pendingCount} agent(s) externe(s) en attente de l'accord de leur chef de service.`
+      : 'Brouillon enregistré',
+    data: { savedAt: new Date().toISOString(), externalLoans, pendingExternal: loanSync.pending },
+  });
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -446,9 +494,19 @@ const getScheduleDetail = async (req, res) => {
   const { scheduleId } = req.params;
   const estId = req.user.establishmentId;
 
+  // ⚠️ Dates en TEXTE, jamais en objets Date. node-pg convertit une colonne DATE
+  // en Date JS à minuit LOCAL ; sérialisée en JSON elle devient
+  // « 2026-08-09T23:00:00.000Z » pour un planning qui commence le 10 (fuseau +01).
+  // Le tableur ne compare que des clés « YYYY-MM-DD » obtenues en tronquant la
+  // chaîne : il reculait donc d'un jour entier — colonnes affichées, périodes par
+  // défaut des lignes, bornes de validation et min/max des sélecteurs de date.
+  // La liste des plannings (`schedules.controller.js`) TO_CHAR déjà ses dates,
+  // d'où la contradiction visible entre la carte du planning et son tableur.
   const sched = await query(
     `SELECT sch.*, d.name AS dept_name, d.code AS dept_code,
-            u.first_name AS created_by_first, u.last_name AS created_by_last
+            u.first_name AS created_by_first, u.last_name AS created_by_last,
+            TO_CHAR(sch.start_date, 'YYYY-MM-DD') AS start_date_key,
+            TO_CHAR(sch.end_date,   'YYYY-MM-DD') AS end_date_key
      FROM schedules sch
      JOIN departments d ON sch.department_id = d.id
      JOIN users u ON sch.created_by = u.id
@@ -459,11 +517,19 @@ const getScheduleDetail = async (req, res) => {
   if (!sched.rows[0]) return res.status(404).json({ success: false, message: 'Planning introuvable' });
   if (sched.rows[0].status === 'draft' && (req.user.roleCode !== 'department_head' || sched.rows[0].created_by !== req.user.id)) return res.status(403).json({ success: false, message: 'Ce brouillon est privé au chef de service.' });
 
+  const { start_date_key, end_date_key, ...schedRow } = sched.rows[0];
+  const schedule = {
+    ...schedRow,
+    start_date: start_date_key || schedRow.start_date,
+    end_date:   end_date_key   || schedRow.end_date,
+  };
+
   const shifts = await query(
     `SELECT s.*, u.first_name, u.last_name, u.matricule, u.speciality, u.grade, u.phone,
             r.code AS role_code, r.name AS role_name,
             st.name AS shift_type_name, st.code AS shift_type_code,
-            st.color, st.start_time, st.end_time, st.duration_hours
+            st.color, st.start_time, st.end_time, st.duration_hours,
+            TO_CHAR(s.shift_date, 'YYYY-MM-DD') AS shift_date_key
      FROM shifts s
      JOIN users u ON s.user_id = u.id
      JOIN roles r ON u.role_id = r.id
@@ -480,18 +546,28 @@ const getScheduleDetail = async (req, res) => {
 
   const staff = await query(
     `SELECT u.id, u.first_name, u.last_name, u.matricule, u.phone, r.name AS role_name,
-            a.period_start, a.period_end, a.position
+            TO_CHAR(a.period_start, 'YYYY-MM-DD') AS period_start,
+            TO_CHAR(a.period_end,   'YYYY-MM-DD') AS period_end,
+            a.position
      FROM schedule_staff_assignments a JOIN users u ON u.id=a.user_id JOIN roles r ON r.id=u.role_id
      WHERE a.schedule_id=$1 ORDER BY a.position`, [scheduleId]
   );
 
+  // État d'approbation des agents empruntés à un autre service : le tableur
+  // colore les lignes en attente sans que rien ne soit bloqué.
+  const externalLoans = await require('./external-staff').getScheduleLoanStates(scheduleId);
+
   return res.json({
     success: true,
     data: {
-      schedule: sched.rows[0],
-      shifts:   shifts.rows,
+      schedule,
+      shifts:   shifts.rows.map(({ shift_date_key, ...s }) => ({
+        ...s,
+        shift_date: shift_date_key || s.shift_date,
+      })),
       cycles:   cycles.rows,
       staff:    staff.rows,
+      externalLoans,
     },
   });
 };
@@ -551,7 +627,7 @@ const createChangeProposal = async (req, res) => {
   const schedule = await query('SELECT id, department_id, establishment_id, status, name, created_by FROM schedules WHERE id=$1 AND establishment_id=$2', [scheduleId, req.user.establishmentId]);
   const item = schedule.rows[0];
   if (!item) return res.status(404).json({ success: false, message: 'Planning introuvable' });
-  if (item.status !== 'submitted') return res.status(400).json({ success: false, message: 'Les propositions sont ouvertes après l’envoi du planning.' });
+  if (!SCHEDULE_IN_FORCE.includes(item.status)) return res.status(400).json({ success: false, message: 'Les propositions sont ouvertes une fois le planning envoyé et mis en marche.' });
   if (!(await canProposeScheduleChange(req.user, item.department_id))) return res.status(403).json({ success: false, message: 'Seuls les surveillants concernés peuvent proposer une modification.' });
   const created = await query(
     `INSERT INTO schedule_change_proposals (schedule_id, establishment_id, department_id, proposed_by, proposal, comment)
@@ -621,7 +697,18 @@ const cancelScheduleSubmission = async (req, res) => {
   if (!item) return res.status(404).json({ success: false, message: 'Planning introuvable.' });
   const head = await query('SELECT 1 FROM user_departments WHERE user_id=$1 AND department_id=$2 AND is_head=TRUE', [req.user.id, item.department_id]);
   if (req.user.roleCode !== 'department_head' || !head.rows.length) return res.status(403).json({ success: false, message: 'Seul le chef de ce service peut annuler cet envoi.' });
-  if (item.status !== 'submitted') return res.status(400).json({ success: false, message: 'Seul un planning envoyé peut être annulé.' });
+  // Un planning déjà en cours ne peut pas être « dé-envoyé » : des gardes sont
+  // en train de se dérouler. Seul un planning envoyé mais pas encore démarré
+  // peut revenir en brouillon.
+  if (item.status !== 'submitted') {
+    return res.status(400).json({
+      success: false,
+      message: item.status === 'active'
+        ? 'Ce planning est déjà en cours : son envoi ne peut plus être annulé. Passez par une proposition de modification ou un remplacement.'
+        : 'Seul un planning envoyé et non encore démarré peut être annulé.',
+    });
+  }
+
   await transaction(async client => {
     await client.query(`UPDATE schedules SET status='draft', updated_at=NOW() WHERE id=$1`, [scheduleId]);
     await client.query(`INSERT INTO schedule_workflow_history (schedule_id, step_order, action, actor_id, comment) VALUES ($1,0,'submission_cancelled',$2,$3)`, [scheduleId, req.user.id, String(reason).trim()]);
@@ -638,7 +725,7 @@ const submitSchedule = async (req, res) => {
 
   // Vérifier accès + statut
   const sched = await query(
-    'SELECT id, status, establishment_id, department_id FROM schedules WHERE id=$1',
+    'SELECT id, status, name, establishment_id, department_id FROM schedules WHERE id=$1',
     [scheduleId]
   );
   if (!sched.rows[0]) return res.status(404).json({ success: false, message: 'Planning introuvable' });
@@ -655,12 +742,21 @@ const submitSchedule = async (req, res) => {
     });
   }
 
-  // Passer en "submitted"
-  await query(
-    `UPDATE schedules SET status = 'submitted', notes = COALESCE($2, notes), updated_at = NOW()
-     WHERE id = $1`,
+  // Mise en marche immédiate : il n'y a ni approbation ni refus. Le planning est
+  // effectif dès l'envoi, et déjà « en cours » si sa période a commencé.
+  const updated = await query(
+    `UPDATE schedules
+        SET status = CASE WHEN start_date <= CURRENT_DATE THEN 'active' ELSE 'submitted' END,
+            notes = COALESCE($2, notes),
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING status,
+                TO_CHAR(start_date, 'YYYY-MM-DD') AS start_date,
+                TO_CHAR(end_date,   'YYYY-MM-DD') AS end_date`,
     [scheduleId, notes || null]
   );
+  const newStatus = updated.rows[0].status;
+  const isRunning = newStatus === 'active';
 
   await query(
     `INSERT INTO schedule_workflow_history (schedule_id, step_order, action, actor_id, comment)
@@ -670,12 +766,35 @@ const submitSchedule = async (req, res) => {
 
   log({
     userId: req.user.id, action: 'schedule_submit', category: 'schedule',
-    description: `Planning soumis pour validation`,
+    description: isRunning
+      ? 'Planning envoyé et mis en marche (période déjà commencée)'
+      : 'Planning envoyé et mis en vigueur',
     entityType: 'schedules', entityId: scheduleId, ipAddress: getIp(req),
   });
 
   await notifyScheduleReviewers({ scheduleId, establishmentId: estId, departmentId: sched.rows[0].department_id, senderId: req.user.id, scheduleName: sched.rows[0].name });
-  return res.json({ success: true, message: 'Planning envoyé aux surveillants pour information et propositions.', data: evaluation });
+
+  // Temps réel : le planning apparaît chez les surveillants sans rechargement.
+  const payload = {
+    scheduleId,
+    name: sched.rows[0].name,
+    status: newStatus,
+    state: isRunning ? 'en_cours' : 'soumis',
+    startDate: updated.rows[0].start_date,
+    endDate: updated.rows[0].end_date,
+  };
+  emitToEstablishment(req.app, estId, 'schedule:submitted', payload);
+  if (sched.rows[0].department_id) {
+    emitToDepartment(req.app, sched.rows[0].department_id, 'schedule:submitted', payload);
+  }
+
+  return res.json({
+    success: true,
+    message: isRunning
+      ? 'Planning envoyé et mis en marche : il est en cours dès maintenant. Les surveillants peuvent proposer des modifications.'
+      : 'Planning envoyé et mis en vigueur. Il démarrera à sa date de début. Les surveillants peuvent proposer des modifications.',
+    data: { ...evaluation, status: newStatus, state: payload.state },
+  });
 };
 
 const decideAllChangeProposals = async (req, res) => {

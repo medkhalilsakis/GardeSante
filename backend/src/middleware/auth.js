@@ -62,6 +62,18 @@ const authenticate = async (req, res, next) => {
 
     const user = result.rows[0];
 
+    // Compte archivé par le Super Admin : blocage total, mais RÉVERSIBLE.
+    // Distinct de `is_active = FALSE` (clôture) et de la suppression : les
+    // données restent intactes et le Super Admin peut réactiver à tout moment.
+    if (user.archived_at) {
+      return res.status(403).json({
+        success: false,
+        code: 'ACCOUNT_ARCHIVED',
+        message: 'Ce compte est archivé. Contactez l\'administrateur de la plateforme.',
+        message_ar: 'هذا الحساب مؤرشف. يرجى الاتصال بمسؤول المنصة.',
+      });
+    }
+
     // Vérifier que l'utilisateur peut se connecter (les médecins/résidents n'ont pas d'accès plateforme)
     if (user.can_login === false) {
       return res.status(403).json({
@@ -100,6 +112,24 @@ const authenticate = async (req, res, next) => {
       }
     }
 
+    // Charger le département primaire de l'utilisateur (pour les rooms socket.io et le périmètre de données)
+    let departmentId = null;
+    try {
+      const deptResult = await query(
+        `SELECT department_id FROM user_departments WHERE user_id = $1 AND is_primary = TRUE LIMIT 1`,
+        [user.id]
+      );
+      if (deptResult.rows.length > 0) {
+        departmentId = deptResult.rows[0].department_id;
+      }
+    } catch (deptErr) {
+      if (deptErr.code === '42P01') {
+        console.warn('⚠️  user_departments table missing. Continuing without department.');
+      } else {
+        throw deptErr;
+      }
+    }
+
     req.user = {
       id: user.id,
       email: user.email,
@@ -112,6 +142,7 @@ const authenticate = async (req, res, next) => {
       establishmentId: user.establishment_id,
       establishmentName: user.establishment_name,
       establishmentCode: user.establishment_code,
+      departmentId: departmentId,
       isSuperAdmin: user.role_code === ROLES.SUPER_ADMIN,
       permissions: user.role_code === ROLES.SUPER_ADMIN ? ['*'] : permissionCodes,
     };

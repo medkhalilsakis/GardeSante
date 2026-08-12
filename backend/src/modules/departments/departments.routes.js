@@ -13,6 +13,7 @@ router.put('/:id',                     requirePermission('departments.update'), 
 router.delete('/:id',                  requirePermission('departments.create'), ctrl.deleteDepartment);
 router.put('/:id/head',                requirePermission('departments.update'), ctrl.setDepartmentHead);
 router.put('/:id/supervisor',          requirePermission('departments.update'), ctrl.setDepartmentSupervisor);
+router.delete('/:id/supervisor/:userId', requirePermission('departments.update'), ctrl.removeDepartmentSupervisor);
 router.post('/:id/members',            requirePermission('users.update'),       ctrl.addMember);
 router.delete('/:id/members/:userId',  requirePermission('users.update'),       ctrl.removeMember);
 

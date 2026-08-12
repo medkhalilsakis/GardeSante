@@ -1,4 +1,26 @@
 const { query } = require('../../config/database');
+const { ROLES } = require('../../config/constants');
+
+// ─── Portée de lecture de l'historique d'autrui (Lot 6) ──────
+// L'historique reste immuable et consultable ; on élargit seulement QUI peut
+// lire celui des autres. Le super admin garde la plateforme entière, le
+// directeur et l'admin hôpital sont bornés à leur propre établissement.
+// Aucun autre rôle n'est ouvert : `null` ⇒ 403, comme avant.
+const OVERSIGHT_ROLES = [ROLES.DIRECTOR, ROLES.HOSPITAL_ADMIN];
+
+const resolveHistoryScope = (user) => {
+  if (user.isSuperAdmin) return { all: true, establishmentId: null };
+  if (OVERSIGHT_ROLES.includes(user.roleCode)) {
+    return { all: false, establishmentId: user.establishmentId };
+  }
+  return null;
+};
+
+const historyForbidden = (res) => res.status(403).json({
+  success: false,
+  message: 'Réservé au Super Admin et à la direction de l\'établissement',
+  message_ar: 'مخصص للمشرف العام وإدارة المؤسسة',
+});
 
 // ─── Helper — enregistrer une action ─────────────────────────
 const log = async ({
@@ -79,9 +101,8 @@ exports.getMine = async (req, res) => {
 // GET /api/history/all  — tous les utilisateurs (super_admin)
 // ──────────────────────────────────────────────────────────────
 exports.getAll = async (req, res) => {
-  if (!req.user.isSuperAdmin) {
-    return res.status(403).json({ success: false, message: 'Réservé au Super Admin' });
-  }
+  const scope = resolveHistoryScope(req.user);
+  if (!scope) return historyForbidden(res);
 
   const { page = 1, limit = 40, userId, category, action, from, to, search } = req.query;
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -90,6 +111,13 @@ exports.getAll = async (req, res) => {
   const params = [];
   let idx = 1;
 
+  // Super admin : plateforme entière. Directeur / admin hôpital : leur
+  // établissement uniquement (contrainte de portée, aucun autre rôle).
+  if (!scope.all) {
+    conditions.push(`u.establishment_id = $${idx}`);
+    params.push(scope.establishmentId);
+    idx++;
+  }
   if (userId)   { conditions.push(`al.user_id = $${idx}`); params.push(userId); idx++; }
   if (category) { conditions.push(`al.category = $${idx}`); params.push(category); idx++; }
   if (action)   { conditions.push(`al.action ILIKE $${idx}`); params.push(`%${action}%`); idx++; }
@@ -142,8 +170,23 @@ exports.getAll = async (req, res) => {
 // GET /api/history/users/:id  — super_admin lit le profil d'un user
 // ──────────────────────────────────────────────────────────────
 exports.getUserHistory = async (req, res) => {
-  if (!req.user.isSuperAdmin) {
-    return res.status(403).json({ success: false, message: 'Réservé au Super Admin' });
+  const scope = resolveHistoryScope(req.user);
+  if (!scope) return historyForbidden(res);
+
+  // Le directeur ne lit que les agents de son hôpital : on vérifie avant de
+  // renvoyer quoi que ce soit, sinon l'id devient une fuite inter-établissement.
+  if (!scope.all) {
+    const owner = await query('SELECT establishment_id FROM users WHERE id = $1', [req.params.id]);
+    if (!owner.rows.length) {
+      return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+    }
+    if (owner.rows[0].establishment_id !== scope.establishmentId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cet agent n\'appartient pas à votre établissement',
+        message_ar: 'هذا الموظف لا ينتمي إلى مؤسستكم',
+      });
+    }
   }
 
   const { page = 1, limit = 30, category } = req.query;
@@ -186,9 +229,9 @@ exports.getUserHistory = async (req, res) => {
 // GET /api/history/users  — liste des users (super_admin, pour filtrage)
 // ──────────────────────────────────────────────────────────────
 exports.getUsersList = async (req, res) => {
-  if (!req.user.isSuperAdmin) {
-    return res.status(403).json({ success: false, message: 'Réservé au Super Admin' });
-  }
+  const scope = resolveHistoryScope(req.user);
+  if (!scope) return historyForbidden(res);
+
   const result = await query(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.avatar_url,
             r.name AS role_name, r.code AS role_code, e.name AS establishment_name
@@ -196,8 +239,9 @@ exports.getUsersList = async (req, res) => {
      JOIN roles r ON u.role_id = r.id
      JOIN establishments e ON u.establishment_id = e.id
      WHERE u.is_active = TRUE
+       ${scope.all ? '' : 'AND u.establishment_id = $1'}
      ORDER BY u.last_name, u.first_name`,
-    []
+    scope.all ? [] : [scope.establishmentId]
   );
   return res.json({ success: true, data: result.rows });
 };
@@ -205,7 +249,25 @@ exports.getUsersList = async (req, res) => {
 // ──────────────────────────────────────────────────────────────
 // GET /api/history/categories  — liste des catégories disponibles
 // ──────────────────────────────────────────────────────────────
+// `?scope=establishment` (Lot 6) : opt-in, honoré pour la direction seulement.
+// Sans ce paramètre le comportement est inchangé — chacun voit les catégories de
+// ses propres actions, le super admin celles de la plateforme. C'est ce que
+// `HistoryPage` attend pour son onglet « mon historique ».
 exports.getCategories = async (req, res) => {
+  const scope = req.query.scope === 'establishment' ? resolveHistoryScope(req.user) : null;
+
+  if (scope && !scope.all) {
+    const result = await query(
+      `SELECT DISTINCT al.category
+       FROM activity_logs al
+       JOIN users u ON al.user_id = u.id
+       WHERE u.establishment_id = $1
+       ORDER BY al.category`,
+      [scope.establishmentId]
+    );
+    return res.json({ success: true, data: result.rows.map(r => r.category) });
+  }
+
   const uid = req.user.isSuperAdmin ? null : req.user.id;
   const result = uid
     ? await query('SELECT DISTINCT category FROM activity_logs WHERE user_id=$1 ORDER BY category', [uid])

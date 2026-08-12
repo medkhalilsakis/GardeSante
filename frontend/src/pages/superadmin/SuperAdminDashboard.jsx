@@ -1,8 +1,13 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { establishmentsAPI, adminAPI, usersAPI } from '../../api';
+import { establishmentsAPI, adminAPI, usersAPI, userArchiveAPI } from '../../api';
 import { useAuthStore } from '../../store';
 import Avatar from '../../components/common/Avatar';
+import NoteComposer from '../../components/notes/NoteComposer';
+import NotesFeed from '../../components/notes/NotesFeed';
+import HospitalGuardCalendar from '../../components/calendar/HospitalGuardCalendar';
+import ScopedStatsPanel from '../../components/statistics/ScopedStatsPanel';
+import EstablishmentOversightPanel from './components/EstablishmentOversightPanel';
 import toast from 'react-hot-toast';
 
 // ── Config ─────────────────────────────────────────────────────
@@ -52,6 +57,8 @@ const I = {
   lock:     'M19 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2z M7 11V7a5 5 0 0110 0v4',
   wifi:     'M5 12.55a11 11 0 0114.08 0 M1.42 9a16 16 0 0121.16 0 M8.53 16.11a6 6 0 016.95 0 M12 20h.01',
   stats:    'M21 21H3V3 M7 14l4-4 4 4 4-6',
+  archive:  'M21 8v13H3V8 M1 3h22v5H1z M10 12h4',
+  unarchive:'M21 8v13H3V8 M1 3h22v5H1z M12 18v-6 M9 15l3-3 3 3',
 };
 
 const Ico = ({ path, size = 16, stroke = 'currentColor', fill = 'none', style = {} }) => (
@@ -641,7 +648,8 @@ export default function SuperAdminDashboard() {
   const [pwdForm,     setPwdForm]     = useState({ newPassword: '', confirm: '' });
   const [holidayForm, setHolidayForm] = useState({});
 
-  const [staffFilter, setStaffFilter] = useState({ search: '', roleCode: '', isActive: 'true' });
+  const [staffFilter, setStaffFilter] = useState({ search: '', roleCode: '', isActive: 'true', archived: '' });
+  const [archiveForm, setArchiveForm] = useState({ reason: '' });
   const [histFilter,  setHistFilter]  = useState({ from: '', to: '', category: '' });
   const [salaryPeriod, setSalaryPeriod] = useState({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 });
 
@@ -674,6 +682,7 @@ export default function SuperAdminDashboard() {
       isActive: staffFilter.isActive || undefined,
       roleCode: staffFilter.roleCode || undefined,
       search:   staffFilter.search   || undefined,
+      archived: staffFilter.archived || undefined,
       limit: 100,
     }).then(r => r.data.data),
     enabled: !!selectedEstId && activeTab === 'personnel',
@@ -714,6 +723,9 @@ export default function SuperAdminDashboard() {
   const resetDirPwd       = mut(({ id, ...d }) => adminAPI.resetDirectorPwd(id, d), ['director'], 'Mot de passe réinitialisé');
   const removeStaff       = mut(id => establishmentsAPI.removePersonnel(id),    ['personnel'], 'Compte désactivé');
   const updateStaff       = mut(({ id, ...d }) => establishmentsAPI.updatePersonnel(id, d), ['personnel', 'salary'], 'Informations mises à jour');
+  // Archivage — blocage total et réversible, distinct de la clôture ci-dessus.
+  const archiveStaff      = mut(({ id, reason }) => userArchiveAPI.archive(id, { reason }), ['personnel', 'establishments'], 'Compte archivé');
+  const unarchiveStaff    = mut(id => userArchiveAPI.unarchive(id),             ['personnel', 'establishments'], 'Compte réactivé');
 
   const createHoliday     = mut(d => adminAPI.createHoliday(d),                 ['admin-holidays'], 'Jour férié enregistré');
   const updateHoliday     = mut(({ id, ...d }) => adminAPI.updateHoliday(id, d), ['admin-holidays'], 'Jour férié mis à jour');
@@ -767,6 +779,9 @@ export default function SuperAdminDashboard() {
             <Btn icon="chart" variant={mainTab === 'stats' ? 'primary' : 'ghost'} onClick={() => setMainTab('stats')}>
               Statistiques
             </Btn>
+            <Btn variant={mainTab === 'notes' ? 'primary' : 'ghost'} onClick={() => setMainTab('notes')}>
+              📢 Notes
+            </Btn>
             {mainTab === 'establishments' && (
               <Btn icon="plus" onClick={() => { setEstForm({}); setModal('create-est'); }}>
                 Nouvel établissement
@@ -797,7 +812,7 @@ export default function SuperAdminDashboard() {
                   {establishments.map(est => (
                     <EstCard key={est.id} est={est}
                       onSelect={goToEst}
-                      onEdit={() => { setEstForm({ name: est.name, nameAr: est.name_ar, type: est.type, address: est.address, city: est.city, phone: est.phone, email: est.email, governorate: est.governorate }); setSelectedEstId(est.id); setModal('edit-est'); }}
+                      onEdit={() => { setEstForm(estToForm(est)); setSelectedEstId(est.id); setModal('edit-est'); }}
                       onToggle={() => est.is_active
                         ? setConfirm({ message: `Désactiver "${est.name}" ?`, sub: 'Tous les comptes rattachés seront désactivés.', action: () => deactivateEst.mutate(est.id) })
                         : setConfirm({ message: `Réactiver "${est.name}" ?`, sub: 'Les comptes ne seront pas automatiquement réactivés.', action: () => activateEst.mutate({ id: est.id }), danger: false })
@@ -852,6 +867,11 @@ export default function SuperAdminDashboard() {
                 });
               }}
             />
+          ) : mainTab === 'notes' ? (
+            <>
+              <NoteComposer scopeLabel="tous les directeurs de la plateforme" />
+              <NotesFeed />
+            </>
           ) : (
             <StatsSection stats={globalStats} loading={loadingStats} />
           )}
@@ -881,7 +901,14 @@ export default function SuperAdminDashboard() {
           onStaffCard={s => { setModalData({ userId: s.id, staff: s }); setModal('staff-card'); }}
           onEditStaff={s => { setStaffForm({ baseSalary: s.base_salary, hourlyRate: s.hourly_rate, hireDate: s.hire_date?.substring(0, 10), phone: s.phone, speciality: s.speciality, grade: s.grade }); setModalData({ userId: s.id, staff: s }); setModal('edit-staff'); }}
           onRemoveStaff={s => setConfirm({ message: `Désactiver ${s.first_name} ${s.last_name} ?`, action: () => removeStaff.mutate(s.id) })}
-          onEditEst={() => { setEstForm({ name: selectedEst.name, nameAr: selectedEst.name_ar, type: selectedEst.type, address: selectedEst.address, city: selectedEst.city, phone: selectedEst.phone, email: selectedEst.email, governorate: selectedEst.governorate }); setModal('edit-est'); }}
+          onArchiveStaff={s => { setArchiveForm({ reason: '' }); setModalData({ userId: s.id, staff: s }); setModal('archive-staff'); }}
+          onUnarchiveStaff={s => setConfirm({
+            message: `Réactiver le compte de ${s.first_name} ${s.last_name} ?`,
+            sub: 'Le compte retrouvera exactement l\'état qu\'il avait avant l\'archivage.',
+            danger: false,
+            action: () => unarchiveStaff.mutate(s.id),
+          })}
+          onEditEst={() => { setEstForm(estToForm(selectedEst)); setModal('edit-est'); }}
           onToggleEst={() => selectedEst.is_active
             ? setConfirm({ message: `Désactiver "${selectedEst.name}" ?`, sub: 'Tous les comptes seront désactivés.', action: () => deactivateEst.mutate(selectedEstId) })
             : setConfirm({ message: `Réactiver "${selectedEst.name}" ?`, action: () => activateEst.mutate({ id: selectedEstId }), danger: false })
@@ -897,7 +924,13 @@ export default function SuperAdminDashboard() {
           <EstForm form={estForm} setForm={setEstForm} govList={governorates} />
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
             <Btn variant="ghost" onClick={() => setModal(null)}>Annuler</Btn>
-            <Btn icon="check" onClick={() => createEst.mutate(estForm)} disabled={createEst.isPending}>
+            <Btn icon="check" onClick={() => {
+              // L'adresse doit être localisable : gouvernorat + ville au minimum.
+              if (!estForm.code || !estForm.name) return toast.error('Code et nom requis');
+              if (!estForm.governorate) return toast.error('Le gouvernorat est obligatoire');
+              if (!estForm.city)        return toast.error('La ville est obligatoire');
+              createEst.mutate(estForm);
+            }} disabled={createEst.isPending}>
               {createEst.isPending ? 'Création…' : 'Créer'}
             </Btn>
           </div>
@@ -963,6 +996,33 @@ export default function SuperAdminDashboard() {
               onClick={() => resetDirPwd.mutate({ id: selectedEstId, newPassword: pwdForm.newPassword })}
               disabled={resetDirPwd.isPending || pwdForm.newPassword !== pwdForm.confirm || pwdForm.newPassword.length < 8}>
               {resetDirPwd.isPending ? 'Réinitialisation…' : 'Réinitialiser'}
+            </Btn>
+          </div>
+        </Modal>
+      )}
+
+      {modal === 'archive-staff' && modalData.staff && (
+        <Modal title={`Archiver — ${modalData.staff.first_name} ${modalData.staff.last_name}`} icon="🗄️" onClose={() => setModal(null)}>
+          <div style={{ background: 'rgba(217,119,6,.10)', border: '1px solid rgba(217,119,6,.30)', borderRadius: 10, padding: '11px 14px', marginBottom: 14, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            L'archivage <strong>bloque totalement</strong> le compte : plus aucune connexion,
+            plus aucune action, même avec une session déjà ouverte.<br />
+            Ce n'est <strong>ni une suppression ni une clôture</strong> : toutes les données sont
+            conservées et vous pouvez réactiver le compte à tout moment.
+          </div>
+          <Field label="Motif de l'archivage (optionnel)">
+            <Inp
+              autoFocus
+              value={archiveForm.reason}
+              onChange={e => setArchiveForm({ reason: e.target.value })}
+              placeholder="Ex. : départ de l'établissement, suspension temporaire…"
+            />
+          </Field>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+            <Btn variant="ghost" onClick={() => setModal(null)}>Annuler</Btn>
+            <Btn icon="archive" variant="warning"
+              onClick={() => archiveStaff.mutate({ id: modalData.staff.id, reason: archiveForm.reason })}
+              disabled={archiveStaff.isPending}>
+              {archiveStaff.isPending ? 'Archivage…' : 'Archiver le compte'}
             </Btn>
           </div>
         </Modal>
@@ -1049,7 +1109,11 @@ function EstCard({ est, onSelect, onEdit, onToggle }) {
               <EstBadge active={est.is_active} small />
             </div>
             <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{est.name}</h3>
-            {est.governorate && <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>📍 {est.governorate}{est.city ? `, ${est.city}` : ''}</p>}
+            {(est.governorate || est.city) && (
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                📍 {[est.governorate, est.delegation, est.city].filter(Boolean).join(', ')}
+              </p>
+            )}
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
@@ -1082,12 +1146,15 @@ function EstCard({ est, onSelect, onEdit, onToggle }) {
 // ══════════════════════════════════════════════════════════════
 // ESTABLISHMENT DETAIL — 4 onglets
 // ══════════════════════════════════════════════════════════════
-function EstDetail({ est, activeTab, onTabChange, director, personnel, loadingPersonnel, history, loadingHistory, histFilter, onHistFilter, staffFilter, onStaffFilter, governorates, onOpenCreateDir, onOpenEditDir, onToggleDir, onResetDirPwd, onStaffCard, onEditStaff, onRemoveStaff, onEditEst, onToggleEst, avatarSrc }) {
+function EstDetail({ est, activeTab, onTabChange, director, personnel, loadingPersonnel, history, loadingHistory, histFilter, onHistFilter, staffFilter, onStaffFilter, governorates, onOpenCreateDir, onOpenEditDir, onToggleDir, onResetDirPwd, onStaffCard, onEditStaff, onRemoveStaff, onArchiveStaff, onUnarchiveStaff, onEditEst, onToggleEst, avatarSrc }) {
   const tabs = [
     { id: 'overview',  icon: '📋', label: 'Aperçu' },
     { id: 'director',  icon: '👔', label: 'Directeur' },
     { id: 'personnel', icon: '👥', label: 'Personnel' },
     { id: 'history',   icon: '📜', label: 'Historique' },
+    { id: 'gardes',    icon: '🛡️', label: 'Gardes' },
+    { id: 'calendrier', icon: '📅', label: 'Calendrier' },
+    { id: 'stats',     icon: '📊', label: 'Statistiques' },
   ];
 
   return (
@@ -1117,7 +1184,11 @@ function EstDetail({ est, activeTab, onTabChange, director, personnel, loadingPe
                 { label: 'Type', value: est.type },
                 { label: 'Gouvernorat', value: est.governorate || '—' },
                 { label: 'Ville', value: est.city || '—' },
+                { label: 'Délégation', value: est.delegation || '—' },
+                { label: 'Code postal', value: est.postal_code || '—' },
                 { label: 'Adresse', value: est.address || '—' },
+                { label: 'Adresse détaillée', value: est.address_details || '—' },
+                { label: 'Coordonnées GPS', value: (est.latitude != null && est.longitude != null) ? `${est.latitude}, ${est.longitude}` : '—' },
                 { label: 'Téléphone', value: est.phone || '—' },
                 { label: 'Email', value: est.email || '—' },
                 { label: 'Statut', value: <EstBadge active={est.is_active} /> },
@@ -1243,6 +1314,15 @@ function EstDetail({ est, activeTab, onTabChange, director, personnel, loadingPe
                   </Sel>
                 </Field>
               </div>
+              <div style={{ flex: '0 0 150px' }}>
+                <Field label="Archivage">
+                  <Sel value={staffFilter.archived} onChange={e => onStaffFilter(f => ({ ...f, archived: e.target.value }))}>
+                    <option value="">Tous</option>
+                    <option value="false">Non archivés</option>
+                    <option value="true">Archivés seulement</option>
+                  </Sel>
+                </Field>
+              </div>
             </div>
           </div>
           <div className="card">
@@ -1252,26 +1332,66 @@ function EstDetail({ est, activeTab, onTabChange, director, personnel, loadingPe
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
-                      {['Personnel', 'Rôle', 'Spécialité', 'Gardes/mois', 'Heures/mois', 'Présence', 'Actions'].map(h => (
+                      {['Personnel', 'Rôle', 'Service(s)', 'Spécialité', 'Gardes/mois', 'Heures/mois', 'Présence', 'Actions'].map(h => (
                         <th key={h} style={{ padding: '9px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {personnel.map(s => (
-                      <tr key={s.id} onClick={() => onStaffCard(s)} style={{ borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer', opacity: s.is_active ? 1 : 0.55 }}
+                      <tr key={s.id} onClick={() => onStaffCard(s)} style={{ borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer', opacity: s.is_active && !s.archived_at ? 1 : 0.55 }}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                         <td style={{ padding: '11px 12px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                             <Avatar firstName={s.first_name} lastName={s.last_name} size="xs" />
                             <div>
-                              <div style={{ fontWeight: 700, fontSize: 13 }}>{s.first_name} {s.last_name}</div>
+                              <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                {s.first_name} {s.last_name}
+                                {s.archived_at && (
+                                  <span title={s.archive_reason ? `Motif : ${s.archive_reason}` : 'Compte archivé — accès bloqué'}
+                                    style={{ background: 'rgba(217,119,6,.14)', color: '#B45309', border: '1px solid rgba(217,119,6,.30)', borderRadius: 20, padding: '1px 8px', fontSize: 10, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                                    🗄️ Archivé
+                                  </span>
+                                )}
+                              </div>
                               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.email}</div>
                             </div>
                           </div>
                         </td>
-                        <td style={{ padding: '11px 12px' }}><RoleBadge code={s.role_code} /></td>
+                        <td style={{ padding: '11px 12px' }}>
+                          <RoleBadge code={s.role_code} />
+                          {/* « Chef de service » est un titre : le rôle métier réel s'affiche à côté */}
+                          {s.secondary_role_name && (
+                            <div style={{ marginTop: 4 }}>
+                              <span title="Rôle métier cumulé avec le titre de chef de service" style={{
+                                fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 20,
+                                background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
+                                border: '1px dashed var(--border-default)',
+                              }}>+ {s.secondary_role_name}</span>
+                            </div>
+                          )}
+                        </td>
+                        {/* Service(s) d'appartenance */}
+                        <td style={{ padding: '11px 12px' }}>
+                          {(() => {
+                            const depts = Array.isArray(s.departments_detail) ? s.departments_detail : [];
+                            if (!depts.length) {
+                              return <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>Aucun service</span>;
+                            }
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+                                {depts.map(d => (
+                                  <span key={d.id} title={d.isHead ? `Chef du service ${d.name}` : d.name} style={{
+                                    fontSize: 11, fontWeight: 600, padding: '1px 8px', borderRadius: 20,
+                                    background: d.isHead ? '#FEF3C7' : 'var(--bg-elevated)',
+                                    color: d.isHead ? '#B45309' : 'var(--text-secondary)', whiteSpace: 'nowrap',
+                                  }}>{d.isHead && '⭐'}{d.name}</span>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </td>
                         <td style={{ padding: '11px 12px', fontSize: 12, color: 'var(--text-secondary)' }}>{s.speciality || '—'}</td>
                         <td style={{ padding: '11px 12px', textAlign: 'center', fontWeight: 700, color: 'var(--color-primary)' }}>{s.shifts_this_month}</td>
                         <td style={{ padding: '11px 12px', textAlign: 'center', fontWeight: 700, color: '#059669' }}>{parseFloat(s.hours_this_month).toFixed(1)}h</td>
@@ -1280,6 +1400,9 @@ function EstDetail({ est, activeTab, onTabChange, director, personnel, loadingPe
                           <div style={{ display: 'flex', gap: 5 }}>
                             <button onClick={() => onStaffCard(s)} title="Fiche" style={{ background: '#1B4FCA18', border: '1px solid #1B4FCA30', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: '#1B4FCA' }}><Ico path={I.eye} size={12} /></button>
                             <button onClick={() => onEditStaff(s)} title="Modifier" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: 'var(--text-secondary)' }}><Ico path={I.edit} size={12} /></button>
+                            {s.archived_at
+                              ? <button onClick={() => onUnarchiveStaff(s)} title="Réactiver le compte archivé" style={{ background: '#05966918', border: '1px solid #05966930', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: '#059669' }}><Ico path={I.unarchive} size={12} /></button>
+                              : <button onClick={() => onArchiveStaff(s)} title="Archiver le compte (blocage réversible)" style={{ background: '#D9770618', border: '1px solid #D9770630', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: '#B45309' }}><Ico path={I.archive} size={12} /></button>}
                             {s.is_active && <button onClick={() => onRemoveStaff(s)} title="Désactiver" style={{ background: '#DC262618', border: '1px solid #DC262630', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: '#DC2626' }}><Ico path={I.trash} size={12} /></button>}
                           </div>
                         </td>
@@ -1337,6 +1460,30 @@ function EstDetail({ est, activeTab, onTabChange, director, personnel, loadingPe
             )}
           </div>
         </div>
+      )}
+
+      {/* ── CALENDRIER DES GARDES (consultation seule) ── */}
+      {activeTab === 'calendrier' && (
+        <HospitalGuardCalendar
+          establishmentId={est.id}
+          title={`Gardes — ${est.name}`}
+        />
+      )}
+
+      {/* ── STATISTIQUES DE L'ÉTABLISSEMENT CIBLÉ ── */}
+      {activeTab === 'stats' && (
+        <ScopedStatsPanel
+          establishmentId={est.id}
+          title={`Statistiques — ${est.name}`}
+        />
+      )}
+
+      {/* ── GARDES, ABSENCES ET REMPLACEMENTS (consultation seule) ── */}
+      {activeTab === 'gardes' && (
+        <EstablishmentOversightPanel
+          establishmentId={est.id}
+          establishmentName={est.name}
+        />
       )}
     </div>
   );
@@ -1597,6 +1744,20 @@ function StaffCard({ staff, salaryReport, salaryPeriod, onPeriodChange, avatarSr
 // ══════════════════════════════════════════════════════════════
 // FORMULAIRES
 // ══════════════════════════════════════════════════════════════
+// Pré-remplissage du formulaire d'établissement depuis une ligne SQL.
+// Centralisé pour que les champs d'adresse détaillée ne soient jamais oubliés
+// à l'édition (deux points d'entrée : la carte et la fiche).
+function estToForm(est) {
+  return {
+    name: est.name, nameAr: est.name_ar, type: est.type,
+    address: est.address, city: est.city, phone: est.phone, email: est.email,
+    governorate: est.governorate,
+    delegation: est.delegation, postalCode: est.postal_code,
+    addressDetails: est.address_details,
+    latitude: est.latitude, longitude: est.longitude,
+  };
+}
+
 function EstForm({ form, setForm, editing, govList }) {
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }));
   return (
@@ -1618,10 +1779,32 @@ function EstForm({ form, setForm, editing, govList }) {
           <GovSelect value={form.governorate || ''} onChange={v => f('governorate', v)} govList={govList} />
         </Field>
       </div>
-      <Field label="Ville"><Inp placeholder="Tunis" value={form.city || ''} onChange={e => f('city', e.target.value)} /></Field>
+      <Field label="Ville" required><Inp placeholder="Tunis" value={form.city || ''} onChange={e => f('city', e.target.value)} /></Field>
+      <Field label="Délégation"><Inp placeholder="Bab Souika" value={form.delegation || ''} onChange={e => f('delegation', e.target.value)} /></Field>
+      <Field label="Code postal"><Inp placeholder="1006" value={form.postalCode || ''} onChange={e => f('postalCode', e.target.value)} /></Field>
       <Field label="Téléphone"><Inp placeholder="+216 71…" value={form.phone || ''} onChange={e => f('phone', e.target.value)} /></Field>
-      <Field label="Email"><Inp type="email" placeholder="contact@chu.tn" value={form.email || ''} onChange={e => f('email', e.target.value)} /></Field>
-      <div style={{ gridColumn: '1/-1' }}><Field label="Adresse"><Inp placeholder="Rue, quartier, ville" value={form.address || ''} onChange={e => f('address', e.target.value)} /></Field></div>
+      <div style={{ gridColumn: '1/-1' }}><Field label="Email"><Inp type="email" placeholder="contact@chu.tn" value={form.email || ''} onChange={e => f('email', e.target.value)} /></Field></div>
+      <div style={{ gridColumn: '1/-1' }}><Field label="Adresse (rue, numéro)"><Inp placeholder="Boulevard 9 Avril 1938, n° 12" value={form.address || ''} onChange={e => f('address', e.target.value)} /></Field></div>
+      <div style={{ gridColumn: '1/-1' }}>
+        <Field label="Adresse détaillée (repères, accès, bâtiment)">
+          <Inp placeholder="En face de la place du Leader, entrée principale côté est…"
+            value={form.addressDetails || ''} onChange={e => f('addressDetails', e.target.value)} />
+        </Field>
+      </div>
+      {/* Coordonnées GPS — facultatives, saisies dès maintenant pour préparer
+          la future carte de tous les hôpitaux (la carte n'est pas construite ici). */}
+      <Field label="Latitude (optionnel)">
+        <Inp type="number" step="0.000001" placeholder="36.806389"
+          value={form.latitude ?? ''} onChange={e => f('latitude', e.target.value)} />
+      </Field>
+      <Field label="Longitude (optionnel)">
+        <Inp type="number" step="0.000001" placeholder="10.181667"
+          value={form.longitude ?? ''} onChange={e => f('longitude', e.target.value)} />
+      </Field>
+      <div style={{ gridColumn: '1/-1', fontSize: 11, color: 'var(--text-muted)', marginTop: -4 }}>
+        📍 Gouvernorat, ville et adresse servent à localiser l'établissement ; les coordonnées GPS
+        sont facultatives et préparent la carte des hôpitaux.
+      </div>
     </div>
   );
 }

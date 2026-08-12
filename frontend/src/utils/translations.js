@@ -72,11 +72,11 @@ const translations = {
     // Statuts
     status: {
       draft: 'Brouillon',
-      submitted: 'Soumis',
+      submitted: 'En vigueur',
       under_review: 'En révision',
       approved: 'Approuvé',
       rejected: 'Rejeté',
-      active: 'Actif',
+      active: 'En cours',
       archived: 'Archivé',
       planned: 'Planifié',
       confirmed: 'Confirmé',
@@ -92,7 +92,7 @@ const translations = {
     // Dashboard
     dashboard: {
       today_shifts: "Gardes aujourd'hui",
-      pending_schedules: 'Plannings en attente',
+      pending_schedules: 'Plannings en vigueur',
       open_replacements: 'Remplacements ouverts',
       absence_rate: "Taux d'absence",
       coverage_rate: 'Taux de couverture',
@@ -108,7 +108,7 @@ const translations = {
       title: 'Plannings de garde',
       create: 'Nouveau planning',
       generate: 'Générer automatiquement',
-      submit_for_validation: 'Soumettre pour validation',
+      submit_for_validation: 'Envoyer et mettre en marche',
       approve_schedule: 'Approuver le planning',
       reject_schedule: 'Rejeter le planning',
       start_date: 'Date de début',
@@ -236,11 +236,11 @@ const translations = {
     },
     status: {
       draft: 'مسودة',
-      submitted: 'مُرسَل',
+      submitted: 'ساري',
       under_review: 'قيد المراجعة',
       approved: 'مُوافق عليه',
       rejected: 'مرفوض',
-      active: 'نشط',
+      active: 'جارٍ',
       archived: 'مؤرشف',
       planned: 'مُخطَّط',
       confirmed: 'مُؤكَّد',
@@ -255,7 +255,7 @@ const translations = {
     },
     dashboard: {
       today_shifts: 'حراسات اليوم',
-      pending_schedules: 'جداول معلقة',
+      pending_schedules: 'جداول سارية',
       open_replacements: 'استخلافات مفتوحة',
       absence_rate: 'معدل الغياب',
       coverage_rate: 'معدل التغطية',
@@ -270,7 +270,7 @@ const translations = {
       title: 'جداول الحراسة',
       create: 'جدول جديد',
       generate: 'توليد تلقائي',
-      submit_for_validation: 'إرسال للمصادقة',
+      submit_for_validation: 'إرسال وتفعيل',
       approve_schedule: 'الموافقة على الجدول',
       reject_schedule: 'رفض الجدول',
       start_date: 'تاريخ البداية',

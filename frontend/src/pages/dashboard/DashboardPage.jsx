@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { statisticsAPI, shiftsAPI, schedulesAPI, replacementsAPI } from '../../api';
 import { useAuthStore } from '../../store';
 import { useTranslation, formatDate, getStatusBadgeClass, exportToPDF, exportToExcel } from '../../utils/helpers';
+import ContextBadge from '../../components/layout/ContextBadge';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend
@@ -136,6 +137,9 @@ export default function DashboardPage() {
 
   return (
     <div>
+      {/* Appartenance — hôpital et service(s). Rien pour le Super Admin. */}
+      <ContextBadge variant="header" />
+
       {/* En-tête */}
       <div className="page-header">
         <div>

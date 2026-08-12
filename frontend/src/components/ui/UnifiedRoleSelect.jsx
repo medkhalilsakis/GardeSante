@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usersAPI, jobTitlesAPI } from '../../api';
 import toast from 'react-hot-toast';
@@ -9,6 +10,11 @@ import toast from 'react-hot-toast';
  *   - Les roles systeme (avec acces plateforme)
  *   - Les titres de poste (role "Autre" - sans acces)
  *
+ * Le panneau est rendu dans un PORTAIL positionne en `fixed` : il n'est donc
+ * jamais rogne par le `overflow: auto` de la modale qui l'accueille, et il se
+ * retourne vers le haut quand la place manque en bas. C'est ce qui evitait de
+ * devoir scroller la modale pour voir la liste des roles.
+ *
  * Props:
  *   roleCode    : string  - code du role systeme selectionne
  *   jobTitleId  : UUID    - id du titre de poste selectionne (si role=autre)
@@ -18,12 +24,28 @@ import toast from 'react-hot-toast';
 
 const SYSTEM_ROLE_COLORS = {
   director:           { bg: '#EFF6FF', color: '#1D4ED8', icon: '👔' },
+  hospital_admin:     { bg: '#F5F3FF', color: '#7C3AED', icon: '🏛️' },
   general_supervisor: { bg: '#F0FDF4', color: '#15803D', icon: '🛡️' },
   department_head:    { bg: '#FEF3C7', color: '#B45309', icon: '⭐' },
   service_supervisor: { bg: '#FDF2F8', color: '#9333EA', icon: '🔹' },
   senior_doctor:      { bg: '#F0F9FF', color: '#0284C7', icon: '👨‍⚕️' },
   resident:           { bg: '#F8FAFC', color: '#64748B', icon: '🩺' },
+  observer:           { bg: '#F1F5F9', color: '#475569', icon: '👁️' },
   autre:              { bg: '#F1F5F9', color: '#475569', icon: '👤' },
+};
+
+// Une ligne d'explication par role : la liste se lit sans avoir a deviner ce
+// que recouvre chaque intitule.
+const SYSTEM_ROLE_HINTS = {
+  director:           'Direction de l\'etablissement',
+  hospital_admin:     'Administration de l\'etablissement',
+  general_supervisor: 'Surveillant general de l\'hopital',
+  department_head:    'Titre cumulable avec un role metier (ex. medecin senior)',
+  service_supervisor: 'Plusieurs surveillants possibles pour un meme service',
+  senior_doctor:      'Medecin senior du service',
+  resident:           'Medecin resident / interne',
+  observer:           'Consultation seule',
+  autre:              'Choisissez un titre de poste ci-dessous',
 };
 
 const JT_CAT_COLORS = {
@@ -42,15 +64,20 @@ const JT_CAT_LABELS = {
   other:     'Autre',
 };
 
+// Hauteur des zones fixes du panneau (recherche + onglets + pied de page).
+const PANEL_CHROME = 152;
+
 export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, required }) {
   const qc = useQueryClient();
   const wrapperRef = useRef(null);
+  const dropRef    = useRef(null);
 
   const [open,      setOpen]      = useState(false);
   const [search,    setSearch]    = useState('');
   const [tab,       setTab]       = useState('all');   // 'all' | 'roles' | 'titles'
   const [addMode,   setAddMode]   = useState(false);
   const [newTitle,  setNewTitle]  = useState({ name: '', category: 'other' });
+  const [pos,       setPos]       = useState(null);
 
   // Roles systeme disponibles
   const { data: rolesData } = useQuery({
@@ -83,16 +110,58 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
     onError: (e) => toast.error(e.response?.data?.message || 'Erreur'),
   });
 
-  // Fermer si clic dehors
-  useEffect(() => {
-    const h = (e) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
-        setOpen(false); setAddMode(false);
-      }
-    };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+  // ── Positionnement du panneau (portail : coordonnees viewport) ──
+  const measure = useCallback(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const r  = el.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    const spaceBelow = vh - r.bottom - 12;
+    const spaceAbove = r.top - 12;
+    // On se retourne vers le haut seulement si le bas est vraiment trop juste.
+    const flip  = spaceBelow < 320 && spaceAbove > spaceBelow;
+    const avail = Math.max(240, Math.min(560, flip ? spaceAbove : spaceBelow));
+    const width = Math.min(Math.max(r.width, 340), vw - 24);
+    setPos({
+      left:   Math.max(12, Math.min(r.left, vw - width - 12)),
+      width,
+      top:    r.bottom + 6,
+      bottom: vh - r.top + 6,
+      flip,
+      listMax: Math.max(180, avail - PANEL_CHROME),
+    });
   }, []);
+
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    measure();
+    // `capture: true` pour capter aussi le scroll interne de la modale.
+    window.addEventListener('scroll', measure, true);
+    window.addEventListener('resize', measure);
+    return () => {
+      window.removeEventListener('scroll', measure, true);
+      window.removeEventListener('resize', measure);
+    };
+  }, [open, measure]);
+
+  // Fermer si clic dehors (le panneau vit dans un portail : il faut tester les
+  // deux noeuds, sinon un clic dans la liste refermerait le menu) ou sur Echap.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (wrapperRef.current?.contains(e.target)) return;
+      if (dropRef.current?.contains(e.target)) return;
+      setOpen(false); setAddMode(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { setOpen(false); setAddMode(false); } };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   // Libelle affiché dans le trigger
   const getDisplayLabel = () => {
@@ -132,8 +201,241 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
     color: 'var(--text-primary)', fontSize: 13, outline: 'none',
   };
 
+  // En-tete de section, colle en haut pendant le defilement de la liste : on
+  // sait toujours dans quel groupe on se trouve.
+  const stickyHeader = {
+    position: 'sticky', top: 0, zIndex: 2,
+    padding: '6px 12px 5px', fontSize: 10, fontWeight: 800,
+    letterSpacing: '.08em', textTransform: 'uppercase',
+    background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)',
+  };
+
   const hasSelection = !!roleCode;
   const isEmpty = filtRoles.length === 0 && filtTitles.length === 0 && !addMode;
+
+  const panel = (
+    <div
+      ref={dropRef}
+      style={{
+        position: 'fixed',
+        left: pos?.left ?? 0,
+        width: pos?.width ?? 340,
+        ...(pos?.flip ? { bottom: pos.bottom } : { top: pos?.top ?? 0 }),
+        background: 'var(--bg-card)', borderRadius: 10, zIndex: 3000,
+        boxShadow: '0 12px 40px rgba(0,0,0,.28)', border: '1px solid var(--border-subtle)',
+        overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        visibility: pos ? 'visible' : 'hidden',
+      }}
+    >
+      {/* Recherche */}
+      <div style={{ padding: '10px 10px 0' }}>
+        <div style={{ position: 'relative' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+            <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            autoFocus
+            type="text"
+            placeholder="Rechercher (ex: Surveillant, ORL, Ambulancier...)"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onClick={e => e.stopPropagation()}
+            style={{ ...baseInput, paddingLeft: 32 }}
+          />
+        </div>
+      </div>
+
+      {/* Onglets — le compteur evite de scroller pour savoir ce qu'il y a */}
+      <div style={{ display: 'flex', gap: 4, padding: '8px 10px 6px', borderBottom: '1px solid var(--border-subtle)' }}>
+        {[
+          { id: 'all',    label: 'Tout',            n: systemRoles.length + jobTitles.length },
+          { id: 'roles',  label: 'Roles systeme',   n: systemRoles.length },
+          { id: 'titles', label: 'Titres de poste', n: jobTitles.length },
+        ].map(t => (
+          <button key={t.id} type="button" onClick={() => setTab(t.id)}
+            style={{
+              padding: '3px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700,
+              border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              background: tab === t.id ? 'var(--color-primary)' : 'var(--bg-elevated)',
+              color: tab === t.id ? '#fff' : 'var(--text-secondary)',
+              transition: 'all .15s',
+            }}>
+            {t.label} <span style={{ opacity: .65, fontWeight: 600 }}>{t.n}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Liste */}
+      <div style={{ maxHeight: pos?.listMax ?? 320, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+        {isEmpty ? (
+          <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+            Aucun resultat pour "{search}".{' '}
+            <button type="button" onClick={() => { setAddMode(true); setNewTitle(n => ({ ...n, name: search })); setTab('titles'); }}
+              style={{ color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit' }}>
+              + Ajouter ce titre
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Roles systeme */}
+            {filtRoles.length > 0 && (
+              <div>
+                <div style={{ ...stickyHeader, color: 'var(--text-muted)' }}>
+                  Roles avec acces plateforme
+                  <span style={{ fontWeight: 400, opacity: .6 }}> ({filtRoles.length})</span>
+                </div>
+                {filtRoles.map(r => {
+                  const isSelected = roleCode === r.code && !jobTitleId;
+                  const colors = SYSTEM_ROLE_COLORS[r.code] || { bg: '#F3F4F6', color: '#374151', icon: '👤' };
+                  return (
+                    <div
+                      key={r.id}
+                      onClick={() => { onChange({ roleCode: r.code, jobTitleId: null, label: r.name }); setOpen(false); setSearch(''); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+                        cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)',
+                        background: isSelected ? 'rgba(27,79,202,.06)' : 'transparent',
+                        transition: 'background .1s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'rgba(27,79,202,.06)' : 'transparent'; }}
+                    >
+                      <span style={{ fontSize: 16 }}>{colors.icon}</span>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 20, flexShrink: 0,
+                        background: colors.bg, color: colors.color,
+                      }}>
+                        Role
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</div>
+                        {SYSTEM_ROLE_HINTS[r.code] && (
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{SYSTEM_ROLE_HINTS[r.code]}</div>
+                        )}
+                      </div>
+                      {isSelected && (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="3">
+                          <path d="M20 6L9 17l-5-5" />
+                        </svg>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Titres de poste par categorie */}
+            {Object.entries(titlesByCategory).map(([cat, titles]) => (
+              <div key={cat}>
+                <div style={{
+                  ...stickyHeader,
+                  color: JT_CAT_COLORS[cat]?.color || '#6B7280',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: JT_CAT_COLORS[cat]?.color, flexShrink: 0 }} />
+                  {JT_CAT_LABELS[cat] || cat}
+                  <span style={{ fontWeight: 400, opacity: .6 }}>({titles.length})</span>
+                </div>
+                {titles.map(t => {
+                  const isSelected = jobTitleId === t.id;
+                  const colors = JT_CAT_COLORS[t.category] || { bg: '#F3F4F6', color: '#374151' };
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => { onChange({ roleCode: 'autre', jobTitleId: t.id, label: t.name }); setOpen(false); setSearch(''); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                        cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)',
+                        background: isSelected ? 'rgba(27,79,202,.06)' : 'transparent',
+                        transition: 'background .1s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'rgba(27,79,202,.06)' : 'transparent'; }}
+                    >
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, flexShrink: 0,
+                        background: colors.bg, color: colors.color,
+                      }}>
+                        {JT_CAT_LABELS[t.category] || t.category}
+                      </span>
+                      <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)' }}>{t.name}</span>
+                      {isSelected && (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="3">
+                          <path d="M20 6L9 17l-5-5" />
+                        </svg>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+
+      {/* Ajouter un titre custom */}
+      {addMode ? (
+        <div style={{ padding: '12px', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
+            Nouveau titre (sans acces plateforme)
+          </div>
+          <input
+            type="text"
+            placeholder="Nom du titre..."
+            value={newTitle.name}
+            onChange={e => setNewTitle(n => ({ ...n, name: e.target.value }))}
+            style={{ ...baseInput, marginBottom: 8 }}
+            autoFocus
+          />
+          <select value={newTitle.category} onChange={e => setNewTitle(n => ({ ...n, category: e.target.value }))}
+            style={{ ...baseInput, marginBottom: 10 }}>
+            {Object.entries(JT_CAT_LABELS).map(([id, label]) => (
+              <option key={id} value={id}>{label}</option>
+            ))}
+          </select>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => createMut.mutate(newTitle)}
+              disabled={!newTitle.name.trim() || createMut.isPending}
+              style={{
+                flex: 1, padding: 8, borderRadius: 8, border: 'none', cursor: 'pointer',
+                background: 'var(--color-primary)', color: '#fff', fontWeight: 700, fontSize: 13,
+                fontFamily: 'inherit',
+                opacity: !newTitle.name.trim() || createMut.isPending ? 0.5 : 1,
+              }}>
+              {createMut.isPending ? 'Ajout...' : '+ Ajouter'}
+            </button>
+            <button type="button" onClick={() => setAddMode(false)}
+              style={{
+                padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border-default)',
+                background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
+                fontSize: 13, fontFamily: 'inherit',
+              }}>
+              Annuler
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border-subtle)' }}>
+          <button type="button" onClick={() => setAddMode(true)}
+            style={{
+              width: '100%', padding: 8, borderRadius: 8,
+              border: '1px dashed var(--color-primary)', background: 'rgba(27,79,202,.04)',
+              color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 700, fontSize: 12,
+              fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Ajouter un titre de poste personnalise
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div ref={wrapperRef} style={{ position: 'relative' }}>
@@ -201,224 +503,8 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
         </div>
       </div>
 
-      {/* Dropdown */}
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
-          background: 'var(--bg-card)', borderRadius: 10, zIndex: 600,
-          boxShadow: '0 8px 32px rgba(0,0,0,.18)', border: '1px solid var(--border-subtle)',
-          overflow: 'hidden',
-        }}>
-          {/* Recherche */}
-          <div style={{ padding: '10px 10px 0' }}>
-            <div style={{ position: 'relative' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
-                <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
-              </svg>
-              <input
-                autoFocus
-                type="text"
-                placeholder="Rechercher (ex: Surveillant, ORL, Ambulancier...)"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                onClick={e => e.stopPropagation()}
-                style={{ ...baseInput, paddingLeft: 32 }}
-              />
-            </div>
-          </div>
-
-          {/* Onglets */}
-          <div style={{ display: 'flex', gap: 4, padding: '8px 10px 6px', borderBottom: '1px solid var(--border-subtle)' }}>
-            {[
-              { id: 'all',    label: 'Tout' },
-              { id: 'roles',  label: 'Roles systeme' },
-              { id: 'titles', label: 'Titres de poste' },
-            ].map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                style={{
-                  padding: '3px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-                  border: 'none', cursor: 'pointer',
-                  background: tab === t.id ? 'var(--color-primary)' : 'var(--bg-elevated)',
-                  color: tab === t.id ? '#fff' : 'var(--text-secondary)',
-                  transition: 'all .15s',
-                }}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Liste */}
-          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {isEmpty ? (
-              <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                Aucun resultat pour "{search}".{' '}
-                <button onClick={() => { setAddMode(true); setNewTitle(n => ({ ...n, name: search })); setTab('titles'); }}
-                  style={{ color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>
-                  + Ajouter ce titre
-                </button>
-              </div>
-            ) : (
-              <>
-                {/* Roles systeme */}
-                {filtRoles.length > 0 && (
-                  <div>
-                    <div style={{
-                      padding: '6px 12px 3px', fontSize: 10, fontWeight: 800,
-                      color: 'var(--text-muted)', letterSpacing: '.08em', textTransform: 'uppercase',
-                      background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)',
-                    }}>
-                      Roles avec acces plateforme
-                    </div>
-                    {filtRoles.map(r => {
-                      const isSelected = roleCode === r.code && !jobTitleId;
-                      const colors = SYSTEM_ROLE_COLORS[r.code] || { bg: '#F3F4F6', color: '#374151', icon: '👤' };
-                      return (
-                        <div
-                          key={r.id}
-                          onClick={() => { onChange({ roleCode: r.code, jobTitleId: null, label: r.name }); setOpen(false); setSearch(''); }}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
-                            cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)',
-                            background: isSelected ? 'rgba(27,79,202,.06)' : 'transparent',
-                            transition: 'background .1s',
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-elevated)'; }}
-                          onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'rgba(27,79,202,.06)' : 'transparent'; }}
-                        >
-                          <span style={{ fontSize: 16 }}>{colors.icon}</span>
-                          <span style={{
-                            fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 20, flexShrink: 0,
-                            background: colors.bg, color: colors.color,
-                          }}>
-                            Role
-                          </span>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</div>
-                            {r.code === 'autre' && (
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Choisissez un titre de poste ci-dessous</div>
-                            )}
-                          </div>
-                          {isSelected && (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="3">
-                              <path d="M20 6L9 17l-5-5" />
-                            </svg>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Titres de poste par categorie */}
-                {Object.entries(titlesByCategory).map(([cat, titles]) => (
-                  <div key={cat}>
-                    <div style={{
-                      padding: '6px 12px 3px', fontSize: 10, fontWeight: 800,
-                      color: JT_CAT_COLORS[cat]?.color || '#6B7280',
-                      letterSpacing: '.08em', textTransform: 'uppercase',
-                      background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)',
-                      display: 'flex', alignItems: 'center', gap: 6,
-                    }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: JT_CAT_COLORS[cat]?.color, flexShrink: 0 }} />
-                      {JT_CAT_LABELS[cat] || cat}
-                      <span style={{ fontWeight: 400, opacity: .6 }}>({titles.length})</span>
-                    </div>
-                    {titles.map(t => {
-                      const isSelected = jobTitleId === t.id;
-                      const colors = JT_CAT_COLORS[t.category] || { bg: '#F3F4F6', color: '#374151' };
-                      return (
-                        <div
-                          key={t.id}
-                          onClick={() => { onChange({ roleCode: 'autre', jobTitleId: t.id, label: t.name }); setOpen(false); setSearch(''); }}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                            cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)',
-                            background: isSelected ? 'rgba(27,79,202,.06)' : 'transparent',
-                            transition: 'background .1s',
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-elevated)'; }}
-                          onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'rgba(27,79,202,.06)' : 'transparent'; }}
-                        >
-                          <span style={{
-                            fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, flexShrink: 0,
-                            background: colors.bg, color: colors.color,
-                          }}>
-                            {JT_CAT_LABELS[t.category] || t.category}
-                          </span>
-                          <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)' }}>{t.name}</span>
-                          {isSelected && (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="3">
-                              <path d="M20 6L9 17l-5-5" />
-                            </svg>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-
-          {/* Ajouter un titre custom */}
-          {addMode ? (
-            <div style={{ padding: '12px', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)' }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                Nouveau titre (sans acces plateforme)
-              </div>
-              <input
-                type="text"
-                placeholder="Nom du titre..."
-                value={newTitle.name}
-                onChange={e => setNewTitle(n => ({ ...n, name: e.target.value }))}
-                style={{ ...baseInput, marginBottom: 8 }}
-                autoFocus
-              />
-              <select value={newTitle.category} onChange={e => setNewTitle(n => ({ ...n, category: e.target.value }))}
-                style={{ ...baseInput, marginBottom: 10 }}>
-                {Object.entries(JT_CAT_LABELS).map(([id, label]) => (
-                  <option key={id} value={id}>{label}</option>
-                ))}
-              </select>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={() => createMut.mutate(newTitle)}
-                  disabled={!newTitle.name.trim() || createMut.isPending}
-                  style={{
-                    flex: 1, padding: 8, borderRadius: 8, border: 'none', cursor: 'pointer',
-                    background: 'var(--color-primary)', color: '#fff', fontWeight: 700, fontSize: 13,
-                    opacity: !newTitle.name.trim() || createMut.isPending ? 0.5 : 1,
-                  }}>
-                  {createMut.isPending ? 'Ajout...' : '+ Ajouter'}
-                </button>
-                <button onClick={() => setAddMode(false)}
-                  style={{
-                    padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border-default)',
-                    background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13,
-                  }}>
-                  Annuler
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border-subtle)' }}>
-              <button onClick={() => setAddMode(true)}
-                style={{
-                  width: '100%', padding: 8, borderRadius: 8,
-                  border: '1px dashed var(--color-primary)', background: 'rgba(27,79,202,.04)',
-                  color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 700, fontSize: 12,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                Ajouter un titre de poste personnalise
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Panneau — rendu hors de la modale pour ne pas etre rogne par son scroll */}
+      {open && createPortal(panel, document.body)}
     </div>
   );
 }

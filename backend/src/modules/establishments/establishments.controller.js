@@ -12,6 +12,9 @@ const getAll = async (req, res) => {
     `SELECT
        e.id, e.code, e.name, e.name_ar, e.type, e.address, e.city,
        e.phone, e.email, e.logo_url, e.is_active, e.created_at,
+       -- Adresse détaillée (localisation de l'établissement)
+       e.governorate, e.delegation, e.postal_code, e.address_details,
+       e.latitude, e.longitude,
        COUNT(DISTINCT u.id) FILTER (
          WHERE u.is_active = TRUE AND r_u.code != 'super_admin'
        ) AS user_count,
@@ -79,7 +82,13 @@ const create = async (req, res) => {
     return res.status(403).json({ success: false, message: 'Réservé au Super Admin' });
   }
 
-  const { code, name, nameAr, type = 'hospital', address, city, phone, email, governorate } = req.body;
+  // Adresse détaillée : gouvernorat / ville / délégation / code postal / adresse
+  // précise. Les coordonnées (latitude, longitude) sont acceptées dès maintenant
+  // pour la future carte des hôpitaux, mais restent facultatives.
+  const {
+    code, name, nameAr, type = 'hospital', address, city, phone, email, governorate,
+    delegation, postalCode, addressDetails, latitude, longitude,
+  } = req.body;
   if (!code || !name) {
     return res.status(400).json({ success: false, message: 'Code et nom de l\'établissement requis' });
   }
@@ -87,10 +96,15 @@ const create = async (req, res) => {
   const result = await transaction(async (client) => {
     // 1. Créer l'établissement
     const est = await client.query(
-      `INSERT INTO establishments (code, name, name_ar, type, address, city, phone, email, governorate)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `INSERT INTO establishments (code, name, name_ar, type, address, city, phone, email, governorate,
+                                   delegation, postal_code, address_details, latitude, longitude)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING *`,
-      [code.toUpperCase(), name, nameAr || null, type, address || null, city || null, phone || null, email || null, governorate || null]
+      [code.toUpperCase(), name, nameAr || null, type, address || null, city || null, phone || null,
+       email || null, governorate || null,
+       delegation || null, postalCode || null, addressDetails || null,
+       latitude === '' || latitude == null ? null : latitude,
+       longitude === '' || longitude == null ? null : longitude]
     );
 
     const eid = est.rows[0].id;
@@ -155,23 +169,35 @@ const update = async (req, res) => {
     return res.status(403).json({ success: false, message: 'Réservé au Super Admin' });
   }
 
-  const { name, nameAr, type, address, city, phone, email, isActive, governorate } = req.body;
+  const {
+    name, nameAr, type, address, city, phone, email, isActive, governorate,
+    delegation, postalCode, addressDetails, latitude, longitude,
+  } = req.body;
+
+  const num = (v) => (v === '' || v == null ? null : v);
 
   const result = await query(
     `UPDATE establishments SET
-       name        = COALESCE($1, name),
-       name_ar     = COALESCE($2, name_ar),
-       type        = COALESCE($3, type),
-       address     = COALESCE($4, address),
-       city        = COALESCE($5, city),
-       phone       = COALESCE($6, phone),
-       email       = COALESCE($7, email),
-       is_active   = COALESCE($8, is_active),
-       governorate = COALESCE($9, governorate),
-       updated_at  = NOW()
-     WHERE id = $10 AND type != 'system'
+       name            = COALESCE($1, name),
+       name_ar         = COALESCE($2, name_ar),
+       type            = COALESCE($3, type),
+       address         = COALESCE($4, address),
+       city            = COALESCE($5, city),
+       phone           = COALESCE($6, phone),
+       email           = COALESCE($7, email),
+       is_active       = COALESCE($8, is_active),
+       governorate     = COALESCE($9, governorate),
+       delegation      = COALESCE($10, delegation),
+       postal_code     = COALESCE($11, postal_code),
+       address_details = COALESCE($12, address_details),
+       latitude        = COALESCE($13, latitude),
+       longitude       = COALESCE($14, longitude),
+       updated_at      = NOW()
+     WHERE id = $15 AND type != 'system'
      RETURNING *`,
-    [name, nameAr, type, address, city, phone, email, isActive, governorate ?? null, req.params.id]
+    [name, nameAr, type, address, city, phone, email, isActive, governorate ?? null,
+     delegation ?? null, postalCode ?? null, addressDetails ?? null,
+     num(latitude), num(longitude), req.params.id]
   );
 
   if (!result.rows[0]) return res.status(404).json({ success: false, message: 'Établissement introuvable' });
@@ -292,6 +318,10 @@ const getPersonnel = async (req, res) => {
   if (isActive !== undefined) { conditions.push(`u.is_active = $${idx}`); params.push(isActive === 'true'); idx++; }
   if (roleCode)  { conditions.push(`r.code = $${idx}`); params.push(roleCode); idx++; }
   if (search)    { conditions.push(`(u.first_name ILIKE $${idx} OR u.last_name ILIKE $${idx} OR u.email ILIKE $${idx} OR u.matricule ILIKE $${idx})`); params.push(`%${search}%`); idx++; }
+  // Filtre archivage — appliqué uniquement s'il est explicitement demandé,
+  // pour que la liste par défaut reste strictement identique à avant.
+  if (req.query.archived === 'true')  conditions.push('u.archived_at IS NOT NULL');
+  if (req.query.archived === 'false') conditions.push('u.archived_at IS NULL');
 
   const where = conditions.join(' AND ');
   const now = new Date();
@@ -304,9 +334,20 @@ const getPersonnel = async (req, res) => {
        u.email, u.phone, u.speciality, u.grade, u.is_active, u.is_on_leave,
        u.avatar_url, u.can_login, u.last_login, u.created_at,
        u.hourly_rate, u.base_salary, u.hire_date,
+       u.archived_at, u.archive_reason,
        r.code AS role_code, r.name AS role_name, r.level AS role_level,
+       r2.code AS secondary_role_code, r2.name AS secondary_role_name,
        -- Départements (agrégé)
        STRING_AGG(DISTINCT d.name, ', ' ORDER BY d.name) AS departments,
+       -- Détail des services : nom + rôle tenu dans le service (chef ou membre)
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object(
+                  'id', d2.id, 'name', d2.name, 'code', d2.code, 'isHead', ud2.is_head
+                ) ORDER BY ud2.is_head DESC, d2.name)
+           FROM user_departments ud2
+           JOIN departments d2 ON d2.id = ud2.department_id
+          WHERE ud2.user_id = u.id
+       ), '[]'::jsonb) AS departments_detail,
        -- Gardes du mois courant
        COUNT(DISTINCT s.id) FILTER (
          WHERE EXTRACT(YEAR FROM s.shift_date) = ${year}
@@ -320,12 +361,13 @@ const getPersonnel = async (req, res) => {
        ), 0) AS hours_this_month
      FROM users u
      JOIN roles r ON r.id = u.role_id
+     LEFT JOIN roles r2 ON r2.id = u.secondary_role_id
      LEFT JOIN user_departments ud ON ud.user_id = u.id
      LEFT JOIN departments d ON d.id = ud.department_id
      LEFT JOIN shifts s ON s.user_id = u.id
      LEFT JOIN shift_types st ON st.id = s.shift_type_id
      WHERE ${where}
-     GROUP BY u.id, r.id
+     GROUP BY u.id, r.id, r2.id
      ORDER BY r.level, u.last_name, u.first_name
      LIMIT $${idx} OFFSET $${idx + 1}`,
     [...params, parseInt(limit), offset]

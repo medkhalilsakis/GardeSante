@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore, useUIStore } from '../../store';
 import { useTranslation } from '../../utils/helpers';
 import Avatar from '../common/Avatar';
+import ContextBadge from './ContextBadge';
 import '../../styles/layout.css';
 
 const API_BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
@@ -30,6 +31,10 @@ const Icon = ({ name, size = 20 }) => {
     services:     <><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></>,
     chef:        <><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M12 12h.01M8 12h.01M16 12h.01"/></>,
     planning:    <><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/></>,
+    // Appel du jour (point 6) : bloc-notes avec une coche.
+    appel:       <><path d="M9 2h6a1 1 0 011 1v1H8V3a1 1 0 011-1z"/><path d="M16 4h1a2 2 0 012 2v13a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2h1"/><polyline points="9,13 11,15 15,11"/></>,
+    // Notes et circulaires (point 7) : porte-voix.
+    notes:       <><path d="M3 11l18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 11-5.8-1.6"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -49,7 +54,12 @@ export default function Sidebar({ unreadCount = 0 }) {
   const isSuperAdmin   = user?.roleCode === 'super_admin';
   const isAdmin        = ['super_admin', 'hospital_admin'].includes(user?.roleCode);
   const isDirector     = user?.roleCode === 'director';
-  const isChef         = ['department_head', 'service_supervisor', 'general_supervisor'].includes(user?.roleCode);
+  // Chaque métier a désormais son écran ; `isChef` ne couvre plus que le chef de service.
+  const isChef              = user?.roleCode === 'department_head';
+  const isServiceSupervisor = user?.roleCode === 'service_supervisor';
+  const isGeneralSupervisor = user?.roleCode === 'general_supervisor';
+  // Les trois rôles gardent leur espace « service » : /schedules leur reste masqué comme avant.
+  const hasServiceSpace     = isChef || isServiceSupervisor || isGeneralSupervisor;
   const isManagement   = ['super_admin', 'hospital_admin', 'director', 'general_supervisor'].includes(user?.roleCode);
   const canManageSchedules = hasPermission('schedules.read');
   const canManageUsers     = hasPermission('users.read');
@@ -65,6 +75,7 @@ export default function Sidebar({ unreadCount = 0 }) {
       { to: '/admin/profile-requests',     icon: 'review',      label: 'Demandes profil' },
     ]},
     { key: 'personal', label: 'Mon espace', items: [
+      { to: '/notifications', icon: 'notifications', label: 'Notifications' },
       { to: '/history', icon: 'history', label: 'Mon historique' },
     ]},
   ];
@@ -74,22 +85,48 @@ export default function Sidebar({ unreadCount = 0 }) {
     { key: 'main', label: 'Principal', items: [
       { to: '/dashboard',    icon: 'dashboard',    label: t('nav.dashboard') },
       // /schedules visible uniquement pour les non-chefs
-      { to: '/schedules',    icon: 'schedules',    label: t('nav.schedules'), show: canManageSchedules && !isChef },
+      { to: '/schedules',    icon: 'schedules',    label: t('nav.schedules'), show: canManageSchedules && !hasServiceSpace },
       { to: '/shifts',       icon: 'shifts',       label: t('nav.shifts') },
       { to: '/absences',     icon: 'absences',     label: t('nav.absences') },
       { to: '/replacements', icon: 'replacements', label: t('nav.replacements') },
     ]},
-    { key: 'chef', label: user?.roleCode === 'general_supervisor' ? 'Supervision' : 'Mon Service', show: isChef, items: [
-      { to: '/chef-de-service',          icon: 'planning',  label: user?.roleCode === 'general_supervisor' ? '📋 Plannings de l\'Hôpital' : '📋 Planning des Gardes' },
+    // Un écran par métier : le chef garde le tableur, le surveillant reçoit le
+    // suivi des gardes courantes, le surveillant général la supervision hôpital.
+    { key: 'chef', label: 'Mon Service', show: isChef, items: [
+      { to: '/chef-de-service',          icon: 'planning',  label: '📋 Planning des Gardes' },
+      { to: '/appel-du-jour',            icon: 'appel',     label: '📝 Appel du jour' },
+      // Consultation de tout l'effectif du service (point 5) — lecture seule.
+      { to: '/portfolio',                icon: 'personnel', label: '👥 Portfolio du service' },
+      { to: '/staff-loans',              icon: 'personnel', label: '🤝 Prêts de personnel' },
+    ]},
+    { key: 'surveillance', label: 'Mon Service', show: isServiceSupervisor, items: [
+      { to: '/surveillant',              icon: 'planning',  label: '🩺 Surveillance du Service' },
+      { to: '/appel-du-jour',            icon: 'appel',     label: '📝 Appel du jour' },
+      { to: '/planning-a-consulter',     icon: 'review',    label: '📅 Planning à Consulter' },
+    ]},
+    { key: 'supervision', label: 'Supervision', show: isGeneralSupervisor, items: [
+      { to: '/supervision',              icon: 'dashboard', label: '🏥 Supervision Générale' },
+      { to: '/chef-de-service',          icon: 'planning',  label: '📋 Plannings de l\'Hôpital' },
+      { to: '/appel-du-jour',            icon: 'appel',     label: '📝 Appel du jour' },
+      { to: '/planning-a-consulter',     icon: 'review',    label: '📅 Planning à Consulter' },
+      { to: '/staff-loans',              icon: 'personnel', label: '🤝 Prêts de personnel' },
+      { to: '/surveillant',              icon: 'shifts',    label: '🩺 Suivi des Gardes' },
     ]},
     { key: 'analytics', label: 'Analytique', show: isManagement, items: [
       { to: '/statistics', icon: 'statistics', label: t('nav.statistics') },
     ]},
     { key: 'director', label: 'Gestion', show: isDirector, items: [
+      { to: '/supervision',        icon: 'dashboard', label: '🏥 Supervision Hôpital' },
+      { to: '/appel-du-jour',      icon: 'appel',     label: '📝 Appel du jour' },
       { to: '/director/personnel', icon: 'personnel', label: 'Gestion des personnels' },
       { to: '/director/services',  icon: 'services',  label: 'Gestion des services' },
+      { to: '/staff-loans',        icon: 'personnel', label: '🤝 Prêts de personnel' },
     ]},
     { key: 'personal', label: 'Mon espace', items: [
+      { to: '/notifications', icon: 'notifications', label: 'Notifications' },
+      // Les notes quittent le planning des gardes et deviennent un écran à part
+      // (point 7). Visible pour tous : le serveur filtre déjà ce que chacun voit.
+      { to: '/notes', icon: 'notes', label: '📢 Notes et circulaires' },
       { to: '/history', icon: 'history', label: 'Historique' },
       { to: '/profile', icon: 'profile', label: 'Mon profil' },
     ]},
@@ -113,6 +150,11 @@ export default function Sidebar({ unreadCount = 0 }) {
           <span className="logo-sub">{user?.establishmentCode || 'Platform'}</span>
         </div>
       </div>
+
+      {/* Contexte d'appartenance — hôpital et service(s). Bloc frère du logo :
+          celui-ci a une hauteur fixe (--header-height) qu'il ne faut pas
+          bousculer. Le composant ne rend rien pour le Super Admin. */}
+      <ContextBadge variant="sidebar" />
 
       {/* Navigation */}
       <nav className="sidebar-nav">

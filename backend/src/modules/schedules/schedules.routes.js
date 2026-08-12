@@ -15,7 +15,10 @@ router.post('/', requirePermission('schedules.create'), ctrl.createSchedule);
 router.put('/:id', requirePermission('schedules.update'), ctrl.updateSchedule);
 router.patch('/:id/action', ctrl.scheduleAction);               // duplicate/archive/restore/delete
 router.post('/:id/submit', requirePermission('schedules.submit'), ctrl.submitSchedule);
-router.post('/:id/approve', requirePermission('schedules.approve'), ctrl.approveSchedule);
-router.post('/:id/reject', requirePermission('schedules.reject'), ctrl.rejectSchedule);
+// Il n'y a plus d'approbation ni de refus : l'envoi met le planning en marche.
+// Les surveillants et surveillants généraux proposent des modifications
+// (POST /api/schedule-builder/:scheduleId/proposals). Les permissions
+// `schedules.approve` / `schedules.reject` restent en base mais ne sont plus
+// rattachées à aucune route.
 module.exports = router;
 

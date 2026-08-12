@@ -62,6 +62,17 @@ const normText = (str) => String(str || '')
   .replace(/[^a-z0-9]/g, '')
   .trim();
 
+// ── Garde à domicile ────────────────────────────────────────────────────
+// Colonne FACULTATIVE : un fichier qui ne la porte pas s'importe exactement
+// comme avant, tous les agents en garde à l'hôpital. Seuls des marqueurs
+// affirmatifs explicites valent « à domicile » ; tout le reste (vide, « Non »,
+// « 0 », un texte quelconque) reste une garde en présence.
+const AT_HOME_TRUE = new Set([
+  'oui', 'o', 'yes', 'y', '1', 'x', 'true', 'vrai',
+  'domicile', 'adomicile', 'astreinte', 'athome', 'home',
+]);
+const parseAtHome = (raw) => AT_HOME_TRUE.has(normText(raw));
+
 // ── POST /api/schedule-builder/import/preview ──────────────────────────
 const importPreview = async (req, res) => {
   const estId = req.user.establishmentId;
@@ -121,6 +132,10 @@ const importPreview = async (req, res) => {
 
     if (parsedDate) {
       dateColumns.push({ original: header, dateKey: parsedDate });
+    } else if (['domicile', 'astreinte', 'athome'].some(k => cleanH.includes(k))) {
+      // Testée avant les autres : « Garde a domicile » ne doit jamais être
+      // happée par un motif plus large de la chaîne (id, code, mat, fin…).
+      metaColumns.atHome = header;
     } else if (['nom', 'lastname', 'familyname'].some(k => cleanH.includes(k))) {
       metaColumns.lastName = header;
     } else if (['prenom', 'firstname', 'givenname'].some(k => cleanH.includes(k))) {
@@ -240,6 +255,7 @@ const importPreview = async (req, res) => {
       roleName: roleName || (matchedUser ? matchedUser.role_name : ''),
       periodStart: pStart,
       periodEnd: pEnd,
+      atHome: metaColumns.atHome ? parseAtHome(row[metaColumns.atHome]) : false,
       matchedUserId: matchedUser ? matchedUser.id : null,
       matchedUserName: matchedUser ? `${matchedUser.first_name} ${matchedUser.last_name}` : null,
       isMatched: !!matchedUser,
@@ -330,6 +346,9 @@ const importConfirm = async (req, res) => {
       periodEnd: r.periodEnd || endDate,
       shiftStart: '07:00',
       shiftEnd: '07:00',
+      // La revue peut avoir corrigé la case : on lit ce que le client renvoie,
+      // sinon `false` — jamais de garde à domicile par défaut.
+      atHome: r.atHome === true,
       deptId: departmentId,
       shifts: r.shifts || {},
       isNew: false,
@@ -459,7 +478,11 @@ const downloadTemplate = async (req, res) => {
       days.push(`${dd}/${mm}/${d.getFullYear()}`);
     }
 
-    const headers = ['Nom', 'Prenom', 'Matricule', 'Telephone', 'Role', ...days];
+    // La colonne « Garde a domicile » est facultative à l'import : elle figure
+    // dans le modèle pour être découvrable, mais un fichier qui ne l'a pas
+    // s'importe exactement comme avant (tous les agents en présence).
+    const headers = ['Nom', 'Prenom', 'Matricule', 'Telephone', 'Role', 'Garde a domicile', ...days];
+    const FIRST_DAY_COL = 6;   // nombre de colonnes d'identité avant les jours
 
     // Style en-tête
     const headerRow = ws.addRow(headers);
@@ -477,13 +500,20 @@ const downloadTemplate = async (req, res) => {
 
     staffList.forEach((person, idx) => {
       const sampleShifts = days.map((_, di) => shiftCodes[(idx + di) % shiftCodes.length]);
-      const rowVals = [person.last_name, person.first_name, person.matricule || '', person.phone || '', person.role_name || '', ...sampleShifts];
+      const sampleAtHome = idx === 1 ? 'Oui' : 'Non';
+      const rowVals = [person.last_name, person.first_name, person.matricule || '', person.phone || '', person.role_name || '', sampleAtHome, ...sampleShifts];
       const r = ws.addRow(rowVals);
       r.height = 22;
       r.eachCell((cell, colIdx) => {
         cell.font = { size: 10 };
-        cell.alignment = { vertical: 'middle', horizontal: colIdx > 5 ? 'center' : 'left' };
-        if (colIdx > 5) {
+        cell.alignment = { vertical: 'middle', horizontal: colIdx >= FIRST_DAY_COL ? 'center' : 'left' };
+        if (colIdx === FIRST_DAY_COL) {
+          // Colonne « Garde a domicile » : teintée quand elle vaut Oui.
+          if (String(cell.value || '').toLowerCase() === 'oui') {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDE9FE' } };
+            cell.font = { bold: true, size: 10, color: { argb: 'FF6D28D9' } };
+          }
+        } else if (colIdx > FIRST_DAY_COL) {
           const code = String(cell.value || '').toUpperCase();
           if (shiftColors[code]) {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: shiftColors[code] } };
@@ -504,6 +534,9 @@ const downloadTemplate = async (req, res) => {
       ['G', 'Garde', 'Garde de 24 heures / générale'],
       ['R', 'Repos', 'Jour de repos (aucune garde)'],
       ['Vide', 'Aucune affectation', 'Laissez la cellule vide si pas de garde'],
+      ['', '', ''],
+      ['Garde a domicile', 'Colonne facultative', "Oui / 1 / X ⇒ l'agent assure sa garde à domicile (astreinte). Non / vide ⇒ garde à l'hôpital, en présence."],
+      ['', 'Compatibilité', "Un fichier sans cette colonne s'importe normalement : tous les agents sont alors en garde à l'hôpital."],
     ].forEach(row => legendWs.addRow(row));
 
     // Largeurs de colonnes
@@ -512,7 +545,11 @@ const downloadTemplate = async (req, res) => {
     ws.getColumn(3).width = 14;
     ws.getColumn(4).width = 16;
     ws.getColumn(5).width = 16;
-    for (let i = 6; i <= headers.length; i++) ws.getColumn(i).width = 13;
+    ws.getColumn(6).width = 17;   // Garde a domicile
+    for (let i = FIRST_DAY_COL + 1; i <= headers.length; i++) ws.getColumn(i).width = 13;
+    legendWs.getColumn(1).width = 18;
+    legendWs.getColumn(2).width = 22;
+    legendWs.getColumn(3).width = 88;
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="template_planning_gardes.xlsx"');

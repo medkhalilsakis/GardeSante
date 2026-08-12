@@ -52,7 +52,13 @@ export default function Avatar({
   onClick,
   className = '',
 }) {
-  const [imgError, setImgError] = useState(false);
+  // On mémorise l'URL qui a échoué, pas un simple booléen : l'erreur se
+  // réinitialise ainsi d'elle-même dès que `avatarUrl` change. Avec un booléen,
+  // un échec restait collé au composant — après l'upload d'une photo de profil,
+  // la nouvelle URL arrivait bien mais l'avatar continuait d'afficher les
+  // initiales tant que le composant n'était pas démonté.
+  const [failedUrl, setFailedUrl] = useState(null);
+  const imgError = !!avatarUrl && failedUrl === avatarUrl;
   const { px, font, icon } = SIZE_MAP[size] || SIZE_MAP.md;
 
   const initials = ((firstName?.[0] || '') + (lastName?.[0] || '')).toUpperCase();
@@ -77,9 +83,11 @@ export default function Avatar({
 
   // ── Cas 1 : URL disponible et pas d'erreur ────────────────
   if (avatarUrl && !imgError) {
-    // Construire l'URL absolue
+    // Construire l'URL absolue. Les URL déjà autoportantes (http, blob et
+    // surtout `data:`, produite par FileReader pour l'aperçu local avant
+    // upload) ne doivent JAMAIS être préfixées, sinon l'image est cassée.
     let fullUrl = avatarUrl;
-    if (!avatarUrl.startsWith('http') && !avatarUrl.startsWith('blob')) {
+    if (!/^(https?:|blob:|data:)/i.test(avatarUrl)) {
       fullUrl = `${API_BASE}${avatarUrl}`;
     }
     return (
@@ -88,7 +96,7 @@ export default function Avatar({
           src={fullUrl}
           alt={initials || 'Avatar'}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          onError={() => setImgError(true)}
+          onError={() => setFailedUrl(avatarUrl)}
         />
       </div>
     );

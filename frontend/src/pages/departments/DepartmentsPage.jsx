@@ -240,7 +240,10 @@ function AddMemberButton({ deptId, onSuccess }) {
     <div style={{ display: 'flex', gap: 8 }}>
       <select className="form-control" style={{ fontSize: 'var(--font-xs)', width: 220 }} value={userId} onChange={e => setUserId(e.target.value)}>
         <option value="">Choisir un médecin</option>
-        {allUsers.map(u => <option key={u.id} value={u.id}>Dr. {u.first_name} {u.last_name}</option>)}
+        {/* Le surveillant général couvre tout l'hôpital : il n'appartient à
+            aucun service. Le serveur refuse ce rattachement en 400, on évite
+            simplement de le proposer. */}
+        {allUsers.filter(u => u.role_code !== 'general_supervisor').map(u => <option key={u.id} value={u.id}>Dr. {u.first_name} {u.last_name}</option>)}
       </select>
       <button className="btn btn-success btn-sm" onClick={() => addMutation.mutate()} disabled={!userId || addMutation.isPending}>✓</button>
       <button className="btn btn-ghost btn-sm" onClick={() => setShow(false)}>✕</button>

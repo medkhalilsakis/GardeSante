@@ -52,6 +52,10 @@ function AvatarTab({ profile }) {
   const { updateAvatar } = useAuthStore();
   const fileRef = useRef();
   const [preview, setPreview] = useState(null);
+  // Le fichier choisi est conservé ici et non relu depuis l'input : un fichier
+  // glissé-déposé n'alimente PAS `fileRef.current.files`, donc l'upload restait
+  // sans effet pour ce chemin-là.
+  const [pendingFile, setPendingFile] = useState(null);
   const [dragOver, setDragOver] = useState(false);
 
   const avatarUrl = preview
@@ -65,8 +69,10 @@ function AvatarTab({ profile }) {
     onSuccess: (res) => {
       toast.success('Photo de profil mise à jour');
       setPreview(null);
+      setPendingFile(null);
+      if (fileRef.current) fileRef.current.value = '';
       updateAvatar(res.data.data.avatarUrl);
-      qc.invalidateQueries(['profile']);
+      qc.invalidateQueries({ queryKey: ['profile'] });
     },
     onError: (e) => toast.error(e.response?.data?.message || 'Erreur lors de l\'upload'),
   });
@@ -76,8 +82,10 @@ function AvatarTab({ profile }) {
     onSuccess: () => {
       toast.success('Photo supprimée');
       setPreview(null);
+      setPendingFile(null);
+      if (fileRef.current) fileRef.current.value = '';
       updateAvatar(null);
-      qc.invalidateQueries(['profile']);
+      qc.invalidateQueries({ queryKey: ['profile'] });
     },
     onError: () => toast.error('Erreur lors de la suppression'),
   });
@@ -88,6 +96,7 @@ function AvatarTab({ profile }) {
       return toast.error('Format non supporté (JPG, PNG, WebP)');
     }
     if (file.size > 5 * 1024 * 1024) return toast.error('Fichier trop volumineux (max 5 Mo)');
+    setPendingFile(file);
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target.result);
     reader.readAsDataURL(file);
@@ -98,9 +107,17 @@ function AvatarTab({ profile }) {
     handleFile(e.dataTransfer.files[0]);
   };
 
+  const handleCancel = () => {
+    setPreview(null);
+    setPendingFile(null);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
   const handleUpload = () => {
-    if (!fileRef.current?.files[0]) return;
-    uploadMut.mutate(fileRef.current.files[0]);
+    // Le fichier vient de l'état, pas de l'input : cela couvre aussi bien le
+    // clic que le glisser-déposer.
+    if (!pendingFile) return;
+    uploadMut.mutate(pendingFile);
   };
 
   return (
@@ -157,8 +174,8 @@ function AvatarTab({ profile }) {
       <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
         {preview ? (
           <>
-            <button className="btn btn-secondary" onClick={() => setPreview(null)}>Annuler</button>
-            <button className="btn btn-primary" onClick={handleUpload} disabled={uploadMut.isPending}>
+            <button className="btn btn-secondary" onClick={handleCancel}>Annuler</button>
+            <button className="btn btn-primary" onClick={handleUpload} disabled={uploadMut.isPending || !pendingFile}>
               {uploadMut.isPending ? '⏳ Upload…' : '💾 Enregistrer cette photo'}
             </button>
           </>
@@ -217,7 +234,7 @@ function ProfileInfoTab({ profile }) {
 
   const mutation = useMutation({
     mutationFn: (data) => profileAPI.requestChange(data),
-    onSuccess: (res) => { toast.success(res.data.message || 'Demande soumise'); qc.invalidateQueries(['profile']); },
+    onSuccess: (res) => { toast.success(res.data.message || 'Demande soumise'); qc.invalidateQueries({ queryKey: ['profile'] }); },
     onError: (e) => toast.error(e.response?.data?.message || 'Erreur'),
   });
 

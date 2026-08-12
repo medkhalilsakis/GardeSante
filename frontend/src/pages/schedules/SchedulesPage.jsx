@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { schedulesAPI, departmentsAPI } from '../../api';
 import { useAuthStore } from '../../store';
-import { useTranslation, formatDate, getStatusBadgeClass, exportToPDF } from '../../utils/helpers';
+import { useTranslation, formatDate, exportToPDF } from '../../utils/helpers';
+import PlanningStateBadge from '../../components/planning/PlanningStateBadge';
 import toast from 'react-hot-toast';
 
 export default function SchedulesPage() {
@@ -15,7 +16,6 @@ export default function SchedulesPage() {
   const [filters, setFilters] = useState({ status: '', departmentId: '' });
 
   const canCreate = hasPermission('schedules.create');
-  const canApprove = hasPermission('schedules.approve');
   const canGenerate = hasPermission('schedules.generate');
 
   const { data: schedulesData, isLoading } = useQuery({
@@ -32,27 +32,20 @@ export default function SchedulesPage() {
 
   const submitMutation = useMutation({
     mutationFn: (id) => schedulesAPI.submit(id, {}),
-    onSuccess: () => { toast.success('Planning soumis pour validation'); qc.invalidateQueries(['schedules']); },
+    onSuccess: (res) => {
+      toast.success(res?.data?.message || 'Planning envoyé et mis en vigueur');
+      qc.invalidateQueries(['schedules']);
+    },
   });
 
-  const approveMutation = useMutation({
-    mutationFn: (id) => schedulesAPI.approve(id, {}),
-    onSuccess: () => { toast.success('Planning approuvé'); qc.invalidateQueries(['schedules']); },
-  });
-
-  const rejectMutation = useMutation({
-    mutationFn: ({ id, reason }) => schedulesAPI.reject(id, { comment: reason }),
-    onSuccess: () => { toast.success('Planning rejeté'); qc.invalidateQueries(['schedules']); },
-  });
-
+  // Il n'y a plus d'approbation ni de refus : l'envoi met le planning en
+  // vigueur, puis il passe « en cours » à sa date de début. Les surveillants
+  // et surveillants généraux proposent des modifications depuis le tableur.
   const statusOptions = [
     { value: '', label: 'Tous les statuts' },
     { value: 'draft', label: t('status.draft') },
     { value: 'submitted', label: t('status.submitted') },
-    { value: 'under_review', label: t('status.under_review') },
-    { value: 'approved', label: t('status.approved') },
     { value: 'active', label: t('status.active') },
-    { value: 'rejected', label: t('status.rejected') },
   ];
 
   const handleExportPDF = () => {
@@ -137,19 +130,22 @@ export default function SchedulesPage() {
                 {/* Barre de statut colorée */}
                 <div style={{
                   width: 4, height: 48, borderRadius: 2, flexShrink: 0,
-                  background: schedule.status === 'approved' || schedule.status === 'active' ? 'var(--color-success)' :
-                               schedule.status === 'rejected' ? 'var(--color-danger)' :
-                               schedule.status === 'submitted' || schedule.status === 'under_review' ? 'var(--color-warning)' :
-                               'var(--color-primary)',
+                  background: schedule.status === 'active' ? 'var(--color-success)' :
+                               schedule.status === 'submitted' ? 'var(--color-primary)' :
+                               'var(--text-muted)',
                 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                     <h3 style={{ fontSize: 'var(--font-md)', fontWeight: 700, color: 'var(--text-primary)' }}>
                       {schedule.name}
                     </h3>
-                    <span className={`badge ${getStatusBadgeClass(schedule.status)}`}>
-                      {t(`status.${schedule.status}`)}
-                    </span>
+                    <PlanningStateBadge
+                      state={schedule.state}
+                      status={schedule.status}
+                      startDate={schedule.start_date}
+                      endDate={schedule.end_date}
+                      size="sm"
+                    />
                   </div>
                   <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>
                     <strong>{schedule.department_name}</strong>
@@ -175,19 +171,6 @@ export default function SchedulesPage() {
                     >
                       {t('schedules.submit_for_validation')}
                     </button>
-                  )}
-                  {(schedule.status === 'submitted' || schedule.status === 'under_review') && canApprove && (
-                    <>
-                      <button className="btn btn-success btn-sm" onClick={() => approveMutation.mutate(schedule.id)} disabled={approveMutation.isPending}>
-                        ✓ {t('common.approve')}
-                      </button>
-                      <button className="btn btn-danger btn-sm" onClick={() => {
-                        const reason = prompt('Motif du rejet :');
-                        if (reason) rejectMutation.mutate({ id: schedule.id, reason });
-                      }}>
-                        ✗ {t('common.reject')}
-                      </button>
-                    </>
                   )}
                 </div>
               </div>

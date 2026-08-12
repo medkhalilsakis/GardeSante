@@ -1,30 +1,61 @@
 const { query } = require('../../config/database');
 
+// Filtres additionnels (`type`, `priority`, `read`) et total renvoyé pour la
+// pagination de l'écran dédié. `unreadOnly`, `page` et `limit` gardent leur sens
+// exact : le menu déroulant du Header et le polling d'AppLayout continuent de
+// fonctionner sans aucune modification.
 const getNotifications = async (req, res) => {
-  const { unreadOnly = false, page = 1, limit = 20 } = req.query;
-  const offset = (page - 1) * limit;
+  const { unreadOnly = false, page = 1, limit = 20, type, priority, read } = req.query;
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+  const safePage = Math.max(parseInt(page, 10) || 1, 1);
+  const offset = (safePage - 1) * safeLimit;
 
-  let conditions = ['recipient_id = $1'];
-  if (unreadOnly === 'true') conditions.push('is_read = FALSE');
+  const conditions = ['n.recipient_id = $1'];
+  const params = [req.user.id];
+
+  if (unreadOnly === 'true' || read === 'false') conditions.push('n.is_read = FALSE');
+  else if (read === 'true') conditions.push('n.is_read = TRUE');
+  if (type)     { params.push(type);     conditions.push(`n.type = $${params.length}`); }
+  if (priority) { params.push(priority); conditions.push(`n.priority = $${params.length}`); }
+
+  const where = conditions.join(' AND ');
 
   const result = await query(
-    `SELECT n.*, COALESCE(p.schedule_id, CASE WHEN n.entity_type='schedules' THEN n.entity_id END) AS target_schedule_id
+    `SELECT n.*,
+            COALESCE(p.schedule_id, rp.schedule_id, sl.schedule_id,
+                     CASE WHEN n.entity_type='schedules' THEN n.entity_id END) AS target_schedule_id
      FROM notifications n
      LEFT JOIN schedule_change_proposals p ON n.entity_type='schedule_change_proposals' AND p.id=n.entity_id
-     WHERE ${conditions.map(condition => condition.replace(/^recipient_id/, 'n.recipient_id').replace(/^is_read/, 'n.is_read')).join(' AND ')}
-     ORDER BY n.created_at DESC LIMIT $2 OFFSET $3`,
-    [req.user.id, parseInt(limit), offset]
+     LEFT JOIN replacements rp ON n.entity_type='replacements' AND rp.id=n.entity_id
+     LEFT JOIN staff_loan_requests sl ON n.entity_type='staff_loan_requests' AND sl.id=n.entity_id
+     WHERE ${where}
+     ORDER BY n.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, safeLimit, offset]
   );
 
+  const totalRes = await query(`SELECT COUNT(*) FROM notifications n WHERE ${where}`, params);
   const unreadCount = await query(
     'SELECT COUNT(*) FROM notifications WHERE recipient_id = $1 AND is_read = FALSE',
     [req.user.id]
   );
+  // Types et priorités réellement présents chez l'appelant : l'écran dédié ne
+  // propose que des filtres qui donneront un résultat.
+  const facets = await query(
+    'SELECT type, priority FROM notifications WHERE recipient_id = $1 GROUP BY type, priority',
+    [req.user.id]
+  );
 
+  const total = parseInt(totalRes.rows[0].count, 10);
   return res.json({
     success: true,
     data: result.rows,
-    unreadCount: parseInt(unreadCount.rows[0].count),
+    unreadCount: parseInt(unreadCount.rows[0].count, 10),
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: Math.max(Math.ceil(total / safeLimit), 1),
+    types: [...new Set(facets.rows.map((r) => r.type).filter(Boolean))].sort(),
+    priorities: [...new Set(facets.rows.map((r) => r.priority).filter(Boolean))],
   });
 };
 
@@ -44,6 +75,33 @@ const markAllRead = async (req, res) => {
   return res.json({ success: true, message: 'Toutes les notifications lues' });
 };
 
+// Suppression unitaire — bornée au destinataire : personne ne peut effacer la
+// notification d'un autre, même en devinant son identifiant.
+const deleteNotification = async (req, res) => {
+  const result = await query(
+    'DELETE FROM notifications WHERE id = $1 AND recipient_id = $2 RETURNING id',
+    [req.params.id, req.user.id]
+  );
+  if (!result.rows.length) {
+    return res.status(404).json({ success: false, message: 'Notification introuvable' });
+  }
+  return res.json({ success: true, message: 'Notification supprimée' });
+};
+
+// Purge des notifications déjà lues de l'appelant. Les non lues sont conservées :
+// vider sa boîte ne doit jamais faire disparaître une information non consultée.
+const clearRead = async (req, res) => {
+  const result = await query(
+    'DELETE FROM notifications WHERE recipient_id = $1 AND is_read = TRUE RETURNING id',
+    [req.user.id]
+  );
+  return res.json({
+    success: true,
+    deleted: result.rows.length,
+    message: `${result.rows.length} notification(s) supprimée(s)`,
+  });
+};
+
 // Fonction utilitaire pour créer une notification (utilisée par les autres modules)
 const createNotification = async (data) => {
   const { establishmentId, recipientId, senderId, type, title, titleAr, message, messageAr, entityType, entityId, priority } = data;
@@ -58,4 +116,4 @@ const createNotification = async (data) => {
   }
 };
 
-module.exports = { getNotifications, markAsRead, markAllRead, createNotification };
+module.exports = { getNotifications, markAsRead, markAllRead, deleteNotification, clearRead, createNotification };

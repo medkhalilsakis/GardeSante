@@ -1,43 +1,82 @@
 ﻿const { query, transaction } = require('../../config/database');
+// Garde-fou : les rôles transversaux à l'hôpital (surveillant général) ne
+// peuvent pas être rattachés à un service. Voir hospital-wide-roles.js.
+const { checkDepartmentMembership, REFUSAL: NO_DEPT_REFUSAL } = require('./hospital-wide-roles');
 
 // GET /api/departments
+// `?head=<userId>` restreint la liste aux services dont cet utilisateur est chef.
+// Sans ce filtre le chef de service pouvait se retrouver positionné par défaut
+// sur un service qui n'est pas le sien, et n'y plus retrouver ses plannings.
 const getDepartments = async (req, res) => {
   const eid = req.user.isSuperAdmin ? (req.query.establishmentId || req.user.establishmentId) : req.user.establishmentId;
-  const result = await query(
-    `SELECT d.*,
-            COUNT(DISTINCT ud.user_id) FILTER (WHERE u.is_active = TRUE) AS member_count,
+  const headId = req.query.head || null;
+
+  // Un seul chef par service, mais plusieurs surveillants possibles : les
+  // surveillants sont agrégés en tableau pour ne pas dupliquer la ligne du
+  // service. `supervisor_*` reste renseigné avec le premier, pour compatibilité.
+  const build = (headFilter) => `
+     SELECT d.*,
+            (SELECT COUNT(*) FROM user_departments udc
+               JOIN users uc ON uc.id = udc.user_id
+              WHERE udc.department_id = d.id AND uc.is_active = TRUE) AS member_count,
             parent.name AS parent_name,
-            -- Chef de service (is_head = TRUE)
-            head_user.id         AS head_id,
-            head_user.first_name AS head_first_name,
-            head_user.last_name  AS head_last_name,
-            head_role.code       AS head_role_code,
-            -- Surveillant du service (role service_supervisor dans ce dept)
-            surv.id              AS supervisor_id,
-            surv.first_name      AS supervisor_first_name,
-            surv.last_name       AS supervisor_last_name
-     FROM departments d
-     LEFT JOIN user_departments ud ON d.id = ud.department_id
-     LEFT JOIN users u ON ud.user_id = u.id
-     LEFT JOIN departments parent ON d.parent_id = parent.id
-     -- Chef (is_head = TRUE)
-     LEFT JOIN user_departments ud_head ON d.id = ud_head.department_id AND ud_head.is_head = TRUE
-     LEFT JOIN users head_user ON ud_head.user_id = head_user.id AND head_user.is_active = TRUE
-     LEFT JOIN roles head_role ON head_user.role_id = head_role.id
-     -- Surveillant (role service_supervisor affecte a ce dept)
-     LEFT JOIN (
-       SELECT ud2.department_id, u2.id, u2.first_name, u2.last_name
-       FROM user_departments ud2
-       JOIN users u2 ON ud2.user_id = u2.id
-       JOIN roles r2 ON u2.role_id = r2.id
-       WHERE r2.code = 'service_supervisor' AND u2.is_active = TRUE
-     ) surv ON surv.department_id = d.id
-     WHERE d.establishment_id = $1 AND d.is_active = TRUE
-     GROUP BY d.id, parent.name, head_user.id, head_user.first_name, head_user.last_name, head_role.code,
-              surv.id, surv.first_name, surv.last_name
-     ORDER BY d.name`,
-    [eid]
-  );
+            head.id         AS head_id,
+            head.first_name AS head_first_name,
+            head.last_name  AS head_last_name,
+            head.role_code  AS head_role_code,
+            surv.first_id         AS supervisor_id,
+            surv.first_first_name AS supervisor_first_name,
+            surv.first_last_name  AS supervisor_last_name,
+            COALESCE(surv.list, '[]'::json) AS supervisors,
+            COALESCE(surv.cnt, 0)           AS supervisor_count
+       FROM departments d
+       LEFT JOIN departments parent ON d.parent_id = parent.id
+       LEFT JOIN LATERAL (
+         SELECT hu.id, hu.first_name, hu.last_name, hr.code AS role_code
+           FROM user_departments udh
+           JOIN users hu ON hu.id = udh.user_id AND hu.is_active = TRUE
+           LEFT JOIN roles hr ON hr.id = hu.role_id
+          WHERE udh.department_id = d.id AND udh.is_head = TRUE
+          LIMIT 1
+       ) head ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT json_agg(json_build_object(
+                  'id', s.id, 'firstName', s.first_name, 'lastName', s.last_name
+                ) ORDER BY s.last_name, s.first_name)          AS list,
+                (array_agg(s.id         ORDER BY s.last_name, s.first_name))[1] AS first_id,
+                (array_agg(s.first_name ORDER BY s.last_name, s.first_name))[1] AS first_first_name,
+                (array_agg(s.last_name  ORDER BY s.last_name, s.first_name))[1] AS first_last_name,
+                COUNT(*)                                        AS cnt
+           FROM user_departments uds
+           JOIN users s ON s.id = uds.user_id AND s.is_active = TRUE
+           JOIN roles rs ON rs.id = s.role_id
+          WHERE uds.department_id = d.id AND rs.code = 'service_supervisor'
+       ) surv ON TRUE
+      WHERE d.establishment_id = $1 AND d.is_active = TRUE
+      ${headFilter}
+      ORDER BY d.name`;
+
+  let result;
+  if (headId) {
+    result = await query(
+      build(`AND EXISTS (SELECT 1 FROM user_departments uf
+                          WHERE uf.department_id = d.id AND uf.user_id = $2 AND uf.is_head = TRUE)`),
+      [eid, headId]
+    );
+    // Repli : un chef sans `is_head` verrait une liste vide et ne pourrait plus
+    // rien créer. On retombe sur ses services d'appartenance, puis sur tout.
+    if (result.rows.length === 0) {
+      result = await query(
+        build(`AND EXISTS (SELECT 1 FROM user_departments uf
+                            WHERE uf.department_id = d.id AND uf.user_id = $2)`),
+        [eid, headId]
+      );
+    }
+    if (result.rows.length === 0) result = await query(build(''), [eid]);
+  } else {
+    result = await query(build(''), [eid]);
+  }
+
   return res.json({ success: true, data: result.rows });
 };
 
@@ -143,6 +182,9 @@ const setDepartmentHead = async (req, res) => {
     return res.status(403).json({ success: false, message: 'Permission refusee' });
   }
 
+  const membership = await checkDepartmentMembership(userId);
+  if (!membership.allowed) return res.status(400).json(NO_DEPT_REFUSAL);
+
   await transaction(async (client) => {
     // Retirer le statut chef de l'ancien chef
     await client.query(
@@ -174,65 +216,113 @@ const setDepartmentHead = async (req, res) => {
   return res.json({ success: true, message: 'Chef de service designe avec succes' });
 };
 
-// PUT /api/departments/:id/supervisor â€” Designer le surveillant du service
-// Regles : un seul surveillant par service. Remplace l'ancien automatiquement.
+// PUT /api/departments/:id/supervisor â€” Designer un surveillant du service
+// Regles : un service n'a qu'UN SEUL chef, mais peut avoir PLUSIEURS
+// surveillants. Designer un nouveau surveillant AJOUTE donc la personne sans
+// retirer son role a qui que ce soit.
+// Cas particulier conserve : appeler la route sans `userId` retire le role a
+// tous les surveillants actuels (« vider la liste »), comme avant.
 const setDepartmentSupervisor = async (req, res) => {
   const { userId } = req.body;
   if (!['director', 'hospital_admin', 'super_admin', 'general_supervisor'].includes(req.user.roleCode)) {
     return res.status(403).json({ success: false, message: 'Permission refusee' });
   }
 
-  await transaction(async (client) => {
-    // Trouver l'ancien surveillant de ce service et lui retirer son role
-    const oldSuperv = await client.query(
-      `SELECT u.id FROM user_departments ud
-       JOIN users u ON ud.user_id = u.id
-       JOIN roles r ON u.role_id = r.id
-       WHERE ud.department_id = $1 AND r.code = 'service_supervisor' AND u.is_active = TRUE`,
-      [req.params.id]
-    );
+  // Un surveillant général ne devient pas surveillant d'un service : sa portée
+  // est l'hôpital entier. Le cas `!userId` (vider la liste) n'est pas concerné.
+  const membership = await checkDepartmentMembership(userId);
+  if (!membership.allowed) return res.status(400).json(NO_DEPT_REFUSAL);
 
-    if (oldSuperv.rows.length > 0 && oldSuperv.rows[0].id !== userId) {
-      // Recuperer un role "neutre" de repli (senior_doctor par defaut)
-      const fallbackRole = await client.query(
-        `SELECT id FROM roles WHERE establishment_id = $1 AND code = 'senior_doctor' LIMIT 1`,
-        [req.user.establishmentId]
+  await transaction(async (client) => {
+    if (!userId) {
+      // Aucun destinataire : on retire le role a tous les surveillants du service.
+      const current = await client.query(
+        `SELECT u.id FROM user_departments ud
+         JOIN users u ON ud.user_id = u.id
+         JOIN roles r ON u.role_id = r.id
+         WHERE ud.department_id = $1 AND r.code = 'service_supervisor' AND u.is_active = TRUE`,
+        [req.params.id]
       );
-      if (fallbackRole.rows[0]) {
-        await client.query(
-          `UPDATE users SET role_id = $1 WHERE id = $2`,
-          [fallbackRole.rows[0].id, oldSuperv.rows[0].id]
+      if (current.rows.length > 0) {
+        const fallbackRole = await client.query(
+          `SELECT id FROM roles WHERE establishment_id = $1 AND code = 'senior_doctor' LIMIT 1`,
+          [req.user.establishmentId]
         );
+        if (fallbackRole.rows[0]) {
+          await client.query(
+            `UPDATE users SET role_id = $1 WHERE id = ANY($2::uuid[])`,
+            [fallbackRole.rows[0].id, current.rows.map(r => r.id)]
+          );
+        }
       }
+      return;
     }
 
-    if (userId) {
+    await client.query(
+      `INSERT INTO user_departments (user_id, department_id, is_head, is_primary)
+       VALUES ($1, $2, FALSE, TRUE)
+       ON CONFLICT (user_id, department_id) DO UPDATE SET is_primary = TRUE`,
+      [userId, req.params.id]
+    );
+    // Assigner role service_supervisor (les autres surveillants gardent le leur)
+    const roleRes = await client.query(
+      `SELECT id FROM roles WHERE establishment_id = $1 AND code = 'service_supervisor'`,
+      [req.user.establishmentId]
+    );
+    if (roleRes.rows[0]) {
       await client.query(
-        `INSERT INTO user_departments (user_id, department_id, is_head, is_primary)
-         VALUES ($1, $2, FALSE, TRUE)
-         ON CONFLICT (user_id, department_id) DO UPDATE SET is_primary = TRUE`,
-        [userId, req.params.id]
+        `UPDATE users SET role_id = $1 WHERE id = $2`,
+        [roleRes.rows[0].id, userId]
       );
-      // Assigner role service_supervisor
-      const roleRes = await client.query(
-        `SELECT id FROM roles WHERE establishment_id = $1 AND code = 'service_supervisor'`,
-        [req.user.establishmentId]
-      );
-      if (roleRes.rows[0]) {
-        await client.query(
-          `UPDATE users SET role_id = $1 WHERE id = $2`,
-          [roleRes.rows[0].id, userId]
-        );
-      }
     }
   });
 
   return res.json({ success: true, message: 'Surveillant de service designe avec succes' });
 };
 
+// DELETE /api/departments/:id/supervisor/:userId â€” Retirer UN surveillant
+// Retire uniquement la personne visee ; les autres surveillants du service
+// conservent leur role. Le compte n'est ni supprime ni desactive : il retrouve
+// simplement un role metier neutre (medecin senior).
+const removeDepartmentSupervisor = async (req, res) => {
+  if (!['director', 'hospital_admin', 'super_admin', 'general_supervisor'].includes(req.user.roleCode)) {
+    return res.status(403).json({ success: false, message: 'Permission refusee' });
+  }
+
+  const current = await query(
+    `SELECT u.id FROM user_departments ud
+     JOIN users u ON ud.user_id = u.id
+     JOIN roles r ON u.role_id = r.id
+     WHERE ud.department_id = $1 AND ud.user_id = $2 AND r.code = 'service_supervisor'`,
+    [req.params.id, req.params.userId]
+  );
+  if (!current.rows[0]) {
+    return res.status(404).json({ success: false, message: 'Cette personne n\'est pas surveillant de ce service.' });
+  }
+
+  const fallbackRole = await query(
+    `SELECT id FROM roles WHERE establishment_id = $1 AND code = 'senior_doctor' LIMIT 1`,
+    [req.user.establishmentId]
+  );
+  if (!fallbackRole.rows[0]) {
+    return res.status(409).json({ success: false, message: 'Aucun role de repli disponible pour cet etablissement.' });
+  }
+  await query('UPDATE users SET role_id = $1, updated_at = NOW() WHERE id = $2',
+    [fallbackRole.rows[0].id, req.params.userId]);
+
+  return res.json({ success: true, message: 'Surveillant retire du service' });
+};
+
 // POST /api/departments/:id/members
 const addMember = async (req, res) => {
   const { userId, isHead, isPrimary } = req.body;
+
+  // Seul garde-fou de cette route : elle insère directement ce que porte le
+  // corps de la requête, c'est donc la porte d'entrée la plus exposée pour un
+  // rattachement interdit.
+  const membership = await checkDepartmentMembership(userId);
+  if (!membership.allowed) return res.status(400).json(NO_DEPT_REFUSAL);
+
   await query(
     `INSERT INTO user_departments (user_id, department_id, is_head, is_primary)
      VALUES ($1,$2,$3,$4)
@@ -254,6 +344,6 @@ const initEstablishmentDefaults = require('../schedules/rules-engine').initEstab
 module.exports = {
   getDepartments, getDepartment,
   createDepartment, updateDepartment, deleteDepartment,
-  setDepartmentHead, setDepartmentSupervisor,
+  setDepartmentHead, setDepartmentSupervisor, removeDepartmentSupervisor,
   addMember, removeMember,
 };

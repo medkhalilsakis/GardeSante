@@ -15,8 +15,9 @@ const getDashboard = async (req, res) => {
       FROM shifts WHERE establishment_id = $1 AND shift_date = $2 AND status != 'cancelled'`,
       [eid, today]
     ),
-    // Plannings en attente de validation
-    query(`SELECT COUNT(*) FROM schedules WHERE establishment_id = $1 AND status IN ('submitted','under_review')`, [eid]),
+    // Plannings en vigueur (envoyés ou en cours) — il n'y a plus d'approbation
+    // à attendre : un planning envoyé est effectif (migration 026).
+    query(`SELECT COUNT(*) FROM schedules WHERE establishment_id = $1 AND status IN ('submitted','active')`, [eid]),
     // Remplacements ouverts
     query(`SELECT COUNT(*) FROM replacements WHERE establishment_id = $1 AND status IN ('pending','proposed')`, [eid]),
     // Absences ce mois
@@ -50,7 +51,11 @@ const getDashboard = async (req, res) => {
         date: today,
         shifts: todayShifts.rows[0],
       },
+      // `pendingSchedules` est conservé sous ce nom pour ne rien casser côté
+      // client, mais il compte désormais les plannings EN VIGUEUR.
+      // `schedulesInForce` est le nom exact du même chiffre.
       pendingSchedules: parseInt(pendingSchedules.rows[0].count),
+      schedulesInForce: parseInt(pendingSchedules.rows[0].count),
       openReplacements: parseInt(openReplacements.rows[0].count),
       monthAbsences: monthAbsences.rows[0],
       coverage: coverageRate.rows[0],
