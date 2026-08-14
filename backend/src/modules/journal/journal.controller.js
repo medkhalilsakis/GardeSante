@@ -18,7 +18,7 @@ const { query } = require('../../config/database');
 const { ROLES } = require('../../config/constants');
 const { createNotification } = require('../notifications/notifications.controller');
 const { emitToUser, emitToDepartment, emitToEstablishment } = require('../../realtime/emit');
-const { rosterOnDate, remainingDutyDays, dateKey } = require('../schedules/spreadsheet-reader');
+const { rosterOnDate, remainingDutyDays, dateKey, datesBetween } = require('../schedules/spreadsheet-reader');
 const history = require('../history/history.controller');
 
 const SCOPE_PLATFORM = 'platform';
@@ -28,6 +28,7 @@ const SCOPE_DEPARTMENTS = 'departments';
 /** Types saisis à la main. Les absences/retards restent l'affaire d'absences-shift. */
 const MANUAL_EVENT_TYPES = ['presence', 'remark', 'incident', 'reinforcement'];
 const SEVERITIES = ['info', 'warning', 'error', 'critical'];
+const CALL_EVENT_TYPES = ['presence', 'absence', 'late'];
 
 const EVENT_LABELS = {
   presence: 'Présence',
@@ -172,12 +173,12 @@ const listEvents = async (req, res) => {
     }
     // Bornes en chaînes : le fuseau ne doit pas décaler la journée demandée.
     if (req.query.from) {
-      params.push(`${String(req.query.from).slice(0, 10)} 00:00:00`);
-      conditions.push(`e.event_time >= $${params.length}::timestamptz`);
+      params.push(String(req.query.from).slice(0, 10));
+      conditions.push(`COALESCE(e.duty_date, (e.event_time AT TIME ZONE 'Africa/Tunis')::date) >= $${params.length}::date`);
     }
     if (req.query.to) {
-      params.push(`${String(req.query.to).slice(0, 10)} 23:59:59`);
-      conditions.push(`e.event_time <= $${params.length}::timestamptz`);
+      params.push(String(req.query.to).slice(0, 10));
+      conditions.push(`COALESCE(e.duty_date, (e.event_time AT TIME ZONE 'Africa/Tunis')::date) <= $${params.length}::date`);
     }
 
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 300);
@@ -186,8 +187,31 @@ const listEvents = async (req, res) => {
     const { rows } = await query(
       `SELECT e.id, e.event_type, e.title, e.description, e.severity, e.metadata,
               e.schedule_id, e.department_id, e.user_id,
-              TO_CHAR(e.event_time, 'YYYY-MM-DD') AS event_date,
-              TO_CHAR(e.event_time, 'HH24:MI')    AS event_hour,
+              CASE WHEN e.event_type IN ('absence', 'late') THEN COALESCE(
+                CASE
+                  WHEN jsonb_typeof(e.metadata->'isJustified') = 'boolean'
+                  THEN (e.metadata->>'isJustified')::boolean
+                END,
+                (SELECT a.is_justified
+                 FROM absences a
+                 WHERE a.establishment_id = e.establishment_id
+                   AND a.user_id = e.user_id
+                   AND a.kind = 'shift_absence'
+                   AND a.status <> 'cancelled'
+                   AND (
+                     a.id::text = e.metadata->>'absenceId'
+                     OR (
+                       a.schedule_id = e.schedule_id
+                       AND a.start_date = COALESCE(e.duty_date, (e.event_time AT TIME ZONE 'Africa/Tunis')::date)
+                     )
+                   )
+                 ORDER BY (a.id::text = COALESCE(e.metadata->>'absenceId', '')) DESC,
+                          a.created_at DESC
+                 LIMIT 1)
+              ) END AS is_justified,
+               TO_CHAR(COALESCE(e.duty_date, (e.event_time AT TIME ZONE 'Africa/Tunis')::date), 'YYYY-MM-DD') AS event_date,
+               TO_CHAR(e.created_at, 'YYYY-MM-DD') AS declared_date,
+               TO_CHAR(e.created_at, 'HH24:MI')    AS event_hour,
               e.event_time, e.created_at,
               d.name AS department_name,
               u.first_name, u.last_name, u.avatar_url,
@@ -223,7 +247,9 @@ const listEvents = async (req, res) => {
           description: e.description,
           severity: e.severity,
           metadata: e.metadata,
+          isJustified: e.is_justified,
           date: e.event_date,
+          declaredDate: e.declared_date,
           hour: e.event_hour,
           scheduleId: e.schedule_id,
           scheduleName: e.schedule_name,
@@ -258,7 +284,48 @@ const createEvent = async (req, res) => {
       });
     }
 
-    const { departmentId, scheduleId, eventType, userId, title, description, severity } = req.body;
+    const {
+      departmentId: requestedDepartmentId,
+      scheduleId,
+      eventType,
+      userId,
+      title,
+      description,
+      severity,
+      dutyDate,
+    } = req.body;
+    let departmentId = requestedDepartmentId;
+
+    if (
+      eventType === 'incident'
+      && [ROLES.DEPARTMENT_HEAD, ROLES.SERVICE_SUPERVISOR].includes(roleCode)
+    ) {
+      // Le service d'un incident est determine par l'affectation du declarant,
+      // jamais par une valeur envoyee par le client.
+      departmentId = req.user.departmentId || null;
+
+      if (!departmentId) {
+        const { rows: departmentRows } = await query(
+          `SELECT ud.department_id
+           FROM user_departments ud
+           JOIN departments d ON d.id = ud.department_id
+           WHERE ud.user_id = $1 AND d.establishment_id = $2
+           ORDER BY ud.is_primary DESC NULLS LAST,
+                    CASE WHEN $3::boolean THEN ud.is_head ELSE FALSE END DESC NULLS LAST,
+                    ud.department_id
+           LIMIT 1`,
+          [reporterId, establishmentId, roleCode === ROLES.DEPARTMENT_HEAD]
+        );
+        departmentId = departmentRows[0]?.department_id || null;
+      }
+
+      if (!departmentId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Aucun service n\'est attribue a votre compte. Contactez l\'administration.',
+        });
+      }
+    }
 
     if (!departmentId || !eventType || !title) {
       return res.status(400).json({
@@ -274,6 +341,9 @@ const createEvent = async (req, res) => {
         message_ar: 'الغياب والتأخر يتم الإبلاغ عنهما من وحدة الغياب',
       });
     }
+    if (roleCode === ROLES.DIRECTOR && eventType !== 'presence') {
+      return res.status(403).json({ success: false, message: 'La direction consulte le journal mais ne déclare pas les incidents de service' });
+    }
     if (severity && !SEVERITIES.includes(severity)) {
       return res.status(400).json({ success: false, message: 'Gravité invalide' });
     }
@@ -286,16 +356,72 @@ const createEvent = async (req, res) => {
       });
     }
 
+    const effectiveDate = String(dutyDate || '').slice(0, 10);
+    if (dutyDate && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+      return res.status(400).json({ success: false, message: 'Date de garde invalide' });
+    }
+    if (dutyDate && eventType !== 'presence') {
+      return res.status(400).json({ success: false, message: 'Seule une présence peut être rattrapée depuis le journal' });
+    }
+
+    if (dutyDate) {
+      const today = dateKey(new Date());
+      if (effectiveDate >= today) {
+        return res.status(400).json({ success: false, message: 'Le rattrapage est réservé aux gardes déjà passées' });
+      }
+      if (!scheduleId || !userId) {
+        return res.status(400).json({ success: false, message: 'Planning et agent requis pour le rattrapage' });
+      }
+
+      const { rows: schedRows } = await query(
+        `SELECT s.id, s.department_id, s.establishment_id, s.metadata, s.schedule_type,
+                TO_CHAR(s.start_date, 'YYYY-MM-DD') AS start_date,
+                TO_CHAR(s.end_date, 'YYYY-MM-DD') AS end_date
+         FROM schedules s
+         WHERE s.id = $1 AND s.establishment_id = $2 AND s.department_id = $3
+           AND s.status NOT IN ('draft','rejected')`,
+        [scheduleId, establishmentId, departmentId]
+      );
+      const schedule = schedRows[0];
+      const roster = schedule ? rosterOnDate(schedule, effectiveDate) : [];
+      if (!schedule || !roster.some((entry) => entry.userId === userId)) {
+        return res.status(400).json({ success: false, message: 'Cet agent n’était pas de garde à cette date' });
+      }
+
+      const duplicate = await query(
+        `SELECT id FROM shift_events
+         WHERE schedule_id = $1 AND user_id = $2
+           AND COALESCE(duty_date, (event_time AT TIME ZONE 'Africa/Tunis')::date) = $3::date
+           AND event_type = ANY($4::text[])
+         LIMIT 1`,
+        [scheduleId, userId, effectiveDate, CALL_EVENT_TYPES]
+      );
+      if (duplicate.rows.length) {
+        return res.status(409).json({ success: false, message: 'Cet agent a déjà été pointé pour cette garde' });
+      }
+      const orphanAbsence = await query(
+        `SELECT id FROM absences
+         WHERE schedule_id = $1 AND user_id = $2 AND start_date = $3::date
+           AND kind = 'shift_absence' AND status <> 'cancelled'
+         LIMIT 1`,
+        [scheduleId, userId, effectiveDate]
+      );
+      if (orphanAbsence.rows.length) {
+        return res.status(409).json({ success: false, message: 'Une absence ou un retard existe déjà pour cette garde' });
+      }
+    }
+
     const { rows } = await query(
       `INSERT INTO shift_events
          (establishment_id, department_id, schedule_id, event_type,
-          user_id, reported_by, title, description, severity)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          user_id, reported_by, title, description, severity, duty_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10::date,(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Tunis')::date))
        RETURNING *`,
       [
         establishmentId, departmentId, scheduleId || null, eventType,
         userId || null, reporterId, String(title).slice(0, 255),
         description || null, severity || 'info',
+        effectiveDate || null,
       ]
     );
     const event = rows[0];
@@ -327,7 +453,7 @@ const createEvent = async (req, res) => {
       description: `${EVENT_LABELS[eventType] || eventType} — ${title}`,
       entityType: 'shift_events',
       entityId: event.id,
-      metadata: { departmentId, scheduleId, eventType, severity: severity || 'info' },
+      metadata: { departmentId, scheduleId, eventType, severity: severity || 'info', dutyDate: effectiveDate || null, isCatchup: Boolean(dutyDate) },
       ipAddress: history.getIp(req),
       userAgent: req.headers['user-agent'],
       severity: severity === 'critical' ? 'critical' : 'info',
@@ -367,6 +493,29 @@ const createEvent = async (req, res) => {
       }
     }
 
+    if (eventType === 'incident') {
+      const { rows: directors } = await query(
+        `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+          WHERE u.establishment_id = $1 AND u.is_active = TRUE
+            AND r.code IN ($2, $3) AND u.id <> $4`,
+        [establishmentId, ROLES.DIRECTOR, ROLES.HOSPITAL_ADMIN, reporterId]
+      );
+      for (const director of directors) {
+        await createNotification({
+          establishmentId,
+          recipientId: director.id,
+          senderId: reporterId,
+          type: 'incident_reported',
+          title: 'Incident de service signalé',
+          message: String(title).slice(0, 255),
+          entityType: 'shift_events',
+          entityId: event.id,
+          priority: ['error', 'critical'].includes(severity) ? 'urgent' : 'high',
+        });
+        emitToUser(req.app, director.id, 'notification:new', { type: 'incident_reported' });
+      }
+    }
+
     emitToDepartment(req.app, departmentId, 'journal:event', { eventId: event.id, eventType, departmentId });
     if (needsAlert) {
       emitToEstablishment(req.app, establishmentId, 'alert:new', { type: eventType, departmentId });
@@ -375,7 +524,113 @@ const createEvent = async (req, res) => {
     return res.status(201).json({ success: true, data: event, message: 'Événement enregistré' });
   } catch (err) {
     console.error('createEvent error:', err);
+    if (err.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Cet agent a déjà été pointé pour cette garde' });
+    }
     return res.status(500).json({ success: false, message: 'Erreur lors de l\'enregistrement' });
+  }
+};
+
+// ============================================================
+// GET /api/journal/calls?from=&to=
+// Gardes attendues et pointages manquants, dans la portée du rôle.
+// ============================================================
+const listCallRoster = async (req, res) => {
+  try {
+    const scope = await resolveJournalScope(req.user, req.query);
+    if (!scope) return res.status(403).json({ success: false, message: 'Aucun appel disponible pour votre rôle' });
+    if (scope.kind === SCOPE_DEPARTMENTS && !scope.departmentIds.length) {
+      return res.json({ success: true, data: { today: dateKey(new Date()), scopeLabel: scope.label, calls: [] } });
+    }
+
+    const today = dateKey(new Date());
+    const from = String(req.query.from || today).slice(0, 10);
+    const requestedTo = String(req.query.to || today).slice(0, 10);
+    const to = requestedTo < today ? requestedTo : today;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+      return res.status(400).json({ success: false, message: 'Période invalide' });
+    }
+    if (datesBetween(from, to).length > 93) {
+      return res.status(400).json({ success: false, message: 'La période de rattrapage est limitée à 93 jours' });
+    }
+
+    const schedParams = [from, to];
+    const conditions = [
+      "s.status NOT IN ('draft','rejected')",
+      's.start_date <= $2::date',
+      's.end_date >= $1::date',
+    ];
+    if (scope.kind === SCOPE_ESTABLISHMENT) {
+      schedParams.push(scope.establishmentId);
+      conditions.push(`s.establishment_id = $${schedParams.length}`);
+    } else if (scope.kind === SCOPE_DEPARTMENTS) {
+      schedParams.push(scope.establishmentId);
+      conditions.push(`s.establishment_id = $${schedParams.length}`);
+      schedParams.push(scope.departmentIds);
+      conditions.push(`s.department_id = ANY($${schedParams.length}::uuid[])`);
+    }
+
+    const { rows: schedules } = await query(
+      `SELECT s.id, s.name, s.department_id, s.metadata, s.schedule_type,
+              TO_CHAR(s.start_date, 'YYYY-MM-DD') AS start_date,
+              TO_CHAR(s.end_date, 'YYYY-MM-DD') AS end_date,
+              d.name AS department_name
+       FROM schedules s
+       JOIN departments d ON d.id = s.department_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY s.start_date DESC`,
+      schedParams
+    );
+
+    const expected = [];
+    const seen = new Set();
+    for (const schedule of schedules) {
+      const start = schedule.start_date > from ? schedule.start_date : from;
+      const end = schedule.end_date < to ? schedule.end_date : to;
+      for (const day of datesBetween(start, end)) {
+        for (const entry of rosterOnDate(schedule, day)) {
+          if (!entry.userId) continue;
+          const key = `${day}|${schedule.id}|${entry.userId}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          expected.push({
+            key, date: day, userId: entry.userId,
+            userName: `${entry.firstName} ${entry.lastName}`.trim() || '—',
+            roleName: entry.roleName, code: entry.code, label: entry.label,
+            shiftStart: entry.shiftStart, shiftEnd: entry.shiftEnd,
+            scheduleId: schedule.id, scheduleName: schedule.name,
+            departmentId: schedule.department_id, departmentName: schedule.department_name,
+          });
+        }
+      }
+    }
+
+    if (expected.length) {
+      const eventParams = [];
+      const eventScope = scopeClause(scope, 'e', eventParams);
+      eventParams.push(CALL_EVENT_TYPES);
+      const typesIndex = eventParams.length;
+      eventParams.push(from);
+      const fromIndex = eventParams.length;
+      eventParams.push(to);
+      const toIndex = eventParams.length;
+      const { rows: eventRows } = await query(
+        `SELECT e.schedule_id, e.user_id,
+                TO_CHAR(COALESCE(e.duty_date, (e.event_time AT TIME ZONE 'Africa/Tunis')::date), 'YYYY-MM-DD') AS duty_date
+         FROM shift_events e
+         WHERE ${eventScope}
+           AND e.event_type = ANY($${typesIndex}::text[])
+           AND COALESCE(e.duty_date, (e.event_time AT TIME ZONE 'Africa/Tunis')::date) BETWEEN $${fromIndex}::date AND $${toIndex}::date`,
+        eventParams
+      );
+      const declared = new Set(eventRows.map((e) => `${e.duty_date}|${e.schedule_id}|${e.user_id}`));
+      expected.forEach((call) => { call.isDeclared = declared.has(call.key); });
+    }
+
+    return res.json({ success: true, data: { today, scope: scope.kind, scopeLabel: scope.label, calls: expected } });
+  } catch (err) {
+    console.error('listCallRoster error:', err);
+    return res.status(500).json({ success: false, message: 'Erreur lors du chargement des appels à rattraper' });
   }
 };
 
@@ -720,7 +975,7 @@ module.exports = {
   listAlerts,
   updateAlert,
   getServiceOverview,
+  listCallRoster,
   EVENT_LABELS,
   MANUAL_EVENT_TYPES,
 };
-

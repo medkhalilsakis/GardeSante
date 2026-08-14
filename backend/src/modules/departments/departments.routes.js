@@ -11,6 +11,7 @@ router.get('/:id',                     requirePermission('departments.read'),   
 router.post('/',                       requirePermission('departments.create'), ctrl.createDepartment);
 router.put('/:id',                     requirePermission('departments.update'), ctrl.updateDepartment);
 router.delete('/:id',                  requirePermission('departments.create'), ctrl.deleteDepartment);
+router.post('/:id/migrate-and-deactivate', requirePermission('departments.create'), ctrl.migrateAndDeactivateDepartment);
 router.put('/:id/head',                requirePermission('departments.update'), ctrl.setDepartmentHead);
 router.put('/:id/supervisor',          requirePermission('departments.update'), ctrl.setDepartmentSupervisor);
 router.delete('/:id/supervisor/:userId', requirePermission('departments.update'), ctrl.removeDepartmentSupervisor);

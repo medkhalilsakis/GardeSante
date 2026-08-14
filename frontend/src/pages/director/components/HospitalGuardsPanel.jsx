@@ -168,7 +168,9 @@ export default function HospitalGuardsPanel() {
                   <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
                     {a.department_name || '—'}
                     {a.reason ? ` · « ${a.reason} »` : ''}
-                    {a.is_justified === false ? ' · non justifiée' : ''}
+                    {typeof a.is_justified === 'boolean'
+                      ? ` · ${a.is_justified ? 'justifiée' : 'non justifiée'}`
+                      : ''}
                   </p>
                 </div>
               </div>

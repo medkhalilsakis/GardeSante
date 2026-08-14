@@ -13,6 +13,7 @@
 // « R » = Repos : la case est remplie mais ne compte PAS comme une garde.
 const SHIFT_LABELS = { J: 'Jour', N: 'Nuit', S: 'Soir', G: 'Garde', R: 'Repos' };
 const REST_CODE = 'R';
+const { normalizePeriods, dateInPeriods } = require('./periods');
 
 const dateKey = (value) => {
   if (!value) return '';
@@ -120,6 +121,9 @@ const rosterOnDate = (schedule, date) => {
     : [];
   const scheduleStart = dateKey(schedule?.start_date);
   const scheduleEnd = dateKey(schedule?.end_date);
+  const isSpecialSchedule = schedule?.schedule_type === 'special_weekend_holiday'
+    || schedule?.metadata?.schedule_kind === 'weekend_holiday'
+    || schedule?.metadata?.special_days_only === true;
 
   const entries = [];
   for (const row of rows) {
@@ -130,13 +134,16 @@ const rosterOnDate = (schedule, date) => {
 
     let fromPeriod = false;
     if (!code) {
+      // Dans un planning spécial, la sélection est discontinue et vit dans
+      // `row.shifts` : une période min/max ne doit jamais remplir les jours
+      // intermédiaires. Sans code explicite, l'agent n'est pas de garde ce jour.
+      if (isSpecialSchedule) continue;
       // Sans code, seule la période fait foi. Une ligne sans personnel
       // sélectionné (la ligne vierge que le tableur ajoute toujours) ne doit
       // jamais devenir un agent fantôme dans l'appel du jour.
       if (!row?.userId) continue;
-      const start = dateKey(row.periodStart || row.period_start) || scheduleStart;
-      const end = dateKey(row.periodEnd || row.period_end) || scheduleEnd;
-      if (!start || !end || day < start || day > end) continue;
+      const periods = normalizePeriods(row, scheduleStart, scheduleEnd);
+      if (!dateInPeriods(day, periods)) continue;
       fromPeriod = true;
     }
 

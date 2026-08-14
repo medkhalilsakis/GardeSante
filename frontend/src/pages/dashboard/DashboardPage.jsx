@@ -226,7 +226,7 @@ export default function DashboardPage() {
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {urgentReplacements.map(r => (
-              <a key={r.id} href="/replacements" style={{
+              <a key={r.id} href="/chef-de-service" style={{
                 background: 'var(--color-danger-20)', border: '1px solid var(--color-danger)',
                 borderRadius: 6, padding: '4px 12px', fontSize: 'var(--font-xs)',
                 color: 'var(--color-danger)', fontWeight: 600, textDecoration: 'none',

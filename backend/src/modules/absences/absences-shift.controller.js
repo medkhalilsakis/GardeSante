@@ -1,15 +1,17 @@
 /**
- * Signalement d'absence / retard en GARDE COURANTE uniquement.
+ * Signalement d'absence / retard sur une garde publiée, courante ou passée.
  * Ouvert au chef de service, au surveillant de service, au surveillant général
  * et au directeur (appel du jour, point 6).
  * Le contrôleur absences.controller.js existant n'est pas modifié.
  */
 
-const { query } = require('../../config/database');
+const { query, transaction } = require('../../config/database');
 const { ROLES } = require('../../config/constants');
 const { createNotification } = require('../notifications/notifications.controller');
 const { emitToUser, emitToDepartment, emitToEstablishment } = require('../../realtime/emit');
 const history = require('../history/history.controller');
+const { ensureDefaultAbsenceTypes } = require('./absence-types.service');
+const { rosterOnDate, dateKey } = require('../schedules/spreadsheet-reader');
 
 const ALLOWED_ROLES = [
   ROLES.DEPARTMENT_HEAD,
@@ -37,24 +39,44 @@ const reportShiftAbsence = async (req, res) => {
     }
 
     const {
-      userId, scheduleId, shiftId, absenceTypeId,
+      userId, scheduleId, shiftId, absenceTypeId, absenceKind,
       date, startTime, endTime, reason, isJustified, severity, lateMinutes
     } = req.body;
 
-    if (!userId || !absenceTypeId || !date) {
+    if (!userId || !date || (!absenceTypeId && !['late', 'absence'].includes(absenceKind))) {
       return res.status(400).json({
         success: false,
-        message: 'Agent, type et date sont obligatoires',
+        message: 'Agent, type d\'absence et date sont obligatoires',
         message_ar: 'الموظف والنوع والتاريخ مطلوبة'
+      });
+    }
+    if (typeof isJustified !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'Indiquez si l’absence ou le retard est justifié ou non',
+        message_ar: 'يجب تحديد ما إذا كان الغياب أو التأخير مبرراً أم لا'
       });
     }
 
     // Le type doit être un type d'absence (pas un congé)
-    const typeCheck = await query(
-      `SELECT id, name, code, is_leave FROM absence_types
-       WHERE id = $1 AND establishment_id = $2 AND is_active = TRUE`,
-      [absenceTypeId, establishmentId]
-    );
+    await ensureDefaultAbsenceTypes(establishmentId);
+
+    let typeCheck;
+    if (absenceTypeId) {
+      typeCheck = await query(
+        `SELECT id, name, code, is_leave FROM absence_types
+         WHERE id = $1 AND establishment_id = $2 AND is_active = TRUE`,
+        [absenceTypeId, establishmentId]
+      );
+    }
+    if (!typeCheck?.rows.length && ['late', 'absence'].includes(absenceKind)) {
+      const code = absenceKind === 'late' ? 'retard' : 'absence_injustifiee';
+      typeCheck = await query(
+        `SELECT id, name, code, is_leave FROM absence_types
+         WHERE establishment_id = $1 AND code = $2 AND is_active = TRUE`,
+        [establishmentId, code]
+      );
+    }
     if (!typeCheck.rows.length) {
       return res.status(404).json({ success: false, message: 'Type d\'absence introuvable' });
     }
@@ -70,25 +92,27 @@ const reportShiftAbsence = async (req, res) => {
     let departmentId = null;
     if (scheduleId) {
       const sched = await query(
-        `SELECT id, department_id, status,
+        `SELECT id, department_id, status, metadata, schedule_type,
                 TO_CHAR(start_date, 'YYYY-MM-DD') AS start_date,
                 TO_CHAR(end_date,   'YYYY-MM-DD') AS end_date,
                 planning_state(status, start_date, end_date) AS state
-         FROM schedules WHERE id = $1 AND establishment_id = $2`,
+         FROM schedules
+         WHERE id = $1 AND establishment_id = $2
+           AND status NOT IN ('draft','rejected')`,
         [scheduleId, establishmentId]
       );
       if (!sched.rows.length) {
         return res.status(404).json({ success: false, message: 'Planning introuvable' });
       }
       const s = sched.rows[0];
-      if (s.state !== 'en_cours') {
+      const d = String(date).slice(0, 10);
+      if (d > dateKey(new Date())) {
         return res.status(400).json({
           success: false,
-          message: `Le signalement n'est possible que sur une garde courante (état actuel : ${s.state})`,
+          message: 'Une garde future ne peut pas être pointée',
           message_ar: 'الإبلاغ ممكن فقط في وردية جارية'
         });
       }
-      const d = String(date).slice(0, 10);
       if (d < s.start_date || d > s.end_date) {
         return res.status(400).json({
           success: false,
@@ -97,15 +121,81 @@ const reportShiftAbsence = async (req, res) => {
         });
       }
       departmentId = s.department_id;
+
+      let canWriteDepartment = false;
+      if (req.user.isSuperAdmin || [ROLES.GENERAL_SUPERVISOR, ROLES.DIRECTOR].includes(roleCode)) {
+        const allowed = await query(
+          'SELECT id FROM departments WHERE id = $1 AND establishment_id = $2',
+          [departmentId, establishmentId]
+        );
+        canWriteDepartment = allowed.rows.length > 0;
+      } else {
+        const allowed = await query(
+          'SELECT department_id FROM user_departments WHERE user_id = $1 AND department_id = $2',
+          [reporterId, departmentId]
+        );
+        canWriteDepartment = allowed.rows.length > 0;
+      }
+      if (!canWriteDepartment) {
+        return res.status(403).json({ success: false, message: 'Ce service ne fait pas partie de votre périmètre' });
+      }
+
+      if (!rosterOnDate(s, d).some((entry) => entry.userId === userId)) {
+        return res.status(400).json({ success: false, message: 'Cet agent n’était pas de garde à cette date' });
+      }
+
+      const orphanAbsence = await query(
+        `SELECT id FROM absences
+         WHERE schedule_id = $1 AND user_id = $2 AND start_date = $3::date
+           AND kind = 'shift_absence' AND status <> 'cancelled'
+         LIMIT 1`,
+        [scheduleId, userId, d]
+      );
+      if (orphanAbsence.rows.length) {
+        return res.status(409).json({ success: false, message: 'Une absence ou un retard existe déjà pour cette garde' });
+      }
+
+      const duplicate = await query(
+        `SELECT id FROM shift_events
+         WHERE schedule_id = $1 AND user_id = $2
+           AND COALESCE(duty_date, (event_time AT TIME ZONE 'Africa/Tunis')::date) = $3::date
+           AND event_type = ANY($4::text[])
+         LIMIT 1`,
+        [scheduleId, userId, d, ['presence', 'absence', 'late']]
+      );
+      if (duplicate.rows.length) {
+        return res.status(409).json({ success: false, message: 'Cet agent a déjà été pointé pour cette garde' });
+      }
     }
 
-    // Département de l'agent si non déduit du planning
+    // Compatibilité avec les signalements hors planning déjà pris en charge par
+    // le formulaire de surveillance : le service est alors déduit de l'agent.
     if (!departmentId) {
       const ud = await query(
-        `SELECT department_id FROM user_departments WHERE user_id = $1 AND is_primary = TRUE LIMIT 1`,
+        `SELECT department_id FROM user_departments
+         WHERE user_id = $1 AND is_primary = TRUE LIMIT 1`,
         [userId]
       );
       departmentId = ud.rows[0]?.department_id || req.user.departmentId;
+    }
+    if (!scheduleId && departmentId) {
+      let canWriteDepartment = false;
+      if (req.user.isSuperAdmin || [ROLES.GENERAL_SUPERVISOR, ROLES.DIRECTOR].includes(roleCode)) {
+        const allowed = await query(
+          'SELECT id FROM departments WHERE id = $1 AND establishment_id = $2',
+          [departmentId, establishmentId]
+        );
+        canWriteDepartment = allowed.rows.length > 0;
+      } else {
+        const allowed = await query(
+          'SELECT department_id FROM user_departments WHERE user_id = $1 AND department_id = $2',
+          [reporterId, departmentId]
+        );
+        canWriteDepartment = allowed.rows.length > 0;
+      }
+      if (!canWriteDepartment) {
+        return res.status(403).json({ success: false, message: 'Ce service ne fait pas partie de votre périmètre' });
+      }
     }
     if (!departmentId) {
       return res.status(400).json({
@@ -120,6 +210,7 @@ const reportShiftAbsence = async (req, res) => {
     // simplement ignorée plutôt que rejetée, pour ne casser aucun appelant.
     const isLate = typeCheck.rows[0].name.toLowerCase().includes('retard')
       || String(typeCheck.rows[0].code || '').toLowerCase() === 'retard';
+    const isCatchup = String(date).slice(0, 10) < dateKey(new Date());
     let minutes = null;
     if (isLate && lateMinutes !== undefined && lateMinutes !== null && lateMinutes !== '') {
       const n = Number.parseInt(lateMinutes, 10);
@@ -133,7 +224,8 @@ const reportShiftAbsence = async (req, res) => {
       minutes = n;
     }
 
-    const inserted = await query(
+    const absence = await transaction(async (client) => {
+      const inserted = await client.query(
       `INSERT INTO absences
          (establishment_id, department_id, user_id, shift_id, schedule_id, absence_type_id,
           start_date, end_date, start_time, end_time, reason, declared_by,
@@ -143,24 +235,29 @@ const reportShiftAbsence = async (req, res) => {
        RETURNING *`,
       [
         establishmentId, departmentId, userId, shiftId || null, scheduleId || null,
-        absenceTypeId, String(date).slice(0, 10), startTime || null, endTime || null,
+        typeCheck.rows[0].id, String(date).slice(0, 10), startTime || null, endTime || null,
         reason || null, reporterId, roleCode, isJustified === true, minutes
       ]
     );
-    const absence = inserted.rows[0];
+      const createdAbsence = inserted.rows[0];
 
     // Marquer la garde comme absente si elle est identifiée
-    if (shiftId) {
-      await query(`UPDATE shifts SET status = 'absent', updated_at = NOW() WHERE id = $1`, [shiftId]);
-    }
+      if (shiftId) {
+        await client.query(
+        `UPDATE shifts SET status = 'absent', updated_at = NOW()
+         WHERE id = $1 AND schedule_id = $2 AND user_id = $3
+           AND shift_date = $4::date AND establishment_id = $5`,
+        [shiftId, scheduleId, userId, String(date).slice(0, 10), establishmentId]
+        );
+      }
 
     // Journal de service — la durée voyage aussi dans `metadata` (colonne JSONB
     // déjà présente) pour que l'historique de l'appel l'affiche sans jointure.
-    await query(
+      await client.query(
       `INSERT INTO shift_events
          (establishment_id, department_id, schedule_id, shift_id, event_type,
-          user_id, reported_by, title, description, severity, metadata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
+          user_id, reported_by, title, description, severity, metadata, duty_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::date)`,
       [
         establishmentId, departmentId, scheduleId || null, shiftId || null,
         isLate ? 'late' : 'absence',
@@ -171,16 +268,18 @@ const reportShiftAbsence = async (req, res) => {
         reason || null,
         severity || 'warning',
         JSON.stringify({
-          absenceId: absence.id,
+          absenceId: createdAbsence.id,
           typeName: typeCheck.rows[0].name,
+          isJustified,
           ...(minutes !== null ? { lateMinutes: minutes } : {}),
-        })
+        }),
+        String(date).slice(0, 10),
       ]
-    );
+      );
 
     // Alerte service
-    await query(
-      `INSERT INTO service_alerts
+      if (!isCatchup) await client.query(
+        `INSERT INTO service_alerts
          (establishment_id, department_id, schedule_id, alert_type, severity, title, message, entity_type, entity_id)
        VALUES ($1,$2,$3,'staff_absent',$4,$5,$6,'absences',$7)`,
       [
@@ -188,9 +287,12 @@ const reportShiftAbsence = async (req, res) => {
         severity || 'warning',
         'Personnel absent signalé',
         `${typeCheck.rows[0].name} le ${String(date).slice(0, 10)}`,
-        absence.id
+        createdAbsence.id
       ]
-    );
+      );
+
+      return createdAbsence;
+    });
 
     await history.log({
       userId: reporterId,
@@ -199,7 +301,14 @@ const reportShiftAbsence = async (req, res) => {
       description: `Absence signalée pour l'agent ${userId} le ${String(date).slice(0, 10)}`,
       entityType: 'absences',
       entityId: absence.id,
-      metadata: { scheduleId, shiftId, reportedByRole: roleCode },
+      metadata: {
+        scheduleId,
+        shiftId,
+        reportedByRole: roleCode,
+        dutyDate: String(date).slice(0, 10),
+        isCatchup,
+        isJustified,
+      },
       ipAddress: history.getIp(req),
       userAgent: req.headers['user-agent'],
       severity: 'warning'
@@ -228,6 +337,9 @@ const reportShiftAbsence = async (req, res) => {
     return res.status(201).json({ success: true, data: absence, message: 'Absence signalée' });
   } catch (err) {
     console.error('reportShiftAbsence error:', err);
+    if (err.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Cet agent a déjà été pointé pour cette garde' });
+    }
     return res.status(500).json({ success: false, message: 'Erreur lors du signalement' });
   }
 };

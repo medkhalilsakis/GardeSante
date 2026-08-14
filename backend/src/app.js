@@ -84,6 +84,14 @@ if (process.env.NODE_ENV !== 'test') {
 // ============================================================
 // FICHIERS STATIQUES — Avatars et uploads
 // ============================================================
+// Le frontend et l'API peuvent être servis sur deux origines différentes
+// (ex. localhost:5173 et localhost:5000). Helmet applique sinon
+// `Cross-Origin-Resource-Policy: same-origin`, ce qui bloque les avatars dans
+// le navigateur avec `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin`.
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // ============================================================

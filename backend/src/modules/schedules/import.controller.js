@@ -10,6 +10,7 @@ const XLSX = require('xlsx');
 const { parse } = require('csv-parse/sync');
 const { query, transaction } = require('../../config/database');
 const { log, getIp } = require('../history/history.controller');
+const { normalizePeriods, periodBounds } = require('./periods');
 
 // ── Utility: Flexible Date String Parser ────────────────────────────────
 const parseFlexDate = (val) => {
@@ -72,6 +73,17 @@ const AT_HOME_TRUE = new Set([
   'domicile', 'adomicile', 'astreinte', 'athome', 'home',
 ]);
 const parseAtHome = (raw) => AT_HOME_TRUE.has(normText(raw));
+
+const parsePeriods = (raw) => {
+  if (!raw) return [];
+  const matches = String(raw).match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4}/g) || [];
+  const dates = matches.map(parseFlexDate).filter(Boolean);
+  const periods = [];
+  for (let index = 0; index < dates.length; index += 2) {
+    periods.push({ startDate: dates[index], endDate: dates[index + 1] || dates[index] });
+  }
+  return periods.sort((a, b) => a.startDate.localeCompare(b.startDate));
+};
 
 // ── POST /api/schedule-builder/import/preview ──────────────────────────
 const importPreview = async (req, res) => {
@@ -146,6 +158,8 @@ const importPreview = async (req, res) => {
       metaColumns.phone = header;
     } else if (['role', 'fonction', 'specialite', 'speciality', 'grade', 'title'].some(k => cleanH.includes(k))) {
       metaColumns.roleName = header;
+    } else if (['multiperiod', 'periodes', 'plages', 'periodesaffectation'].some(k => cleanH.includes(k))) {
+      metaColumns.periods = header;
     } else if (['periodedebut', 'periodstart', 'debut', 'startdate'].some(k => cleanH.includes(k))) {
       metaColumns.periodStart = header;
     } else if (['periodefin', 'periodend', 'fin', 'enddate'].some(k => cleanH.includes(k))) {
@@ -163,8 +177,11 @@ const importPreview = async (req, res) => {
   // Si pas de colonnes dates entêtes, chercher dans les lignes periodStart / periodEnd
   if (!detectedStartDate) {
     for (const row of rawData) {
+      const rowPeriods = parsePeriods(row[metaColumns.periods]);
       const pStart = parseFlexDate(row[metaColumns.periodStart]);
       const pEnd = parseFlexDate(row[metaColumns.periodEnd]);
+      if (rowPeriods[0]?.startDate && (!detectedStartDate || rowPeriods[0].startDate < detectedStartDate)) detectedStartDate = rowPeriods[0].startDate;
+      if (rowPeriods.at(-1)?.endDate && (!detectedEndDate || rowPeriods.at(-1).endDate > detectedEndDate)) detectedEndDate = rowPeriods.at(-1).endDate;
       if (pStart && (!detectedStartDate || pStart < detectedStartDate)) detectedStartDate = pStart;
       if (pEnd && (!detectedEndDate || pEnd > detectedEndDate)) detectedEndDate = pEnd;
     }
@@ -216,8 +233,11 @@ const importPreview = async (req, res) => {
     const matricule = String(row[metaColumns.matricule] || '').trim();
     const phone     = String(row[metaColumns.phone] || '').trim();
     const roleName  = String(row[metaColumns.roleName] || '').trim();
+    const importedPeriods = parsePeriods(row[metaColumns.periods]);
     const pStart    = parseFlexDate(row[metaColumns.periodStart]) || detectedStartDate;
     const pEnd      = parseFlexDate(row[metaColumns.periodEnd]) || detectedEndDate;
+    const periods   = importedPeriods.length ? importedPeriods : [{ startDate: pStart, endDate: pEnd }];
+    const bounds    = periodBounds(periods);
 
     // Tentative de correspondance
     let matchedUser = null;
@@ -253,8 +273,9 @@ const importPreview = async (req, res) => {
       matricule: matricule || (matchedUser ? matchedUser.matricule : ''),
       phone: phone || (matchedUser ? matchedUser.phone : ''),
       roleName: roleName || (matchedUser ? matchedUser.role_name : ''),
-      periodStart: pStart,
-      periodEnd: pEnd,
+      periods,
+      periodStart: bounds.startDate,
+      periodEnd: bounds.endDate,
       atHome: metaColumns.atHome ? parseAtHome(row[metaColumns.atHome]) : false,
       matchedUserId: matchedUser ? matchedUser.id : null,
       matchedUserName: matchedUser ? `${matchedUser.first_name} ${matchedUser.last_name}` : null,
@@ -334,6 +355,10 @@ const importConfirm = async (req, res) => {
   // 2. Construire la liste des lignes pour le Tableur (SmartSpreadsheet)
   const rosterRows = rows.map((r, idx) => {
     const rowUserId = r.matchedUserId || null;
+    const periods = scheduleType === 'special_weekend_holiday'
+      ? normalizePeriods(r, startDate, endDate)
+      : normalizePeriods({ ...r, periods: Array.isArray(r.periods) ? r.periods : undefined }, startDate, endDate);
+    const bounds = periodBounds(periods);
     return {
       id: rowUserId ? `row-${rowUserId}` : `import-row-${Date.now()}-${idx}`,
       userId: rowUserId,
@@ -342,8 +367,9 @@ const importConfirm = async (req, res) => {
       roleName: r.roleName || '',
       phone: r.phone || '',
       matricule: r.matricule || '',
-      periodStart: r.periodStart || startDate,
-      periodEnd: r.periodEnd || endDate,
+      periods,
+      periodStart: bounds.startDate || startDate,
+      periodEnd: bounds.endDate || endDate,
       shiftStart: '07:00',
       shiftEnd: '07:00',
       // La revue peut avoir corrigé la case : on lit ce que le client renvoie,
@@ -355,6 +381,24 @@ const importConfirm = async (req, res) => {
       custom: {},
     };
   });
+
+  if (scheduleType !== 'special_weekend_holiday') {
+    for (const row of rosterRows) {
+      const name = `${row.lastName} ${row.firstName}`.trim() || `Ligne ${row.id}`;
+      if (!row.periods.length) return res.status(400).json({ success: false, message: `${name} : ajoutez au moins une période.` });
+      for (const [index, period] of row.periods.entries()) {
+        if (!period.startDate || !period.endDate || period.startDate > period.endDate) {
+          return res.status(400).json({ success: false, message: `${name} : la période ${index + 1} est invalide.` });
+        }
+        if (period.startDate < startDate || period.endDate > endDate) {
+          return res.status(400).json({ success: false, message: `${name} : la période ${index + 1} doit rester entre le ${startDate} et le ${endDate}.` });
+        }
+        if (index > 0 && period.startDate <= row.periods[index - 1].endDate) {
+          return res.status(400).json({ success: false, message: `${name} : les périodes ${index} et ${index + 1} se chevauchent.` });
+        }
+      }
+    }
+  }
 
   // 3. Récupérer les types de gardes configurés pour peupler la table shifts
   const shiftTypesRes = await query(
@@ -392,6 +436,23 @@ const importConfirm = async (req, res) => {
     // Vider les anciennes gardes si mise à jour
     if (scheduleId) {
       await client.query(`DELETE FROM shifts WHERE schedule_id = $1`, [targetScheduleId]);
+    }
+
+    await client.query('DELETE FROM schedule_staff_periods WHERE schedule_id = $1', [targetScheduleId]);
+    await client.query('DELETE FROM schedule_staff_assignments WHERE schedule_id = $1', [targetScheduleId]);
+    for (const [position, row] of rosterRows.filter((item) => item.userId).entries()) {
+      await client.query(
+        `INSERT INTO schedule_staff_assignments (schedule_id, user_id, period_start, period_end, position)
+         VALUES ($1,$2,$3::date,$4::date,$5)`,
+        [targetScheduleId, row.userId, row.periodStart, row.periodEnd, position]
+      );
+      for (const [periodPosition, period] of row.periods.entries()) {
+        await client.query(
+          `INSERT INTO schedule_staff_periods (schedule_id, user_id, period_start, period_end, position)
+           VALUES ($1,$2,$3::date,$4::date,$5)`,
+          [targetScheduleId, row.userId, period.startDate, period.endDate, periodPosition]
+        );
+      }
     }
 
     // Réinsérer les gardes pour les utilisateurs enregistrés
@@ -481,8 +542,8 @@ const downloadTemplate = async (req, res) => {
     // La colonne « Garde a domicile » est facultative à l'import : elle figure
     // dans le modèle pour être découvrable, mais un fichier qui ne l'a pas
     // s'importe exactement comme avant (tous les agents en présence).
-    const headers = ['Nom', 'Prenom', 'Matricule', 'Telephone', 'Role', 'Garde a domicile', ...days];
-    const FIRST_DAY_COL = 6;   // nombre de colonnes d'identité avant les jours
+    const headers = ['Nom', 'Prenom', 'Matricule', 'Telephone', 'Role', 'Periodes', 'Garde a domicile', ...days];
+    const AT_HOME_COL = 7;
 
     // Style en-tête
     const headerRow = ws.addRow(headers);
@@ -501,19 +562,22 @@ const downloadTemplate = async (req, res) => {
     staffList.forEach((person, idx) => {
       const sampleShifts = days.map((_, di) => shiftCodes[(idx + di) % shiftCodes.length]);
       const sampleAtHome = idx === 1 ? 'Oui' : 'Non';
-      const rowVals = [person.last_name, person.first_name, person.matricule || '', person.phone || '', person.role_name || '', sampleAtHome, ...sampleShifts];
+      const samplePeriods = idx === 1 && days.length >= 4
+        ? `${days[0]} au ${days[Math.min(2, days.length - 1)]}; ${days[Math.min(3, days.length - 1)]} au ${days.at(-1)}`
+        : `${days[0]} au ${days.at(-1)}`;
+      const rowVals = [person.last_name, person.first_name, person.matricule || '', person.phone || '', person.role_name || '', samplePeriods, sampleAtHome, ...sampleShifts];
       const r = ws.addRow(rowVals);
       r.height = 22;
       r.eachCell((cell, colIdx) => {
         cell.font = { size: 10 };
-        cell.alignment = { vertical: 'middle', horizontal: colIdx >= FIRST_DAY_COL ? 'center' : 'left' };
-        if (colIdx === FIRST_DAY_COL) {
+        cell.alignment = { vertical: 'middle', horizontal: colIdx >= AT_HOME_COL ? 'center' : 'left' };
+        if (colIdx === AT_HOME_COL) {
           // Colonne « Garde a domicile » : teintée quand elle vaut Oui.
           if (String(cell.value || '').toLowerCase() === 'oui') {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDE9FE' } };
             cell.font = { bold: true, size: 10, color: { argb: 'FF6D28D9' } };
           }
-        } else if (colIdx > FIRST_DAY_COL) {
+        } else if (colIdx > AT_HOME_COL) {
           const code = String(cell.value || '').toUpperCase();
           if (shiftColors[code]) {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: shiftColors[code] } };
@@ -535,6 +599,8 @@ const downloadTemplate = async (req, res) => {
       ['R', 'Repos', 'Jour de repos (aucune garde)'],
       ['Vide', 'Aucune affectation', 'Laissez la cellule vide si pas de garde'],
       ['', '', ''],
+      ['Periodes', 'Une ou plusieurs plages', 'Exemple : 01/08/2026 au 10/08/2026; 18/08/2026 au 31/08/2026. Séparez les plages par un point-virgule.'],
+      ['', 'Période complète', 'Une seule plage couvrant tout le planning reste acceptée.'],
       ['Garde a domicile', 'Colonne facultative', "Oui / 1 / X ⇒ l'agent assure sa garde à domicile (astreinte). Non / vide ⇒ garde à l'hôpital, en présence."],
       ['', 'Compatibilité', "Un fichier sans cette colonne s'importe normalement : tous les agents sont alors en garde à l'hôpital."],
     ].forEach(row => legendWs.addRow(row));
@@ -545,8 +611,9 @@ const downloadTemplate = async (req, res) => {
     ws.getColumn(3).width = 14;
     ws.getColumn(4).width = 16;
     ws.getColumn(5).width = 16;
-    ws.getColumn(6).width = 17;   // Garde a domicile
-    for (let i = FIRST_DAY_COL + 1; i <= headers.length; i++) ws.getColumn(i).width = 13;
+    ws.getColumn(6).width = 42;   // Périodes
+    ws.getColumn(7).width = 17;   // Garde a domicile
+    for (let i = AT_HOME_COL + 1; i <= headers.length; i++) ws.getColumn(i).width = 13;
     legendWs.getColumn(1).width = 18;
     legendWs.getColumn(2).width = 22;
     legendWs.getColumn(3).width = 88;

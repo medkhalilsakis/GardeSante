@@ -18,17 +18,17 @@ const EXAMPLE_DATA = [
 ];
 
 function GuideExampleTwo() {
-  const headers = ['Nom', 'Prenom', 'Matricule', 'Telephone', 'Role', 'Période-début', 'Période-fin', 'Remarque'];
+  const headers = ['Nom', 'Prenom', 'Matricule', 'Telephone', 'Role', 'Périodes', 'Remarque'];
   const rows = [
-    ['Ben Ali', 'Khalil', 'MED-001', '+216 22 111 222', 'Médecin', '01/08/2026', '31/08/2026', 'Garde de jour'],
-    ['Hamdi', 'Sara', 'INF-002', '+216 25 333 444', 'Infirmier', '05/08/2026', '20/08/2026', 'Service de nuit']
+    ['Ben Ali', 'Khalil', 'MED-001', '+216 22 111 222', 'Médecin', '01/08/2026 au 31/08/2026', 'Garde de jour'],
+    ['Hamdi', 'Sara', 'INF-002', '+216 25 333 444', 'Infirmier', '05/08/2026 au 10/08/2026; 18/08/2026 au 20/08/2026', 'Service de nuit']
   ];
   return (
     <div>
       <div style={{ padding: '12px 16px', borderRadius: 10, background: '#F0FDF4', border: '1px solid #BBF7D0', marginBottom: 14 }}>
         <strong style={{ color: '#166534', fontSize: 13 }}>Exemple — Colonnes par Périodes Individuelles</strong>
         <div style={{ fontSize: 11, color: '#15803D', marginTop: 4 }}>
-          Une ligne par agent avec des colonnes de dates de début et de fin de période.
+          Une ligne par agent. Une seule plage ou plusieurs plages séparées par un point-virgule sont acceptées.
         </div>
       </div>
       <div style={{ overflowX: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 10 }}>

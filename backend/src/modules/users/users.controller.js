@@ -83,7 +83,7 @@ const DEPARTMENTS_JSON = `
 
 // GET /api/users
 const getUsers = async (req, res) => {
-  const { page = 1, limit = 20, search, roleCode, departmentId, isActive, canLogin } = req.query;
+  const { page = 1, limit = 20, search, roleCode, personnelType, departmentId, isActive, canLogin } = req.query;
   const offset = (page - 1) * limit;
   const eid = req.user.isSuperAdmin
     ? (req.query.establishmentId || req.user.establishmentId)
@@ -100,6 +100,13 @@ const getUsers = async (req, res) => {
   if (roleCode) {
     conditions.push(`r.code = $${idx}`); params.push(roleCode); idx++;
   }
+  if (personnelType) {
+    conditions.push(`COALESCE(jt.category, CASE
+      WHEN r.code IN ('senior_doctor','resident') THEN 'medical'
+      WHEN r.code IN ('director','hospital_admin','general_supervisor','department_head','service_supervisor','observer') THEN 'administrative'
+      ELSE NULL END) = $${idx}`);
+    params.push(personnelType); idx++;
+  }
   if (departmentId) {
     conditions.push(`ud.department_id = $${idx}`); params.push(departmentId); idx++;
   }
@@ -115,6 +122,7 @@ const getUsers = async (req, res) => {
   const countResult = await query(
     `SELECT COUNT(DISTINCT u.id) FROM users u
      JOIN roles r ON u.role_id = r.id
+     LEFT JOIN job_titles jt ON jt.id = u.job_title_id
      LEFT JOIN user_departments ud ON u.id = ud.user_id
      WHERE ${where}`,
     params
@@ -122,11 +130,20 @@ const getUsers = async (req, res) => {
 
   const result = await query(
     `SELECT DISTINCT u.id, u.matricule, u.first_name, u.last_name, u.first_name_ar, u.last_name_ar,
-            u.email, u.phone, u.speciality, u.grade, u.is_active, u.is_on_leave, u.avatar_url,
+            u.email, u.phone, u.speciality, u.grade, u.preferred_language,
+            u.is_active, u.is_on_leave, u.avatar_url,
             u.can_login, u.last_login, u.created_at,
             r.code AS role_code, r.name AS role_name, r.name_ar AS role_name_ar, r.level AS role_level,
             r2.code AS secondary_role_code, r2.name AS secondary_role_name, r2.name_ar AS secondary_role_name_ar,
-            jt.id AS job_title_id, jt.name AS job_title, jt.category AS personnel_category, jt.category_label AS personnel_category_label,
+            jt.id AS job_title_id, jt.name AS job_title,
+            COALESCE(jt.category, CASE
+              WHEN r.code IN ('senior_doctor','resident') THEN 'medical'
+              WHEN r.code IN ('director','hospital_admin','general_supervisor','department_head','service_supervisor','observer') THEN 'administrative'
+              ELSE NULL END) AS personnel_category,
+            COALESCE(jt.category_label, CASE
+              WHEN r.code IN ('senior_doctor','resident') THEN 'Personnel médical'
+              WHEN r.code IN ('director','hospital_admin','general_supervisor','department_head','service_supervisor','observer') THEN 'Personnel administratif'
+              ELSE NULL END) AS personnel_category_label,
             e.name AS establishment_name,
             ${DEPARTMENTS_JSON}
      FROM users u
@@ -336,49 +353,205 @@ const createUser = async (req, res) => {
 
 // PUT /api/users/:id — Modifier un utilisateur
 const updateUser = async (req, res) => {
-  const { firstName, lastName, firstNameAr, lastNameAr, phone, speciality, grade, isOnLeave, preferredLanguage } = req.body;
-
-  // Role secondaire optionnel — traite a part pour ne rien changer a la requete
-  // existante. Absent du body = on n'y touche pas ; chaine vide / null = on retire.
-  if (Object.prototype.hasOwnProperty.call(req.body, 'secondaryRoleCode')) {
-    const target = await query(
-      `SELECT u.establishment_id, r.code AS role_code
-         FROM users u JOIN roles r ON r.id = u.role_id
-        WHERE u.id = $1`,
-      [req.params.id]
-    );
-    if (!target.rows[0]) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
-    if (!req.user.isSuperAdmin && target.rows[0].establishment_id !== req.user.establishmentId) {
-      return res.status(403).json({ success: false, message: 'Utilisateur hors de votre etablissement.' });
-    }
-
-    const secondary = await resolveSecondaryRole(
-      req.body.secondaryRoleCode || null, target.rows[0].role_code, target.rows[0].establishment_id
-    );
-    if (secondary.error) return res.status(400).json({ success: false, message: secondary.error });
-    await query('UPDATE users SET secondary_role_id = $1, updated_at = NOW() WHERE id = $2', [secondary.id, req.params.id]);
+  const has = (field) => Object.prototype.hasOwnProperty.call(req.body, field);
+  const targetResult = await query(
+    `SELECT u.id, u.establishment_id, u.role_id, u.job_title_id, u.speciality,
+            u.secondary_role_id, u.can_login, r.code AS role_code,
+            (SELECT department_id FROM user_departments
+              WHERE user_id = u.id AND is_primary = TRUE LIMIT 1) AS department_id
+       FROM users u
+       JOIN roles r ON r.id = u.role_id
+      WHERE u.id = $1`,
+    [req.params.id]
+  );
+  const target = targetResult.rows[0];
+  if (!target) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+  if (!req.user.isSuperAdmin && target.establishment_id !== req.user.establishmentId) {
+    return res.status(403).json({ success: false, message: 'Utilisateur hors de votre etablissement.' });
   }
 
-  const result = await query(
-    `UPDATE users SET
-       first_name        = COALESCE($1, first_name),
-       last_name         = COALESCE($2, last_name),
-       first_name_ar     = COALESCE($3, first_name_ar),
-       last_name_ar      = COALESCE($4, last_name_ar),
-       phone             = COALESCE($5, phone),
-       speciality        = COALESCE($6, speciality),
-       grade             = COALESCE($7, grade),
-       is_on_leave       = COALESCE($8, is_on_leave),
-       preferred_language= COALESCE($9, preferred_language),
-       updated_at        = NOW()
-     WHERE id = $10 AND establishment_id = $11
-     RETURNING id, email, first_name, last_name, updated_at`,
-    [firstName, lastName, firstNameAr, lastNameAr, phone, speciality, grade,
-     isOnLeave, preferredLanguage, req.params.id, req.user.isSuperAdmin ? undefined : req.user.establishmentId]
-  );
+  const desiredRoleCode = has('roleCode') ? req.body.roleCode : target.role_code;
+  if (!desiredRoleCode) {
+    return res.status(400).json({ success: false, message: 'Le role ou la fonction est obligatoire.' });
+  }
+  const allowed = CREATABLE_ROLES[req.user.roleCode] || [];
+  if (!req.user.isSuperAdmin && desiredRoleCode !== target.role_code && !allowed.includes(desiredRoleCode)) {
+    return res.status(403).json({
+      success: false,
+      message: `Votre role (${req.user.roleCode}) ne peut pas attribuer le role "${desiredRoleCode}".`,
+    });
+  }
 
-  if (!result.rows[0]) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
-  return res.json({ success: true, data: result.rows[0], message: 'Utilisateur mis a jour' });
+  const roleResult = await query(
+    'SELECT id, code FROM roles WHERE establishment_id = $1 AND code = $2',
+    [target.establishment_id, desiredRoleCode]
+  );
+  const desiredRole = roleResult.rows[0];
+  if (!desiredRole) {
+    return res.status(400).json({ success: false, message: 'Role invalide pour cet etablissement.' });
+  }
+
+  const desiredJobTitleId = has('jobTitleId')
+    ? (req.body.jobTitleId || null)
+    : target.job_title_id;
+  let desiredJobTitle = null;
+  if (desiredJobTitleId) {
+    const titleResult = await query(
+      `SELECT id, name, category FROM job_titles
+        WHERE id = $1 AND establishment_id = $2 AND is_active = TRUE`,
+      [desiredJobTitleId, target.establishment_id]
+    );
+    desiredJobTitle = titleResult.rows[0];
+    if (!desiredJobTitle) {
+      return res.status(400).json({ success: false, message: 'Fonction du personnel invalide pour cet etablissement.' });
+    }
+  }
+  if (desiredRoleCode === 'autre' && !desiredJobTitle) {
+    return res.status(400).json({ success: false, message: 'Veuillez choisir une fonction du personnel.' });
+  }
+
+  const departmentSpecified = has('departmentId');
+  const desiredDepartmentId = departmentSpecified
+    ? (req.body.departmentId || null)
+    : target.department_id;
+  const needsDepartment = ROLES_REQUIRING_DEPT.includes(desiredRoleCode)
+    || CARE_CATEGORIES.has(desiredJobTitle?.category);
+  if (needsDepartment && !desiredDepartmentId) {
+    return res.status(400).json({
+      success: false,
+      message: 'Le personnel medical doit obligatoirement etre affecte a un service.',
+    });
+  }
+  if (desiredDepartmentId && isHospitalWideRole(desiredRoleCode)) {
+    return res.status(400).json(NO_DEPT_REFUSAL);
+  }
+  if (desiredDepartmentId) {
+    const department = await query(
+      'SELECT id FROM departments WHERE id = $1 AND establishment_id = $2 AND is_active = TRUE',
+      [desiredDepartmentId, target.establishment_id]
+    );
+    if (!department.rows[0]) {
+      return res.status(400).json({ success: false, message: 'Service invalide pour cet etablissement.' });
+    }
+  }
+
+  if (desiredRoleCode === 'department_head' && desiredDepartmentId) {
+    const existingHead = await query(
+      `SELECT u.id, u.first_name, u.last_name
+         FROM user_departments ud
+         JOIN users u ON u.id = ud.user_id
+        WHERE ud.department_id = $1 AND ud.is_head = TRUE
+          AND u.is_active = TRUE AND u.id <> $2
+        LIMIT 1`,
+      [desiredDepartmentId, req.params.id]
+    );
+    if (existingHead.rows[0]) {
+      return res.status(409).json({
+        success: false,
+        message: `Ce service a deja un chef de service : ${existingHead.rows[0].first_name} ${existingHead.rows[0].last_name}.`,
+      });
+    }
+  }
+
+  const desiredSecondaryCode = has('secondaryRoleCode')
+    ? (req.body.secondaryRoleCode || null)
+    : (desiredRoleCode === target.role_code ? undefined : null);
+  let secondaryRoleId = target.secondary_role_id;
+  if (desiredSecondaryCode !== undefined) {
+    const secondary = await resolveSecondaryRole(
+      desiredSecondaryCode, desiredRoleCode, target.establishment_id
+    );
+    if (secondary.error) return res.status(400).json({ success: false, message: secondary.error });
+    secondaryRoleId = secondary.id;
+  }
+
+  const editable = [
+    ['firstName', 'first_name', true],
+    ['lastName', 'last_name', true],
+    ['firstNameAr', 'first_name_ar'],
+    ['lastNameAr', 'last_name_ar'],
+    ['email', 'email', true],
+    ['phone', 'phone'],
+    ['matricule', 'matricule'],
+    ['grade', 'grade'],
+    ['isOnLeave', 'is_on_leave'],
+    ['preferredLanguage', 'preferred_language'],
+  ];
+  const assignments = [];
+  const values = [];
+  const addValue = (column, value) => {
+    values.push(value);
+    assignments.push(`${column} = $${values.length}`);
+  };
+  for (const [field, column, required] of editable) {
+    if (!has(field)) continue;
+    const raw = req.body[field];
+    if (required && !String(raw || '').trim()) {
+      return res.status(400).json({ success: false, message: `${field} est obligatoire.` });
+    }
+    addValue(column, typeof raw === 'string' ? (raw.trim() || null) : raw);
+  }
+  if (has('roleCode')) {
+    addValue('role_id', desiredRole.id);
+    addValue('can_login', !NO_LOGIN_ROLES.includes(desiredRoleCode));
+  }
+  if (has('jobTitleId') || has('roleCode')) {
+    addValue('job_title_id', desiredJobTitleId);
+    addValue('speciality', desiredJobTitle?.name || null);
+  }
+  if (has('secondaryRoleCode') || has('roleCode')) {
+    addValue('secondary_role_id', secondaryRoleId);
+  }
+  assignments.push('updated_at = NOW()');
+
+  const updated = await transaction(async (client) => {
+    let row;
+    if (assignments.length > 1) {
+      values.push(req.params.id, target.establishment_id);
+      const result = await client.query(
+        `UPDATE users SET ${assignments.join(', ')}
+          WHERE id = $${values.length - 1} AND establishment_id = $${values.length}
+          RETURNING id, email, first_name, last_name, matricule, phone, grade, updated_at`,
+        values
+      );
+      row = result.rows[0];
+    } else {
+      const result = await client.query(
+        `UPDATE users SET updated_at = NOW()
+          WHERE id = $1 AND establishment_id = $2
+          RETURNING id, email, first_name, last_name, matricule, phone, grade, updated_at`,
+        [req.params.id, target.establishment_id]
+      );
+      row = result.rows[0];
+    }
+
+    if (isHospitalWideRole(desiredRoleCode)) {
+      await client.query('DELETE FROM user_departments WHERE user_id = $1', [req.params.id]);
+    } else if (departmentSpecified || has('roleCode')) {
+      await client.query(
+        'UPDATE user_departments SET is_head = FALSE WHERE user_id = $1',
+        [req.params.id]
+      );
+      if (departmentSpecified) {
+        await client.query(
+          'UPDATE user_departments SET is_primary = FALSE WHERE user_id = $1',
+          [req.params.id]
+        );
+      }
+      if (desiredDepartmentId) {
+        await client.query(
+          `INSERT INTO user_departments (user_id, department_id, is_head, is_primary)
+           VALUES ($1,$2,$3,TRUE)
+           ON CONFLICT (user_id, department_id) DO UPDATE
+             SET is_head = EXCLUDED.is_head, is_primary = TRUE`,
+          [req.params.id, desiredDepartmentId, desiredRoleCode === 'department_head']
+        );
+      }
+    }
+    return row;
+  });
+
+  return res.json({ success: true, data: updated, message: 'Informations du personnel mises a jour' });
 };
 
 // PUT /api/users/:id/deactivate — Cloturer un compte
@@ -479,6 +652,10 @@ const getCreatableRoles = async (req, res) => {
     [req.user.establishmentId, allowed]
   );
 
+  // `autre` est uniquement un rôle technique de compatibilité pour les
+  // fonctions sans accès. Il ne doit plus apparaître comme choix métier.
+  result.rows = result.rows.filter((role) => role.code !== 'autre');
+
   // Roles metier cumulables avec le titre « Chef de service ». Expose a cote de
   // `data` pour ne rien changer a la forme deja consommee par le frontend.
   const secondaryRoles = await query(
@@ -489,7 +666,11 @@ const getCreatableRoles = async (req, res) => {
     [req.user.establishmentId, SECONDARY_ROLE_CODES]
   );
 
-  return res.json({ success: true, data: result.rows, secondaryRoles: secondaryRoles.rows });
+  return res.json({
+    success: true,
+    data: result.rows,
+    secondaryRoles: secondaryRoles.rows.filter((role) => role.code !== 'autre'),
+  });
 };
 
 module.exports = {
@@ -499,4 +680,3 @@ module.exports = {
   getUserShifts, getUserStats,
   getCreatableRoles,
 };
-

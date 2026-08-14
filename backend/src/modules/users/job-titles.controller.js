@@ -30,6 +30,10 @@ const getJobTitles = async (req, res) => {
 
   const result = await query(
     `SELECT jt.id, jt.name, jt.name_ar, jt.category, jt.is_system, jt.is_active, jt.sort_order,
+            COALESCE(jt.category_label,
+              CASE jt.category WHEN 'medical' THEN 'Personnel médical'
+                WHEN 'administrative' THEN 'Personnel administratif'
+                ELSE 'Personnel auxiliaire' END) AS category_label,
             COUNT(u.id) AS user_count
      FROM job_titles jt
      LEFT JOIN users u ON u.job_title_id = jt.id AND u.is_active = TRUE
@@ -70,11 +74,13 @@ const createJobTitle = async (req, res) => {
     [eid]
   );
 
+  const normalizedCategory = ['medical', 'administrative', 'auxiliary'].includes(category) ? category : 'auxiliary';
+  const categoryLabel = PERSONNEL_CATEGORIES.find((c) => c.code === normalizedCategory)?.label;
   const result = await query(
-    `INSERT INTO job_titles (establishment_id, name, name_ar, category, is_system, sort_order)
-     VALUES ($1, $2, $3, $4, FALSE, $5)
+    `INSERT INTO job_titles (establishment_id, name, name_ar, category, category_label, is_system, sort_order)
+     VALUES ($1, $2, $3, $4, $5, FALSE, $6)
      RETURNING *`,
-    [eid, name.trim(), nameAr?.trim() || null, category || 'other', maxOrder.rows[0].next]
+    [eid, name.trim(), nameAr?.trim() || null, normalizedCategory, categoryLabel, maxOrder.rows[0].next]
   );
 
   return res.status(201).json({ success: true, data: result.rows[0], message: 'Titre de poste cree' });
@@ -100,15 +106,22 @@ const updateJobTitle = async (req, res) => {
     return res.status(403).json({ success: false, message: 'Impossible de renommer un titre systeme' });
   }
 
+  const normalizedCategory = category
+    ? (['medical', 'administrative', 'auxiliary'].includes(category) ? category : 'auxiliary')
+    : null;
+  const categoryLabel = normalizedCategory
+    ? PERSONNEL_CATEGORIES.find((c) => c.code === normalizedCategory)?.label
+    : null;
   const result = await query(
     `UPDATE job_titles SET
        name      = COALESCE($1, name),
        name_ar   = COALESCE($2, name_ar),
        category  = COALESCE($3, category),
-       is_active = COALESCE($4, is_active)
-     WHERE id = $5 AND establishment_id = $6
+       category_label = COALESCE($4, category_label),
+       is_active = COALESCE($5, is_active)
+     WHERE id = $6 AND establishment_id = $7
      RETURNING *`,
-    [name?.trim() || null, nameAr?.trim() || null, category, isActive, req.params.id, eid]
+    [name?.trim() || null, nameAr?.trim() || null, normalizedCategory, categoryLabel, isActive, req.params.id, eid]
   );
 
   return res.json({ success: true, data: result.rows[0], message: 'Titre mis a jour' });

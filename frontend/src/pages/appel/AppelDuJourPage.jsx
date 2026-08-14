@@ -36,6 +36,7 @@ import { journalAPI, absencesShiftAPI, absencesAPI } from '../../api';
 import { useAuthStore } from '../../store';
 import ContextBadge from '../../components/layout/ContextBadge';
 import PlanningStateBadge from '../../components/planning/PlanningStateBadge';
+import JustificationChoice, { JustificationBadge } from '../../components/common/JustificationChoice';
 import AppelHistoryPanel from './components/AppelHistoryPanel';
 
 /** Rôles autorisés à pointer — miroir exact des gardes serveur (journal + absences-shift). */
@@ -103,7 +104,7 @@ const KPI = ({ label, value, color }) => (
  */
 function ReasonModal({ mark, guard, onClose, onConfirm, busy }) {
   const [reason, setReason] = useState('');
-  const [isJustified, setIsJustified] = useState(false);
+  const [isJustified, setIsJustified] = useState(null);
   const [lateMinutes, setLateMinutes] = useState('');
   const meta = MARKS[mark];
   const isLate = mark === 'late';
@@ -172,10 +173,13 @@ function ReasonModal({ mark, guard, onClose, onConfirm, busy }) {
                 placeholder="Précisions sur le signalement…"
               />
             </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--font-sm)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={isJustified} onChange={(e) => setIsJustified(e.target.checked)} />
-              {isLate ? 'Retard justifié' : 'Absence justifiée'}
-            </label>
+            <JustificationChoice
+              value={isJustified}
+              onChange={setIsJustified}
+              subject={isLate ? 'Retard' : 'Absence'}
+              label={isLate ? 'Qualification du retard' : 'Qualification de l’absence'}
+              required
+            />
             <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               L'agent est notifié et la trace reste dans le journal de service et dans l'historique.
             </p>
@@ -212,7 +216,7 @@ export default function AppelDuJourPage() {
     enabled: canCall,
   });
   const overview = overviewRes?.data?.data;
-  const guards = overview?.todayGuards || [];
+  const guards = useMemo(() => overview?.todayGuards || [], [overview]);
   const serverToday = overview?.today || today;
 
   // --- Ce qui a déjà été pointé aujourd'hui ------------------------------
@@ -237,7 +241,18 @@ export default function AppelDuJourPage() {
       const key = markKey(ev.userId, ev.scheduleId);
       // Les événements arrivent du plus récent au plus ancien : le premier vu
       // pour une clé est le dernier déclaré, c'est celui qui fait foi.
-      if (!map[key]) map[key] = { mark, hour: ev.hour, reporter: ev.reporterName, id: ev.id };
+      if (!map[key]) {
+        const metadataJustification = ev.metadata && typeof ev.metadata === 'object'
+          ? ev.metadata.isJustified
+          : undefined;
+        map[key] = {
+          mark,
+          hour: ev.hour,
+          reporter: ev.reporterName,
+          id: ev.id,
+          isJustified: typeof ev.isJustified === 'boolean' ? ev.isJustified : metadataJustification,
+        };
+      }
     }
     return map;
   }, [eventsRes]);
@@ -302,7 +317,8 @@ export default function AppelDuJourPage() {
       return absencesShiftAPI.report({
         userId: guard.userId,
         scheduleId: guard.scheduleId,
-        absenceTypeId: type.id,
+        absenceTypeId: type?.id,
+        absenceKind: mark === 'late' ? 'late' : 'absence',
         date: serverToday,
         // Pas de startTime/endTime : `todayGuards[]` vient du tableur, qui ne
         // porte qu'un code de garde, pas d'horaires. Les deux champs sont
@@ -336,11 +352,6 @@ export default function AppelDuJourPage() {
     if (mark === 'present') {
       setBusyKey(markKey(guard.userId, guard.scheduleId));
       markPresent.mutate(guard);
-      return;
-    }
-    const type = mark === 'late' ? lateType : absentType;
-    if (!type) {
-      toast.error('Aucun type d\'absence configuré pour votre établissement');
       return;
     }
     setPending({ mark, guard });
@@ -514,7 +525,7 @@ export default function AppelDuJourPage() {
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         {meta ? (
-                          <span style={{ color: meta.color, fontWeight: 700 }}>
+                          <div style={{ color: meta.color, fontWeight: 700 }}>
                             {meta.emoji} {meta.label}
                             {d.hour && (
                               <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11 }}> · {d.hour}</span>
@@ -524,7 +535,12 @@ export default function AppelDuJourPage() {
                                 par {d.reporter}
                               </div>
                             )}
-                          </span>
+                            {d.mark !== 'present' && typeof d.isJustified === 'boolean' && (
+                              <div style={{ marginTop: 5 }}>
+                                <JustificationBadge value={d.isJustified} />
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Non pointé</span>
                         )}
@@ -535,15 +551,16 @@ export default function AppelDuJourPage() {
                             <button
                               key={mark}
                               onClick={() => onMark(g, mark)}
-                              disabled={busy || reportAbsence.isPending}
-                              title={d?.mark === mark ? `Déjà déclaré ${m.label.toLowerCase()}` : `Déclarer ${m.label.toLowerCase()}`}
+                              disabled={busy || markPresent.isPending || reportAbsence.isPending || Boolean(d)}
+                              title={d ? `Déjà pointé ${MARKS[d.mark].label.toLowerCase()}` : `Déclarer ${m.label.toLowerCase()}`}
                               style={{
-                                padding: '4px 10px', borderRadius: 8, cursor: busy ? 'wait' : 'pointer',
+                                padding: '4px 10px', borderRadius: 8,
+                                cursor: busy ? 'wait' : (d ? 'not-allowed' : 'pointer'),
                                 fontSize: 11, fontWeight: 700, fontFamily: 'inherit',
                                 border: `1px solid ${d?.mark === mark ? m.color : 'var(--border-default)'}`,
                                 background: d?.mark === mark ? m.color : 'var(--bg-elevated)',
                                 color: d?.mark === mark ? '#fff' : m.color,
-                                opacity: busy ? 0.5 : 1,
+                                opacity: busy || d ? 0.5 : 1,
                               }}
                             >
                               {m.emoji} {m.label}
@@ -563,8 +580,8 @@ export default function AppelDuJourPage() {
       <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.6 }}>
         Un pointage n'est jamais effacé : « Présent » alimente le journal de service, « Retard » et
         « Absent » créent en plus une absence, une alerte de service et une notification à l'agent.
-        Repointer un agent ajoute une nouvelle déclaration — c'est la plus récente qui s'affiche,
-        les précédentes restent visibles dans l'onglet « Historique des appels ».
+        Une ligne déjà pointée est verrouillée ; sa déclaration reste consultable dans l’onglet
+        « Historique des appels ».
       </p>
       </>
       )}

@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 import NoteCard from './NoteCard';
 import NoteModal from './NoteModal';
 
-export default function NotesFeed({ scopeLabel, showComposer = false }) {
+export default function NotesFeed({ scopeLabel }) {
   const [selectedNote, setSelectedNote] = useState(null);
   const [filters, setFilters] = useState({ category: '', scope: '' });
   const queryClient = useQueryClient();
@@ -25,6 +25,16 @@ export default function NotesFeed({ scopeLabel, showComposer = false }) {
     onError: (err) => {
       toast.error(err.response?.data?.message || 'Erreur lors de la suppression');
     },
+  });
+
+  const markRead = useMutation({
+    mutationFn: (id) => notesAPI.markRead(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notes'] });
+      queryClient.invalidateQueries({ queryKey: ['urgent-notes'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Marquage impossible'),
   });
 
   const notes = data?.data?.data || [];
@@ -116,6 +126,8 @@ export default function NotesFeed({ scopeLabel, showComposer = false }) {
               note={note}
               onClick={() => setSelectedNote(note.id)}
               onDelete={deleteNote.mutate}
+              onMarkRead={markRead.mutate}
+              markingRead={markRead.isPending && markRead.variables === note.id}
               canDelete={canDelete(note)}
             />
           ))}

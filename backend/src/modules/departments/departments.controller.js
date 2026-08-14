@@ -155,6 +155,20 @@ const deleteDepartment = async (req, res) => {
     return res.status(403).json({ success: false, message: 'Seul le directeur peut supprimer des services' });
   }
 
+  const members = await query(
+    `SELECT COUNT(*) FROM user_departments ud
+      JOIN users u ON u.id = ud.user_id AND u.is_active = TRUE
+     WHERE ud.department_id = $1`, [req.params.id]
+  );
+  if (parseInt(members.rows[0].count) > 0) {
+    return res.status(409).json({
+      success: false,
+      code: 'DEPARTMENT_HAS_MEMBERS',
+      memberCount: parseInt(members.rows[0].count),
+      message: 'Ce service contient encore du personnel. Migrez tout le personnel vers un autre service avant sa désactivation.',
+    });
+  }
+
   const activeShifts = await query(
     `SELECT COUNT(*) FROM shifts
      WHERE department_id = $1 AND status IN ('planned','confirmed')
@@ -173,6 +187,52 @@ const deleteDepartment = async (req, res) => {
     [req.params.id, req.user.establishmentId]
   );
   return res.json({ success: true, message: 'Service desactive avec succes' });
+};
+
+// POST /api/departments/:id/migrate-and-deactivate
+const migrateAndDeactivateDepartment = async (req, res) => {
+  if (!['director', 'hospital_admin', 'super_admin'].includes(req.user.roleCode)) {
+    return res.status(403).json({ success: false, message: 'Seul le directeur peut migrer et désactiver un service' });
+  }
+  const { targetDepartmentId } = req.body;
+  if (!targetDepartmentId || targetDepartmentId === req.params.id) {
+    return res.status(400).json({ success: false, message: 'Choisissez un autre service de destination.' });
+  }
+
+  const eid = req.user.establishmentId;
+  const result = await transaction(async (client) => {
+    const departments = await client.query(
+      `SELECT id, name, is_active FROM departments
+       WHERE establishment_id = $1 AND id = ANY($2::uuid[]) FOR UPDATE`,
+      [eid, [req.params.id, targetDepartmentId]]
+    );
+    const source = departments.rows.find((d) => d.id === req.params.id);
+    const target = departments.rows.find((d) => d.id === targetDepartmentId);
+    if (!source) return { error: 404, message: 'Service source introuvable.' };
+    if (!target || !target.is_active) return { error: 400, message: 'Le service de destination est invalide ou inactif.' };
+
+    const activeShifts = await client.query(
+      `SELECT COUNT(*) FROM shifts WHERE department_id = $1
+       AND status IN ('planned','confirmed') AND shift_date >= CURRENT_DATE`, [source.id]
+    );
+    if (parseInt(activeShifts.rows[0].count) > 0) {
+      return { error: 409, message: 'Ce service possède encore des gardes planifiées actives. Migrez ou terminez-les avant la désactivation.' };
+    }
+
+    const moved = await client.query(
+      `INSERT INTO user_departments (user_id, department_id, is_head, is_primary)
+       SELECT user_id, $2, FALSE, is_primary FROM user_departments WHERE department_id = $1
+       ON CONFLICT (user_id, department_id) DO UPDATE
+       SET is_primary = user_departments.is_primary OR EXCLUDED.is_primary
+       RETURNING user_id`, [source.id, target.id]
+    );
+    await client.query('DELETE FROM user_departments WHERE department_id = $1', [source.id]);
+    await client.query('UPDATE departments SET is_active = FALSE WHERE id = $1', [source.id]);
+    return { moved: moved.rowCount, source: source.name, target: target.name };
+  });
+
+  if (result.error) return res.status(result.error).json({ success: false, message: result.message });
+  return res.json({ success: true, data: result, message: `${result.moved} personnel(s) migré(s) vers ${result.target}. Service désactivé.` });
 };
 
 // PUT /api/departments/:id/head â€” Designer le chef de service
@@ -343,7 +403,7 @@ const initEstablishmentDefaults = require('../schedules/rules-engine').initEstab
 
 module.exports = {
   getDepartments, getDepartment,
-  createDepartment, updateDepartment, deleteDepartment,
+  createDepartment, updateDepartment, deleteDepartment, migrateAndDeactivateDepartment,
   setDepartmentHead, setDepartmentSupervisor, removeDepartmentSupervisor,
   addMember, removeMember,
 };

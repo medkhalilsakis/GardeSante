@@ -23,10 +23,9 @@ const DOW_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 const STATE_FILTERS = [
   { value: '', label: 'Tous les états' },
-  { value: 'soumis', label: 'Soumis' },
+  { value: 'soumis', label: 'En vigueur' },
   { value: 'en_cours', label: 'En cours' },
-  { value: 'termine', label: 'Terminés' },
-  { value: 'brouillon', label: 'Brouillons' },
+  { value: 'suspendu', label: 'Suspendus' },
 ];
 
 /** Bornes du mois affiché, en chaînes 'YYYY-MM-DD' (jamais de Date pour les bornes). */
@@ -61,8 +60,16 @@ const STATE_COLORS = {
   soumis:    { label: 'En vigueur', color: '#3B82F6', rgb: '59, 130, 246' },
   en_cours:  { label: 'En cours',   color: '#10B981', rgb: '16, 185, 129' },
   termine:   { label: 'Terminé',    color: '#6B7280', rgb: '107, 114, 128' },
+  suspendu:  { label: 'Suspendu',   color: '#EF4444', rgb: '239, 68, 68' },
 };
-const STATE_ORDER = ['en_cours', 'soumis', 'brouillon', 'termine'];
+const STATE_ORDER = ['en_cours', 'soumis', 'suspendu', 'brouillon', 'termine'];
+
+const DEPARTMENT_COLORS = ['#2563EB','#7C3AED','#DB2777','#EA580C','#059669','#0891B2','#4F46E5','#65A30D'];
+const departmentColor = (id, departments) => {
+  const found = departments.findIndex((d) => d.id === id);
+  const index = found >= 0 ? found : 0;
+  return DEPARTMENT_COLORS[index % DEPARTMENT_COLORS.length];
+};
 
 /**
  * Un segment par planning présent ce jour-là : c'est l'unité d'affichage des
@@ -146,6 +153,7 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
   const days = payload?.days || [];
   const departments = payload?.departments || [];
   const schedules = payload?.schedules || [];
+  const holidays = payload?.holidays || [];
   const summary = payload?.summary || {};
 
   const byDate = useMemo(() => {
@@ -153,6 +161,19 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
     days.forEach((d) => { m[d.date] = d; });
     return m;
   }, [days]);
+  const holidaysByDate = useMemo(() => {
+    const map = {};
+    holidays.forEach((holiday) => {
+      const cursor = new Date(`${holiday.start_date}T12:00:00`);
+      const end = new Date(`${holiday.end_date}T12:00:00`);
+      while (cursor <= end) {
+        const key = cursor.toISOString().slice(0, 10);
+        map[key] = holiday;
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    });
+    return map;
+  }, [holidays]);
 
   // Segments (= plannings) de chaque jour, calculés une fois par chargement.
   const segmentsByDate = useMemo(() => {
@@ -185,6 +206,7 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <style>{`@keyframes holidayGlow { 0%,100% { box-shadow: inset 0 0 0 1px rgba(245,158,11,.35); } 50% { box-shadow: inset 0 0 0 2px rgba(245,158,11,.8), 0 0 8px rgba(245,158,11,.22); } }`}</style>
       {/* Barre de navigation et filtres */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
@@ -280,6 +302,8 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
                 const segments = segmentsByDate[cell.date] || [];
                 const isToday = cell.date === today;
                 const isSelected = cell.date === selectedDay;
+                const isWeekend = cell.dow >= 5;
+                const holiday = holidaysByDate[cell.date];
                 // Une ligne par planning : « nom — état · n garde(s) ».
                 const title = count
                   ? segments
@@ -298,6 +322,10 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
                       fontFamily: 'inherit',
                       outline: isSelected ? '2px solid var(--color-primary-light)' : 'none',
                       ...densityStyle(count, peak, segments),
+                      ...(isWeekend ? {
+                        backgroundImage: 'repeating-linear-gradient(135deg, rgba(239,68,68,.08) 0 5px, transparent 5px 10px)',
+                      } : {}),
+                      ...(holiday ? { animation: 'holidayGlow 2.4s ease-in-out infinite', backgroundImage: 'linear-gradient(135deg, rgba(245,158,11,.14), transparent)' } : {}),
                       ...(isToday ? { borderColor: 'var(--color-primary-light)', borderWidth: 2 } : {}),
                     }}
                   >
@@ -308,6 +336,7 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
                       }}>
                         {cell.day}
                       </span>
+                      {holiday && <span title={holiday.name} style={{ fontSize: 10 }}>★</span>}
                       {count > 0 && (
                         <span style={{
                           fontSize: 10, fontWeight: 700, color: '#fff',
@@ -324,15 +353,18 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
                       <div style={{ marginTop: 5, display: 'flex', flexDirection: 'column', gap: 3 }}>
                         {segments.slice(0, 3).map((s) => {
                           const c = STATE_COLORS[s.state] || STATE_COLORS.brouillon;
+                          const dept = info?.guards?.find((g) => (g.scheduleId || g.scheduleName) === s.key)?.departmentId;
+                          const deptColor = departmentColor(dept, departments);
                           return (
                             <span key={s.key} style={{
                               display: 'flex', alignItems: 'center', gap: 3,
                             }}>
                               <span style={{
                                 flex: 1, height: 4, borderRadius: 2,
-                                background: c.color, minWidth: 0,
+                                background: deptColor, minWidth: 0,
+                                borderLeft: `4px solid ${c.color}`,
                               }} />
-                              <span style={{ fontSize: 8, fontWeight: 700, color: c.color }}>
+                              <span style={{ fontSize: 8, fontWeight: 700, color: deptColor }}>
                                 {s.count}
                               </span>
                             </span>
@@ -351,7 +383,7 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
             </div>
 
             {/* Légende — n'affiche que les états réellement présents. */}
-            {statesPresent.length > 0 && (
+            {(statesPresent.length > 0 || departments.length > 0) && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
                 marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-subtle)',
@@ -359,15 +391,21 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>
                   État des plannings
                 </span>
-                {statesPresent.map((s) => (
+                {['soumis','en_cours','suspendu'].map((s) => (
                   <span key={s} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 18, height: 4, borderRadius: 2, background: STATE_COLORS[s].color }} />
                     <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{STATE_COLORS[s].label}</span>
                   </span>
                 ))}
-                <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                  Une barre par planning · le chiffre indique le nombre de gardes
-                </span>
+                <span style={{ width: 1, height: 18, background: 'var(--border-default)' }} />
+                {departments.map((d) => (
+                  <span key={d.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 9, height: 9, transform: 'rotate(45deg)', background: departmentColor(d.id, departments) }} />
+                    <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{d.name}</span>
+                  </span>
+                ))}
+                <span style={{ fontSize: 10, color: '#D97706' }}>★ Jour férié</span>
+                <span style={{ fontSize: 10, color: 'var(--color-danger)' }}>Hachuré : week-end</span>
               </div>
             )}
           </div>

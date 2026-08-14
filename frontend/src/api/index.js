@@ -137,6 +137,7 @@ export const departmentsAPI = {
   create: (data) => api.post('/departments', data),
   update: (id, data) => api.put(`/departments/${id}`, data),
   delete: (id) => api.delete(`/departments/${id}`),
+  migrateAndDeactivate: (id, targetDepartmentId) => api.post(`/departments/${id}/migrate-and-deactivate`, { targetDepartmentId }),
   setHead: (id, userId) => api.put(`/departments/${id}/head`, { userId }),
   setSupervisor: (id, userId) => api.put(`/departments/${id}/supervisor`, { userId }),
   removeSupervisor: (id, userId) => api.delete(`/departments/${id}/supervisor/${userId}`),
@@ -177,8 +178,6 @@ export const absencesAPI = {
   getAll: (params) => api.get('/absences', { params }),
   getTypes: () => api.get('/absences/types'),
   create: (data) => api.post('/absences', data),
-  approve: (id, data) => api.put(`/absences/${id}/approve`, data),
-  reject: (id, data) => api.put(`/absences/${id}/reject`, data),
   cancel: (id) => api.put(`/absences/${id}/cancel`),
 };
 
@@ -190,7 +189,9 @@ export const absencesShiftAPI = {
 export const leavesAPI = {
   getAll: (params) => api.get('/leaves', { params }),
   getTypes: () => api.get('/leaves/types'),
-  create: (data) => api.post('/leaves', data),
+  create: (data) => api.post('/leaves', data, data instanceof FormData
+    ? { headers: { 'Content-Type': 'multipart/form-data' } }
+    : undefined),
   // Annulation (Lot 6) : le congé passe en `cancelled`, la ligne n'est jamais
   // supprimée — la trace reste lisible dans l'historique.
   cancel: (id) => api.put(`/leaves/${id}/cancel`),
@@ -208,6 +209,8 @@ export const staffLoansAPI = {
 export const notesAPI = {
   getAll: (params) => api.get('/notes', { params }),
   getOne: (id) => api.get(`/notes/${id}`),
+  markRead: (id) => api.put(`/notes/${id}/read`),
+  getReaders: (id) => api.get(`/notes/${id}/readers`),
   delete: (id) => api.delete(`/notes/${id}`),
   publish: ({ title, body, category, priority, isPinned, attachments = [] }) => {
     const form = new FormData();
@@ -236,6 +239,7 @@ export const scopedStatsAPI = {
 // Les absences et retards ne passent PAS par ici : voir absencesShiftAPI.
 export const journalAPI = {
   getOverview: (params)     => api.get('/journal/overview', { params }),
+  getCalls:    (params)     => api.get('/journal/calls',    { params }),
   getEvents:   (params)     => api.get('/journal',          { params }),
   addEvent:    (data)       => api.post('/journal', data),
   getAlerts:   (params)     => api.get('/journal/alerts',   { params }),

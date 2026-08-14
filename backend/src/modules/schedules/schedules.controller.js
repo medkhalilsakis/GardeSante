@@ -69,6 +69,12 @@ const detectConflicts = async (departmentId, startDate, endDate, excludeSchedule
 // GÉNÉRATION AUTOMATIQUE (Round-Robin équitable)
 // ============================================================
 const generateSchedule = async (req, res) => {
+  if (req.user.roleCode === 'director') {
+    return res.status(403).json({
+      success: false,
+      message: 'Le directeur consulte les plannings mais ne crée pas de gardes.',
+    });
+  }
   const { departmentId, startDate, endDate, shiftTypeId, scheduleId } = req.body;
 
   // Récupérer les médecins du service
@@ -159,8 +165,11 @@ const getSchedules = async (req, res) => {
       conditions.push(`sch.department_id = $${idx}`); params.push(departmentId); idx++;
     }
   }
-  if (from) { conditions.push(`sch.start_date >= $${idx}`); params.push(from); idx++; }
-  if (to) { conditions.push(`sch.end_date <= $${idx}`); params.push(to); idx++; }
+  // Recherche par chevauchement : un planning qui couvre une partie de la
+  // période demandée doit rester visible, même s'il commence avant `from` ou
+  // se termine après `to`.
+  if (from) { conditions.push(`sch.end_date >= $${idx}`); params.push(from); idx++; }
+  if (to) { conditions.push(`sch.start_date <= $${idx}`); params.push(to); idx++; }
 
   // Les brouillons sont strictement privés : seul leur chef créateur peut les voir.
   if (isHead) {
@@ -208,7 +217,12 @@ const getSchedules = async (req, res) => {
 
   return res.json({
     success: true, data: result.rows,
-    pagination: { total: parseInt(countResult.rows[0].count), page: parseInt(page), limit: parseInt(limit) },
+    pagination: {
+      total: parseInt(countResult.rows[0].count),
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(parseInt(countResult.rows[0].count) / parseInt(limit)),
+    },
   });
 };
 
@@ -253,6 +267,12 @@ const getSchedule = async (req, res) => {
 };
 
 const createSchedule = async (req, res) => {
+  if (req.user.roleCode === 'director') {
+    return res.status(403).json({
+      success: false,
+      message: 'Le directeur consulte les plannings mais ne peut pas en créer.',
+    });
+  }
   // Accept both camelCase (old wizard) and snake_case (new PlanningStep1 form)
   const deptId       = req.body.department_id || req.body.departmentId;
   const startDate    = req.body.start_date    || req.body.startDate;

@@ -10,6 +10,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { absencesShiftAPI, absencesAPI, replacementsAPI } from '../../../api';
+import JustificationChoice from '../../../components/common/JustificationChoice';
 
 /** Date du jour en 'YYYY-MM-DD' assemblée depuis les parties locales (jamais toISOString). */
 const todayKey = () => {
@@ -30,7 +31,7 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
   const [form, setForm] = useState({
     scheduleId: '', userId: '', absenceTypeId: '',
     date: todayKey(), startTime: '', endTime: '',
-    reason: '', isJustified: false, severity: 'warning',
+    reason: '', isJustified: null, severity: 'warning',
   });
 
   // Gardes courantes uniquement — même source que le module Remplacements.
@@ -38,14 +39,17 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
     queryKey: ['eligible-schedules'],
     queryFn: () => replacementsAPI.getEligibleSchedules(),
   });
-  const schedules = schedRes?.data?.data || [];
+  const schedules = useMemo(() => schedRes?.data?.data || [], [schedRes]);
 
   const { data: typesRes } = useQuery({
     queryKey: ['absence-types'],
     queryFn: () => absencesAPI.getTypes(),
   });
   // Les congés relèvent de la gestion des congés, pas du signalement en garde.
-  const types = (typesRes?.data?.data || []).filter((t) => !t.is_leave);
+  const types = useMemo(
+    () => (typesRes?.data?.data || []).filter((t) => !t.is_leave),
+    [typesRes]
+  );
 
   const { data: staffRes, isFetching: loadingStaff } = useQuery({
     queryKey: ['schedule-staff', form.scheduleId],
@@ -58,6 +62,9 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
     () => schedules.find((s) => s.id === form.scheduleId) || null,
     [schedules, form.scheduleId]
   );
+  const selectedAbsenceType = types.find((type) => type.id === form.absenceTypeId);
+  const selectedTypeIsLate = selectedAbsenceType?.code === 'retard'
+    || /retard/i.test(selectedAbsenceType?.name || '');
 
   // Le premier type disponible évite un envoi sans type quand le champ n'est pas touché.
   useEffect(() => {
@@ -95,6 +102,10 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
     if (!form.userId)        { toast.error('Choisissez l\'agent concerné'); return; }
     if (!form.absenceTypeId) { toast.error('Choisissez un type'); return; }
     if (!form.date)          { toast.error('La date est obligatoire'); return; }
+    if (typeof form.isJustified !== 'boolean') {
+      toast.error('Indiquez si la situation est justifiée ou non');
+      return;
+    }
     report.mutate({
       scheduleId: form.scheduleId || undefined,
       userId: form.userId,
@@ -130,9 +141,7 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
                 value={form.scheduleId}
                 onChange={(e) => setForm((f) => ({ ...f, scheduleId: e.target.value }))}
               >
-                <option value="">
-                  {loadingSched ? 'Chargement…' : 'Hors planning (agent du service)'}
-                </option>
+                <option value="">{loadingSched ? 'Chargement…' : 'Choisir une garde courante'}</option>
                 {schedules.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name} — {s.department_name} ({s.start_date} → {s.end_date})
@@ -141,7 +150,7 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
               </select>
               {!loadingSched && schedules.length === 0 && (
                 <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                  Aucune garde courante : le signalement se rattachera au service de l'agent.
+                   Aucune garde courante disponible pour un signalement.
                 </p>
               )}
             </div>
@@ -173,7 +182,7 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
                 <select
                   className="form-control"
                   value={form.absenceTypeId}
-                  onChange={(e) => setForm((f) => ({ ...f, absenceTypeId: e.target.value }))}
+                  onChange={(e) => setForm((f) => ({ ...f, absenceTypeId: e.target.value, isJustified: null }))}
                   required
                 >
                   {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -214,28 +223,24 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
               </div>
             </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Gravité</label>
-                <select
-                  className="form-control"
-                  value={form.severity}
-                  onChange={(e) => setForm((f) => ({ ...f, severity: e.target.value }))}
-                >
-                  {SEVERITIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </div>
-              <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--font-sm)', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={form.isJustified}
-                    onChange={(e) => setForm((f) => ({ ...f, isJustified: e.target.checked }))}
-                  />
-                  Absence justifiée
-                </label>
-              </div>
+            <div className="form-group">
+              <label className="form-label">Gravité</label>
+              <select
+                className="form-control"
+                value={form.severity}
+                onChange={(e) => setForm((f) => ({ ...f, severity: e.target.value }))}
+              >
+                {SEVERITIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
             </div>
+
+            <JustificationChoice
+              value={form.isJustified}
+              onChange={(value) => setForm((current) => ({ ...current, isJustified: value }))}
+              subject={selectedTypeIsLate ? 'Retard' : 'Absence'}
+              label={selectedTypeIsLate ? 'Qualification du retard' : 'Qualification de l’absence'}
+              required
+            />
 
             <div className="form-group">
               <label className="form-label">Motif</label>

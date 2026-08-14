@@ -1,6 +1,7 @@
 const { query, transaction } = require('../../config/database');
 const { log, getIp } = require('../history/history.controller');
 const { initEstablishmentDefaults } = require('../schedules/rules-engine');
+const { ensureDefaultAbsenceTypes } = require('../absences/absence-types.service');
 
 // ──────────────────────────────────────────────────────────────
 // GET /api/establishments — liste (super_admin : tous | autres : le leur)
@@ -126,6 +127,9 @@ const create = async (req, res) => {
       [eid]
     );
 
+    // Types standards requis par l'appel du jour et la gestion des congés.
+    await ensureDefaultAbsenceTypes(eid, client);
+
     return est.rows[0];
   });
 
@@ -139,6 +143,20 @@ const create = async (req, res) => {
   // 5. Seeder les titres de poste hospitaliers pour cet etablissement
   try {
     await query('SELECT seed_job_titles_for_establishment($1)', [result.id]);
+    await query(
+      `UPDATE job_titles SET category = CASE
+         WHEN category IN ('medical','paramedical','nursing','surgical') THEN 'medical'
+         WHEN category IN ('administrative','admin') THEN 'administrative'
+         ELSE 'auxiliary' END
+       WHERE establishment_id = $1`, [result.id]
+    );
+    await query(
+      `UPDATE job_titles SET category_label = CASE category
+         WHEN 'medical' THEN 'Personnel médical'
+         WHEN 'administrative' THEN 'Personnel administratif'
+         ELSE 'Personnel auxiliaire' END
+       WHERE establishment_id = $1`, [result.id]
+    );
   } catch (e) {
     console.warn('[seed-job-titles] Non bloquant :', e.message);
   }
@@ -721,4 +739,3 @@ module.exports = {
   getDirector, updateDirector, removeDirector,
   removePersonnel, updatePersonnel, getSalaryReport,
 };
-

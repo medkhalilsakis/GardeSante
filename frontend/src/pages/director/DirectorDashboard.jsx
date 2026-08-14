@@ -1,15 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { departmentsAPI, usersAPI, jobTitlesAPI } from '../../api';
 import UnifiedRoleSelect from '../../components/ui/UnifiedRoleSelect';
-import NoteComposer from '../../components/notes/NoteComposer';
-import NotesFeed from '../../components/notes/NotesFeed';
 import HospitalGuardCalendar from '../../components/calendar/HospitalGuardCalendar';
 import ScopedStatsPanel from '../../components/statistics/ScopedStatsPanel';
 import StaffLoanStatsPanel from '../../components/statistics/StaffLoanStatsPanel';
 import LeavesPanel from './components/LeavesPanel';
-import HospitalGuardsPanel from './components/HospitalGuardsPanel';
 import StaffHistoryPanel from './components/StaffHistoryPanel';
 import ContextBadge from '../../components/layout/ContextBadge';
 import { useAuthStore } from '../../store';
@@ -27,7 +24,6 @@ const TrashIcon  = () => <Icon path="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />;
 const UserIcon   = () => <Icon path="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" />;
 const BuildingIcon = () => <Icon path="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10" />;
 const ShieldIcon = () => <Icon path="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />;
-const CheckIcon  = () => <Icon path="M20 6L9 17l-5-5" />;
 const XIcon      = () => <Icon path="M18 6L6 18M6 6l12 12" />;
 
 // Le surveillant général couvre l'hôpital entier : il n'appartient à aucun
@@ -74,6 +70,28 @@ const RoleBadge = ({ code, name }) => {
       whiteSpace: 'nowrap',
     }}>
       {name || code}
+    </span>
+  );
+};
+
+const personnelTypeStyles = {
+  medical:        { label: 'Personnel médical',        bg: '#DBEAFE', color: '#1D4ED8', border: '#93C5FD' },
+  administrative: { label: 'Personnel administratif', bg: '#EDE9FE', color: '#6D28D9', border: '#C4B5FD' },
+  auxiliary:      { label: 'Personnel auxiliaire',     bg: '#CCFBF1', color: '#0F766E', border: '#5EEAD4' },
+};
+const PersonnelTypeBadge = ({ category, label }) => {
+  const style = personnelTypeStyles[category] || {
+    label: label || 'Non renseigné', bg: 'var(--bg-elevated)', color: 'var(--text-muted)', border: 'var(--border-default)',
+  };
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '3px 9px', borderRadius: 999, whiteSpace: 'nowrap',
+      background: style.bg, color: style.color, border: `1px solid ${style.border}`,
+      fontSize: 10, fontWeight: 800,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: style.color }} />
+      {label || style.label}
     </span>
   );
 };
@@ -143,21 +161,26 @@ export default function DirectorDashboard() {
 
   const activeTab = section === 'personnel'  ? 'staff'
                   : section === 'services'   ? 'departments'
-                  : section === 'notes'      ? 'notes'
                   : section === 'calendrier' ? 'calendrier'
                   : section === 'statistiques' ? 'stats'
                   : section === 'prets'      ? 'loan-stats'
                   : section === 'conges'     ? 'conges'
-                  : section === 'gardes'     ? 'gardes'
                   : section === 'historique' ? 'historique'
                   : 'overview';
+
+  useEffect(() => {
+    if (section === 'notes') navigate('/notes', { replace: true });
+    if (section === 'gardes') navigate('/shifts', { replace: true });
+  }, [section, navigate]);
 
   // ── État des modals ──────────────────────────────────────
   const [deptModal,       setDeptModal]       = useState(null);
   const [headModal,       setHeadModal]       = useState(null);
   const [supervModal,     setSupervModal]     = useState(null);
+  const [migrationDept,   setMigrationDept]   = useState(null);
+  const [migrationTarget, setMigrationTarget] = useState('');
   const [userModal,       setUserModal]       = useState(null);
-  const [staffFilter,     setStaffFilter]     = useState({ search: '', roleCode: '', isActive: '', departmentId: '' });
+  const [staffFilter,     setStaffFilter]     = useState({ search: '', roleCode: '', personnelType: '', isActive: '', departmentId: '' });
   const [deptForm,        setDeptForm]        = useState({});
   const [userForm,        setUserForm]        = useState({});
   const [selectedUserId,  setSelectedUserId]  = useState('');
@@ -175,8 +198,10 @@ export default function DirectorDashboard() {
     queryFn: () => usersAPI.getAll({
       search: staffFilter.search || undefined,
       roleCode: staffFilter.roleCode || undefined,
+      personnelType: staffFilter.personnelType || undefined,
       departmentId: staffFilter.departmentId || undefined,
       isActive: staffFilter.isActive !== '' ? staffFilter.isActive : undefined,
+      limit: 500,
     }).then(r => r.data),
   });
   const staff = staffData?.data || [];
@@ -224,7 +249,21 @@ export default function DirectorDashboard() {
   const deleteDept = useMutation({
     mutationFn: (id) => departmentsAPI.delete(id),
     onSuccess: () => { toast.success('Service désactivé'); invalidate(); },
-    onError:   (e) => toast.error(e.response?.data?.message || 'Erreur'),
+    onError:   (e) => {
+      if (e.response?.data?.code === 'DEPARTMENT_HAS_MEMBERS') {
+        const dept = departments.find((d) => d.id === e.config?.url?.split('/').pop());
+        if (dept) setMigrationDept(dept);
+      }
+      toast.error(e.response?.data?.message || 'Erreur');
+    },
+  });
+  const migrateDept = useMutation({
+    mutationFn: () => departmentsAPI.migrateAndDeactivate(migrationDept.id, migrationTarget),
+    onSuccess: (res) => {
+      toast.success(res.data.message || 'Personnel migré et service désactivé');
+      setMigrationDept(null); setMigrationTarget(''); invalidate();
+    },
+    onError: (e) => toast.error(e.response?.data?.message || 'Migration impossible'),
   });
   const setHead = useMutation({
     mutationFn: ({ deptId, userId }) => departmentsAPI.setHead(deptId, userId),
@@ -247,6 +286,14 @@ export default function DirectorDashboard() {
     mutationFn: (d) => usersAPI.create(d),
     onSuccess: (res) => { toast.success(res.data.message || 'Compte créé'); setUserModal(null); setUserForm({}); invalidate(); },
     onError:   (e) => toast.error(e.response?.data?.message || 'Erreur'),
+  });
+  const updateUser = useMutation({
+    mutationFn: ({ id, ...data }) => usersAPI.update(id, data),
+    onSuccess: (res) => {
+      toast.success(res.data.message || 'Informations mises à jour');
+      setUserModal(null); setUserForm({}); invalidate();
+    },
+    onError: (e) => toast.error(e.response?.data?.message || 'Modification impossible'),
   });
   const deactivate = useMutation({
     mutationFn: (id) => usersAPI.deactivate(id),
@@ -284,12 +331,32 @@ export default function DirectorDashboard() {
     || ['medical', 'paramedical'].includes(selectedTitle?.category);
   // Rôle transversal (surveillant général) : aucun service, comme le directeur.
   const roleIsHospitalWide = HOSPITAL_WIDE_ROLES.includes(userForm.roleCode);
+  const openEditUser = (staffMember) => {
+    const primaryDepartment = (staffMember.departments || []).find((d) => d.isPrimary || d.is_primary)
+      || (staffMember.departments || [])[0];
+    setUserForm({
+      firstName: staffMember.first_name || '',
+      lastName: staffMember.last_name || '',
+      firstNameAr: staffMember.first_name_ar || '',
+      lastNameAr: staffMember.last_name_ar || '',
+      email: staffMember.email || '',
+      phone: staffMember.phone || '',
+      matricule: staffMember.matricule || '',
+      grade: staffMember.grade || '',
+      preferredLanguage: staffMember.preferred_language || 'fr',
+      roleCode: staffMember.role_code || null,
+      jobTitleId: staffMember.job_title_id || null,
+      secondaryRoleCode: staffMember.secondary_role_code || null,
+      departmentId: primaryDepartment?.id || '',
+    });
+    setUserModal(staffMember);
+  };
   const submitUser = () => {
     if (!userForm.firstName || !userForm.lastName || !userForm.email || !userForm.roleCode) {
       return toast.error('Prenom, Nom, Email et Role/Titre sont obligatoires');
     }
     if (userForm.roleCode === 'autre' && !userForm.jobTitleId) {
-      return toast.error('Veuillez choisir un titre de poste pour le role "Autre Personnel".');
+      return toast.error('Veuillez choisir une fonction du personnel.');
     }
     if (personnelNeedsDept && !userForm.departmentId) {
       return toast.error('Le personnel medical ou paramedical doit obligatoirement etre affecte a un service.');
@@ -298,10 +365,13 @@ export default function DirectorDashboard() {
     // rester renseigné si le rôle a été changé après coup : on le neutralise
     // ici, sinon le serveur refuserait la création en 400.
     if (roleIsHospitalWide) {
-      const { departmentId, ...rest } = userForm;
-      return createUser.mutate(rest);
+      const { departmentId: _departmentId, ...rest } = userForm;
+      return userModal === 'create'
+        ? createUser.mutate(rest)
+        : updateUser.mutate({ id: userModal.id, ...rest, departmentId: null });
     }
-    createUser.mutate(userForm);
+    if (userModal === 'create') createUser.mutate(userForm);
+    else updateUser.mutate({ id: userModal.id, ...userForm });
   };
 
   // ── Statistiques rapides ─────────────────────────────────
@@ -367,9 +437,7 @@ export default function DirectorDashboard() {
           { id: 'overview',     label: '📊 Vue d\'ensemble', path: '/director' },
           { id: 'departments',  label: '🏥 Services',         path: '/director/services' },
           { id: 'staff',        label: '👤 Personnel',        path: '/director/personnel' },
-          { id: 'gardes',       label: '🛡️ Gardes',           path: '/director/gardes' },
           { id: 'conges',       label: '🏖️ Congés',           path: '/director/conges' },
-          { id: 'notes',        label: '📢 Notes',            path: '/director/notes' },
           { id: 'calendrier',   label: '📅 Calendrier',       path: '/director/calendrier' },
           { id: 'stats',        label: '📊 Statistiques',     path: '/director/statistiques' },
           { id: 'loan-stats',   label: '🤝 Prêts personnel',  path: '/director/prets' },
@@ -539,12 +607,9 @@ export default function DirectorDashboard() {
                             background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
                             borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: 'var(--text-secondary)',
                           }}><EditIcon /></button>
-                          <button title="Désigner chef" onClick={() => setHeadModal(dept.id)} style={{
-                            background: '#D9770620', border: '1px solid #D97706 44',
-                            borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#D97706',
-                          }}><UserIcon /></button>
                           <button title="Désactiver" onClick={() => {
-                            if (window.confirm(`Désactiver le service "${dept.name}" ?`)) deleteDept.mutate(dept.id);
+                            if (Number(dept.member_count) > 0) { setMigrationDept(dept); setMigrationTarget(''); }
+                            else if (window.confirm(`Désactiver le service "${dept.name}" ?`)) deleteDept.mutate(dept.id);
                           }} style={{
                             background: 'var(--color-danger-10)', border: '1px solid var(--color-danger-30)',
                             borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: 'var(--color-danger)',
@@ -592,6 +657,14 @@ export default function DirectorDashboard() {
                 <option key={r.id} value={r.code}>{r.name}</option>
               ))}
             </Select>
+            <Select value={staffFilter.personnelType || ''}
+              onChange={e => setStaffFilter(f => ({ ...f, personnelType: e.target.value }))}
+              style={{ width: 190 }}>
+              <option value="">Tous types de personnel</option>
+              <option value="medical">Personnel médical</option>
+              <option value="administrative">Personnel administratif</option>
+              <option value="auxiliary">Personnel auxiliaire</option>
+            </Select>
             <Select value={staffFilter.departmentId}
               onChange={e => setStaffFilter(f => ({ ...f, departmentId: e.target.value }))}
               style={{ width: 190 }}>
@@ -618,7 +691,7 @@ export default function DirectorDashboard() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
-                    {['Matricule','Nom','Rôle','Service(s)','Spécialité','Accès','Statut','Actions'].map(h => (
+                    {['Matricule','Nom','Rôle / Fonction','Service(s)','Type du personnel','Accès','Statut','Actions'].map(h => (
                       <th key={h} style={{
                         padding: '10px 16px', textAlign: 'left', fontSize: 11,
                         fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase',
@@ -642,6 +715,7 @@ export default function DirectorDashboard() {
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         <RoleBadge code={u.role_code} name={u.role_name} />
+                        {u.job_title && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-primary)', marginTop: 4 }}>{u.job_title}</div>}
                         {/* « Chef de service » est un titre : le rôle métier réel
                             s'affiche à côté quand il est renseigné. */}
                         {u.secondary_role_name && (
@@ -679,8 +753,8 @@ export default function DirectorDashboard() {
                           );
                         })()}
                       </td>
-                      <td style={{ padding: '12px 16px', fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>
-                        {u.speciality || '—'}
+                      <td style={{ padding: '12px 16px' }}>
+                        <PersonnelTypeBadge category={u.personnel_category} label={u.personnel_category_label} />
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         {u.can_login ? (
@@ -700,8 +774,14 @@ export default function DirectorDashboard() {
                         </span>
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        {u.id !== user?.id && (
-                          u.is_active ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <button onClick={() => openEditUser(u)} title="Modifier les informations" style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                            fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                            background: 'var(--color-primary-10)', border: '1px solid var(--color-primary-30)',
+                            color: 'var(--color-primary)', fontFamily: 'inherit', fontWeight: 700,
+                          }}><EditIcon /> Modifier</button>
+                          {u.id !== user?.id && (u.is_active ? (
                             <button onClick={() => {
                               if (window.confirm(`Clôturer le compte de ${u.first_name} ${u.last_name} ?`))
                                 deactivate.mutate(u.id);
@@ -716,8 +796,8 @@ export default function DirectorDashboard() {
                               background: '#05966920', border: '1px solid #05966944',
                               color: '#059669', fontFamily: 'inherit', fontWeight: 600,
                             }}>Réactiver</button>
-                          )
-                        )}
+                          ))}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -878,17 +958,18 @@ export default function DirectorDashboard() {
         </Modal>
       )}
 
-      {/* ══ MODAL : Créer un compte ══ */}
-      {userModal === 'create' && (
-        <Modal title="Créer un compte" onClose={() => { setUserModal(null); setUserForm({}); }} wide>
-          <div style={{
+      {/* ══ MODAL : Créer / Modifier un compte ══ */}
+      {userModal && (
+        <Modal title={userModal === 'create' ? 'Créer un compte' : `Modifier — ${userModal.first_name} ${userModal.last_name}`}
+          onClose={() => { setUserModal(null); setUserForm({}); }} wide>
+          {userModal === 'create' && <div style={{
             background: 'var(--color-primary-10)', border: '1px solid var(--color-primary-20)',
             borderRadius: 8, padding: '10px 14px', marginBottom: 20,
             fontSize: 'var(--font-xs)', color: 'var(--color-primary-light)',
           }}>
             ℹ️ Selectionnez un <strong>role</strong> (avec acces plateforme) ou un <strong>titre de poste</strong> (ambulancier, ORL, pharmacien...) dans le champ ci-dessous.
             Le mot de passe initial sera <strong>GardeSante@2025</strong> — les titres de poste n'ont pas d'acces plateforme.
-          </div>
+          </div>}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Field label="Prénom" required>
@@ -917,11 +998,12 @@ export default function DirectorDashboard() {
           {/* Role + Titre de poste — champ unifie avec recherche */}
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', fontSize: 'var(--font-xs)', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-              Rôle / Titre de poste <span style={{ color: 'var(--color-danger)' }}>*</span>
+              Rôle d'accès / Fonction du personnel <span style={{ color: 'var(--color-danger)' }}>*</span>
             </label>
             <UnifiedRoleSelect
               roleCode={userForm.roleCode || null}
               jobTitleId={userForm.jobTitleId || null}
+              currentRole={userModal !== 'create' ? { code: userModal.role_code, name: userModal.role_name } : null}
               required
               onChange={({ roleCode: rc, jobTitleId: jid }) => {
                 setUserForm(f => ({
@@ -935,7 +1017,7 @@ export default function DirectorDashboard() {
             />
             {userForm.roleCode === 'autre' && !userForm.jobTitleId && (
               <div style={{ fontSize: 11, color: '#F59E0B', marginTop: 4, fontWeight: 600 }}>
-                Veuillez choisir un titre de poste specifique (ex: Ambulancier, Medecin Interne...).
+                Veuillez choisir une fonction du personnel (ex : Ambulancier, Médecin interne…).
               </div>
             )}
           </div>
@@ -1016,19 +1098,33 @@ export default function DirectorDashboard() {
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
             <button className="btn btn-secondary" onClick={() => { setUserModal(null); setUserForm({}); }}>Annuler</button>
-            <button className="btn btn-primary" onClick={submitUser} disabled={createUser.isPending}>
-              {createUser.isPending ? 'Création…' : 'Créer le compte'}
+            <button className="btn btn-primary" onClick={submitUser} disabled={createUser.isPending || updateUser.isPending}>
+              {userModal === 'create'
+                ? (createUser.isPending ? 'Création…' : 'Créer le compte')
+                : (updateUser.isPending ? 'Enregistrement…' : 'Enregistrer les modifications')}
             </button>
           </div>
         </Modal>
       )}
 
-      {/* ══ TAB : NOTES & CIRCULAIRES ══ */}
-      {activeTab === 'notes' && (
-        <div>
-          <NoteComposer scopeLabel="tout le personnel de l'hôpital" />
-          <NotesFeed />
-        </div>
+      {migrationDept && (
+        <Modal title={`Migrer le personnel de ${migrationDept.name}`} onClose={() => setMigrationDept(null)}>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+            Ce service contient {migrationDept.member_count} personnel(s). Ils doivent tous être affectés à un autre service avant la désactivation.
+          </p>
+          <Field label="Service de destination" required>
+            <Select value={migrationTarget} onChange={(e) => setMigrationTarget(e.target.value)}>
+              <option value="">— Choisir le service cible —</option>
+              {departments.filter((d) => d.id !== migrationDept.id).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </Select>
+          </Field>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
+            <button className="btn btn-secondary" onClick={() => setMigrationDept(null)}>Annuler</button>
+            <button className="btn btn-danger" disabled={!migrationTarget || migrateDept.isPending} onClick={() => migrateDept.mutate()}>
+              {migrateDept.isPending ? 'Migration…' : 'Migrer et désactiver'}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* ══ TAB : CALENDRIER HÔPITAL (lecture seule) ══ */}
@@ -1046,9 +1142,6 @@ export default function DirectorDashboard() {
         <StaffLoanStatsPanel title="Prêts de personnel — statistiques de l'hôpital" />
       )}
 
-      {/* ══ TAB : GARDES DE L'HÔPITAL (lecture seule) ══ */}
-      {activeTab === 'gardes' && <HospitalGuardsPanel />}
-
       {/* ══ TAB : CONGÉS DU PERSONNEL ══ */}
       {activeTab === 'conges' && <LeavesPanel />}
 
@@ -1057,7 +1150,3 @@ export default function DirectorDashboard() {
     </div>
   );
 }
-
-
-
-

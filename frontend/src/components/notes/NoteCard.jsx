@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -16,8 +15,7 @@ const CATEGORY_LABELS = {
   info: 'Information',
 };
 
-export default function NoteCard({ note, onClick, onDelete, canDelete }) {
-  const [showPreview, setShowPreview] = useState(false);
+export default function NoteCard({ note, onClick, onDelete, onMarkRead, canDelete, markingRead = false }) {
   const priorityStyle = PRIORITY_CONFIG[note.priority] || PRIORITY_CONFIG.normal;
 
   return (
@@ -114,11 +112,11 @@ export default function NoteCard({ note, onClick, onDelete, canDelete }) {
                 fontSize: '14px',
                 lineHeight: '1.6',
                 marginBottom: '12px',
-                maxHeight: showPreview ? 'none' : '60px',
+                maxHeight: '60px',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 display: '-webkit-box',
-                WebkitLineClamp: showPreview ? 'unset' : 3,
+                WebkitLineClamp: 3,
                 WebkitBoxOrient: 'vertical',
               }}
             >
@@ -134,6 +132,16 @@ export default function NoteCard({ note, onClick, onDelete, canDelete }) {
             </div>
           )}
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {!note.isRead && (
+          <button
+            onClick={(event) => { event.stopPropagation(); onMarkRead?.(note.id); }}
+            disabled={markingRead}
+            style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', color: '#1D4ED8', cursor: markingRead ? 'wait' : 'pointer', padding: '7px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}
+          >
+            Marquer comme lu
+          </button>
+        )}
         {canDelete && (
           <button
             onClick={(e) => {
@@ -157,6 +165,7 @@ export default function NoteCard({ note, onClick, onDelete, canDelete }) {
             🗑️
           </button>
         )}
+        </div>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: '#9CA3AF' }}>

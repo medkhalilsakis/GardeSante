@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { notesAPI } from '../../api';
 import toast from 'react-hot-toast';
@@ -13,7 +14,7 @@ const PRIORITY_CONFIG = {
 
 const API_BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
 
-export default function NoteModal({ noteId, onClose, onDelete }) {
+export default function NoteModal({ noteId, onClose }) {
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -35,6 +36,19 @@ export default function NoteModal({ noteId, onClose, onDelete }) {
   });
 
   const note = data?.data?.data;
+  const { data: readersData, isLoading: readersLoading } = useQuery({
+    queryKey: ['note-readers', noteId],
+    queryFn: () => notesAPI.getReaders(noteId),
+    enabled: Boolean(noteId && note?.canViewReaders),
+  });
+  const readers = readersData?.data?.data || [];
+
+  useEffect(() => {
+    if (!note?.id) return;
+    queryClient.invalidateQueries({ queryKey: ['notes'] });
+    queryClient.invalidateQueries({ queryKey: ['urgent-notes'] });
+    queryClient.invalidateQueries({ queryKey: ['notifications'] });
+  }, [note?.id, queryClient]);
   if (!noteId) return null;
 
   return (
@@ -215,6 +229,28 @@ export default function NoteModal({ noteId, onClose, onDelete }) {
                       </a>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {note.canViewReaders && (
+                <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #E5E7EB' }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 700, color: '#374151', marginBottom: 10 }}>
+                    Lecteurs ({readers.length}/{note.recipientsCount})
+                  </h3>
+                  {readersLoading ? (
+                    <div style={{ color: '#9CA3AF', fontSize: 13 }}>Chargement des lecteurs…</div>
+                  ) : readers.length === 0 ? (
+                    <div style={{ color: '#9CA3AF', fontSize: 13 }}>Aucun destinataire n'a encore lu cette note.</div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: 7 }}>
+                      {readers.map((reader) => (
+                        <div key={reader.userId} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 10px', borderRadius: 7, background: '#F9FAFB', fontSize: 12 }}>
+                          <span><strong>{reader.name}</strong>{reader.roleName ? ` · ${reader.roleName}` : ''}</span>
+                          <span style={{ color: '#6B7280' }}>{format(new Date(reader.readAt), 'd MMM yyyy · HH:mm', { locale: fr })}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

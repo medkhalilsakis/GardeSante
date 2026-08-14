@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
  * UnifiedRoleSelect
  * Un seul dropdown avec recherche qui regroupe :
  *   - Les roles systeme (avec acces plateforme)
- *   - Les titres de poste (role "Autre" - sans acces)
+ *   - Les fonctions métier du personnel
  *
  * Le panneau est rendu dans un PORTAIL positionne en `fixed` : il n'est donc
  * jamais rogne par le `overflow: auto` de la modale qui l'accueille, et il se
@@ -20,6 +20,8 @@ import toast from 'react-hot-toast';
  *   jobTitleId  : UUID    - id du titre de poste selectionne (si role=autre)
  *   onChange    : ({ roleCode, jobTitleId, label }) => void
  *   required    : bool
+ *   currentRole : { code, name } - rôle déjà affecté, même s'il n'est pas
+ *                 créable par l'acteur (édition de son propre profil, etc.)
  */
 
 const SYSTEM_ROLE_COLORS = {
@@ -31,7 +33,6 @@ const SYSTEM_ROLE_COLORS = {
   senior_doctor:      { bg: '#F0F9FF', color: '#0284C7', icon: '👨‍⚕️' },
   resident:           { bg: '#F8FAFC', color: '#64748B', icon: '🩺' },
   observer:           { bg: '#F1F5F9', color: '#475569', icon: '👁️' },
-  autre:              { bg: '#F1F5F9', color: '#475569', icon: '👤' },
 };
 
 // Une ligne d'explication par role : la liste se lit sans avoir a deviner ce
@@ -45,29 +46,30 @@ const SYSTEM_ROLE_HINTS = {
   senior_doctor:      'Medecin senior du service',
   resident:           'Medecin resident / interne',
   observer:           'Consultation seule',
-  autre:              'Choisissez un titre de poste ci-dessous',
 };
 
 const JT_CAT_COLORS = {
   medical:   { bg: '#EFF6FF', color: '#3B82F6' },
-  paramedical: { bg: '#ECFDF5', color: '#059669' },
   administrative: { bg: '#F5F3FF', color: '#7C3AED' },
-  technical_logistics: { bg: '#F0F9FF', color: '#0891B2' },
-  other:     { bg: '#F3F4F6', color: '#6B7280' },
+  auxiliary: { bg: '#F0F9FF', color: '#0891B2' },
 };
 
 const JT_CAT_LABELS = {
   medical:   'Personnel médical',
-  paramedical: 'Personnel paramédical',
   administrative: 'Personnel administratif',
-  technical_logistics: 'Personnel technique et logistique',
-  other:     'Autre',
+  auxiliary: 'Personnel auxiliaire',
+};
+
+const normalizeCategory = (category) => {
+  if (['medical', 'paramedical'].includes(category)) return 'medical';
+  if (category === 'administrative') return 'administrative';
+  return 'auxiliary';
 };
 
 // Hauteur des zones fixes du panneau (recherche + onglets + pied de page).
 const PANEL_CHROME = 152;
 
-export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, required }) {
+export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, required, currentRole }) {
   const qc = useQueryClient();
   const wrapperRef = useRef(null);
   const dropRef    = useRef(null);
@@ -76,7 +78,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
   const [search,    setSearch]    = useState('');
   const [tab,       setTab]       = useState('all');   // 'all' | 'roles' | 'titles'
   const [addMode,   setAddMode]   = useState(false);
-  const [newTitle,  setNewTitle]  = useState({ name: '', category: 'other' });
+  const [newTitle,  setNewTitle]  = useState({ name: '', category: 'auxiliary' });
   const [pos,       setPos]       = useState(null);
 
   // Roles systeme disponibles
@@ -85,7 +87,16 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
     queryFn: () => usersAPI.rolesAvailable().then(r => r.data.data),
     staleTime: 120000,
   });
-  const systemRoles = rolesData || [];
+  const availableSystemRoles = rolesData || [];
+  const systemRoles = currentRole?.code
+    && currentRole.code !== 'autre'
+    && !availableSystemRoles.some((role) => role.code === currentRole.code)
+    ? [...availableSystemRoles, {
+        id: `current-${currentRole.code}`,
+        code: currentRole.code,
+        name: currentRole.name || currentRole.code,
+      }]
+    : availableSystemRoles;
 
   // Titres de poste
   const { data: titlesData } = useQuery({
@@ -104,7 +115,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
       const jt = res.data.data;
       onChange({ roleCode: 'autre', jobTitleId: jt.id, label: jt.name });
       setAddMode(false);
-      setNewTitle({ name: '', category: 'other' });
+      setNewTitle({ name: '', category: 'auxiliary' });
       setOpen(false);
     },
     onError: (e) => toast.error(e.response?.data?.message || 'Erreur'),
@@ -174,7 +185,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
       const jt = jobTitles.find(t => t.id === jobTitleId);
       return jt ? { label: jt.name, cat: jt.category, type: 'title' } : null;
     }
-    return { label: 'Autre Personnel', icon: '👤', type: 'role', code: 'autre' };
+    return null;
   };
 
   const display = getDisplayLabel();
@@ -191,8 +202,9 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
   // Grouper les titres par categorie
   const titlesByCategory = {};
   filtTitles.forEach(t => {
-    if (!titlesByCategory[t.category]) titlesByCategory[t.category] = [];
-    titlesByCategory[t.category].push(t);
+    const category = normalizeCategory(t.category);
+    if (!titlesByCategory[category]) titlesByCategory[category] = [];
+    titlesByCategory[category].push({ ...t, category });
   });
 
   const baseInput = {
@@ -250,8 +262,8 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
       <div style={{ display: 'flex', gap: 4, padding: '8px 10px 6px', borderBottom: '1px solid var(--border-subtle)' }}>
         {[
           { id: 'all',    label: 'Tout',            n: systemRoles.length + jobTitles.length },
-          { id: 'roles',  label: 'Roles systeme',   n: systemRoles.length },
-          { id: 'titles', label: 'Titres de poste', n: jobTitles.length },
+          { id: 'roles',  label: 'Accès plateforme', n: systemRoles.length },
+          { id: 'titles', label: 'Fonctions', n: jobTitles.length },
         ].map(t => (
           <button key={t.id} type="button" onClick={() => setTab(t.id)}
             style={{
@@ -273,7 +285,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
             Aucun resultat pour "{search}".{' '}
             <button type="button" onClick={() => { setAddMode(true); setNewTitle(n => ({ ...n, name: search })); setTab('titles'); }}
               style={{ color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit' }}>
-              + Ajouter ce titre
+              + Ajouter cette fonction
             </button>
           </div>
         ) : (
@@ -282,7 +294,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
             {filtRoles.length > 0 && (
               <div>
                 <div style={{ ...stickyHeader, color: 'var(--text-muted)' }}>
-                  Roles avec acces plateforme
+                  Responsabilités avec accès plateforme
                   <span style={{ fontWeight: 400, opacity: .6 }}> ({filtRoles.length})</span>
                 </div>
                 {filtRoles.map(r => {
@@ -306,7 +318,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
                         fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 20, flexShrink: 0,
                         background: colors.bg, color: colors.color,
                       }}>
-                        Role
+                        Accès
                       </span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</div>
@@ -374,15 +386,15 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
         )}
       </div>
 
-      {/* Ajouter un titre custom */}
+      {/* Ajouter une fonction personnalisée */}
       {addMode ? (
         <div style={{ padding: '12px', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)' }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
-            Nouveau titre (sans acces plateforme)
+            Nouvelle fonction du personnel
           </div>
           <input
             type="text"
-            placeholder="Nom du titre..."
+            placeholder="Nom de la fonction..."
             value={newTitle.name}
             onChange={e => setNewTitle(n => ({ ...n, name: e.target.value }))}
             style={{ ...baseInput, marginBottom: 8 }}
@@ -430,7 +442,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M12 5v14M5 12h14" />
             </svg>
-            Ajouter un titre de poste personnalise
+            Ajouter une fonction personnalisée
           </button>
         </div>
       )}

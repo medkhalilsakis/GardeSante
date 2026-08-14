@@ -64,7 +64,8 @@ const getHospitalCalendar = async (req, res) => {
               TO_CHAR(sch.start_date, 'YYYY-MM-DD') AS start_date,
               TO_CHAR(sch.end_date,   'YYYY-MM-DD') AS end_date,
               d.name AS department_name, d.department_type,
-              planning_state(sch.status, sch.start_date, sch.end_date) AS state
+              CASE WHEN sch.status IN ('archived','rejected') THEN 'suspendu'
+                   ELSE planning_state(sch.status, sch.start_date, sch.end_date) END AS state
          FROM schedules sch
          LEFT JOIN departments d ON d.id = sch.department_id
         WHERE ${conditions.join(' AND ')}
@@ -85,6 +86,14 @@ const getHospitalCalendar = async (req, res) => {
       if (state && s.state !== state) return false;
       return true;
     });
+
+    const { rows: holidays } = await query(
+      `SELECT id, name, TO_CHAR(start_date, 'YYYY-MM-DD') AS start_date,
+              TO_CHAR(end_date, 'YYYY-MM-DD') AS end_date, category
+         FROM public_holidays
+        WHERE start_date <= $2::date AND end_date >= $1::date
+        ORDER BY start_date`, [from, to]
+    );
 
     // Agrégation jour par jour, bornée à la fenêtre demandée.
     const byDate = new Map();
@@ -176,6 +185,7 @@ const getHospitalCalendar = async (req, res) => {
           endDate: s.end_date,
           guards: perSchedule.get(s.id) || 0,
         })),
+        holidays,
         summary: {
           totalGuards,
           daysCovered: days.length,

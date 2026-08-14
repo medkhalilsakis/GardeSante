@@ -24,9 +24,7 @@ export function resolveNotificationTarget(notif, roleCode) {
   // Une note ou circulaire ouvre le fil correspondant au rôle du lecteur.
   if (notif.entity_type === 'notes') {
     if (roleCode === 'super_admin') return { path: '/admin', label: 'Ouvrir les notes' };
-    if (roleCode === 'director' || roleCode === 'hospital_admin') {
-      return { path: '/director/notes', label: 'Ouvrir les notes' };
-    }
+    if (roleCode === 'director' || roleCode === 'hospital_admin') return { path: '/notes', label: 'Ouvrir les notes' };
     // Point 7 : l'onglet Notes du planning des gardes n'existe plus, l'écran
     // indépendant `/notes` le remplace pour tous les autres rôles.
     return { path: '/notes', label: 'Ouvrir les notes' };

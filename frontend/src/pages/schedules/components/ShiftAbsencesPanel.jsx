@@ -1,21 +1,20 @@
 /**
  * Absences déclarées à l'appel du jour, vues depuis « Planning des gardes » (point 8).
  *
- * L'onglet « Absences » du planning n'affichait jusqu'ici que les *congés en
- * attente d'approbation* (`absencesAPI.getAll({ status:'pending' })`) — jamais ce
- * qui est signalé pendant l'appel. Ce panneau lit la bonne source,
+ * L'onglet « Absences » du planning s'appuie sur la source des signalements
+ * faits pendant l'appel. Ce panneau lit cette source,
  * `GET /api/absences-shift` (`kind = 'shift_absence'`), et la restitue selon les
  * quatre regroupements demandés : par garde, par jour, par période et par année.
  *
- * Composant neuf, strictement en lecture : il n'ajoute aucun endpoint, ne
- * remplace pas le bloc des congés en attente (qui reste monté en dessous) et
- * n'écrit rien. Le serveur borne déjà la réponse au périmètre de l'appelant —
+ * Composant strictement en lecture : il n'ajoute aucun endpoint et n'écrit
+ * rien. Le serveur borne déjà la réponse au périmètre de l'appelant —
  * son service pour un chef ou un surveillant de service, l'hôpital entier pour un
  * surveillant général ou un directeur.
  */
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { absencesShiftAPI } from '../../../api';
+import { JustificationBadge } from '../../../components/common/JustificationChoice';
 
 // Plafond de sécurité : `listShiftAbsences` applique le LIMIT qu'on lui envoie
 // sans le borner lui-même. On demande donc une tranche explicite et on prévient
@@ -380,6 +379,7 @@ export default function ShiftAbsencesPanel({ departmentId }) {
                             <tr>
                               <th style={th}>Personnel concerné</th>
                               <th style={th}>Type</th>
+                              <th style={th}>Justification</th>
                               <th style={th}>Durée du retard</th>
                               <th style={th}>{groupBy === 'schedule' ? 'Date de la garde' : 'Garde'}</th>
                               <th style={th}>Déclaré par</th>
@@ -400,6 +400,7 @@ export default function ShiftAbsencesPanel({ departmentId }) {
                                     )}
                                   </td>
                                   <td style={td}><TypeChip row={r} /></td>
+                                  <td style={td}><JustificationBadge value={r.is_justified} /></td>
                                   <td style={{ ...td, fontWeight: 700, color: minutes !== null ? '#C2410C' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                                     {minutes !== null
                                       ? durationLabel(minutes)

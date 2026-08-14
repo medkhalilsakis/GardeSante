@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../store';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { departmentsAPI, schedulesAPI, absencesAPI, scheduleBuilderAPI, shiftsAPI, adminAPI } from '../../api';
+import { departmentsAPI, schedulesAPI, scheduleBuilderAPI, shiftsAPI, absencesShiftAPI, adminAPI } from '../../api';
 import SmartSpreadsheet from './components/SmartSpreadsheet';
 import VisualCalendar from './components/VisualCalendar';
 import ImportModal from './components/ImportModal';
@@ -37,27 +37,6 @@ const IconRight    = () => <Svg d="M9 18l6-6-6-6" />;
 const IconStar     = () => <Svg d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17 5.8 21.3l2.4-7.4L2 9.4h7.6z" />;
 const IconTable    = () => <Svg d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18" />;
 const IconGrid     = () => <Svg d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" />;
-
-// ─── Status Badge ─────────────────────────────────────────────
-const StatusBadge = ({ status }) => {
-  const map = {
-    draft:        { label: 'Brouillon',   bg: '#F3F4F6', color: '#6B7280' },
-    // Un planning envoyé est effectif : « En vigueur » avant sa date de début,
-    // « En cours » une fois démarré. Les trois statuts suivants n'existent plus
-    // (migration 026) et ne restent que par sécurité pour d'anciennes lignes.
-    submitted:    { label: 'En vigueur',  bg: '#EFF6FF', color: '#3B82F6' },
-    under_review: { label: 'En revision', bg: '#FFFBEB', color: '#F59E0B' },
-    approved:     { label: 'Approuve',    bg: '#ECFDF5', color: '#10B981' },
-    rejected:     { label: 'Rejete',      bg: '#FEF2F2', color: '#EF4444' },
-    active:       { label: 'En cours',    bg: '#ECFDF5', color: '#059669' },
-  };
-  const c = map[status] || { label: status, bg: '#F3F4F6', color: '#6B7280' };
-  return (
-    <span style={{ background: c.bg, color: c.color, padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
-      {c.label}
-    </span>
-  );
-};
 
 // ─── KPI Card ─────────────────────────────────────────────────
 const KpiCard = ({ icon, label, value, sub, color }) => (
@@ -1174,14 +1153,6 @@ export default function ChefDeServiceDashboard() {
   });
   const dept = deptDetail?.data?.data || deptDetail?.data;
 
-  // Absences en attente
-  const { data: absData } = useQuery({
-    queryKey: ['absences-pending', selectedDept],
-    queryFn:  () => absencesAPI.getAll({ departmentId: selectedDept, status: 'pending', limit: 10 }),
-    enabled:  !!selectedDept,
-  });
-  const pendingAbsences = absData?.data?.data || absData?.data || [];
-
   // Gardes du jour
   const { data: todayData } = useQuery({
     queryKey: ['shifts-today', selectedDept],
@@ -1190,6 +1161,18 @@ export default function ChefDeServiceDashboard() {
     refetchInterval: 60000,
   });
   const todayShifts = todayData?.data?.data || todayData?.data || [];
+
+  const currentDay = new Date().toLocaleDateString('en-CA');
+  const { data: todayAbsenceData } = useQuery({
+    queryKey: ['absences-shift', 'today', selectedDept, currentDay],
+    queryFn: () => absencesShiftAPI.getAll({ from: currentDay, to: currentDay, limit: 200 }),
+    enabled: !!selectedDept,
+    refetchInterval: 60000,
+  });
+  const todayAbsences = (todayAbsenceData?.data?.data || []).filter((absence) => (
+    !selectedDept || !absence.department_id || absence.department_id === selectedDept
+  ));
+  const absentStaffCount = new Set(todayAbsences.map((absence) => absence.user_id).filter(Boolean)).size;
 
   const roleLabel = isSG
     ? 'Surveillant Général — Consultation Hôpital'
@@ -1277,9 +1260,9 @@ export default function ChefDeServiceDashboard() {
               transition: 'all .2s', display: 'flex', alignItems: 'center', gap: 6,
             }}>
             {t.label}
-            {t.id === 'absences' && pendingAbsences.length > 0 && (
+            {t.id === 'absences' && todayAbsences.length > 0 && (
               <span style={{ background: '#EF4444', color: '#fff', borderRadius: 20, padding: '1px 7px', fontSize: 10, fontWeight: 800 }}>
-                {pendingAbsences.length}
+                {todayAbsences.length}
               </span>
             )}
           </button>
@@ -1292,8 +1275,8 @@ export default function ChefDeServiceDashboard() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 14, marginBottom: 22 }}>
             <KpiCard icon={<IconUsers />}   label="Personnel actif"   value={dept?.member_count || '-'}  color="#3B82F6" sub="dans ce service" />
             <KpiCard icon={<IconCalendar />} label="Gardes aujourd'hui" value={todayShifts.length}       color="#8B5CF6" sub={new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} />
-            <KpiCard icon={<IconAlert />}   label="Absences en cours" value={pendingAbsences.length}     color="#F59E0B" sub="en attente" />
-            <KpiCard icon={<IconCheck />}   label="Personnel present" value={dept?.member_count ? Math.max(0, (dept.member_count || 0) - pendingAbsences.length) : '-'} color="#10B981" sub="disponibles" />
+            <KpiCard icon={<IconAlert />}   label="Signalements du jour" value={todayAbsences.length} color="#F59E0B" sub="absences et retards" />
+            <KpiCard icon={<IconCheck />}   label="Personnel présent" value={dept?.member_count ? Math.max(0, (dept.member_count || 0) - absentStaffCount) : '-'} color="#10B981" sub="disponibles" />
           </div>
 
           {/* Actions rapides */}
@@ -1370,28 +1353,6 @@ export default function ChefDeServiceDashboard() {
             </div>
           )}
 
-          {/* Absences en attente */}
-          {pendingAbsences.length > 0 && (
-            <div style={cardSt}>
-              <h3 style={{ margin: '0 0 14px', fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ color: '#F59E0B' }}><IconAlert /></span>
-                Absences en attente de validation
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {pendingAbsences.slice(0, 5).map(a => (
-                  <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', background: '#FFFBEB', borderRadius: 10, border: '1px solid #FDE68A' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{a.first_name || a.user_first_name} {a.last_name || a.user_last_name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {a.absence_type_name} - {a.start_date} au {a.end_date}
-                      </div>
-                    </div>
-                    <StatusBadge status="submitted" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -1537,41 +1498,7 @@ export default function ChefDeServiceDashboard() {
       {/* ── ABSENCES ───────────────────────────────────────── */}
       {activeTab === 'absences' && (
         <div>
-          {/* Ce que l'appel du jour a réellement signalé (point 8). Le bloc des
-              congés en attente d'approbation reste en place juste en dessous :
-              les deux informations sont utiles et distinctes. */}
           <ShiftAbsencesPanel departmentId={selectedDept} />
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Congés en attente d'approbation</h3>
-            <button style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px', borderRadius: 10, border: 'none', cursor: 'pointer', background: '#F59E0B', color: '#fff', fontWeight: 700, fontSize: 13 }}>
-              <IconPlus /> Declarer une absence
-            </button>
-          </div>
-          {pendingAbsences.length === 0 ? (
-            <div style={{ ...cardSt, textAlign: 'center', padding: '48px 20px' }}>
-              <div style={{ fontSize: 38, marginBottom: 10 }}>?</div>
-              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 5 }}>Aucune demande de congé en attente</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Aucune demande n'attend votre décision</div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-              {pendingAbsences.map(a => (
-                <div key={a.id} style={{ ...cardSt, display: 'flex', alignItems: 'center', gap: 14, padding: '15px 20px' }}>
-                  <div style={{ width: 38, height: 38, borderRadius: 10, background: '#FFFBEB', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#F59E0B', flexShrink: 0 }}>
-                    <IconAlert />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{a.user_first_name || a.first_name} {a.user_last_name || a.last_name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      {a.absence_type_name} - {a.start_date} au {a.end_date}
-                    </div>
-                  </div>
-                  <StatusBadge status={a.status} />
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 

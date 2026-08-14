@@ -19,8 +19,11 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { journalAPI } from '../../../api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { absencesAPI, absencesShiftAPI, journalAPI } from '../../../api';
+import { JustificationBadge } from '../../../components/common/JustificationChoice';
+import HistoryCatchupModal from './HistoryCatchupModal';
 
 /** Le serveur plafonne `limit` à 300 : on le demande explicitement. */
 const MAX_EVENTS = 300;
@@ -29,6 +32,7 @@ const MARKS = {
   presence: { label: 'Présent', emoji: '✅', color: '#10B981', bg: 'rgba(16, 185, 129, .10)' },
   late:     { label: 'Retard',  emoji: '⏰', color: '#F59E0B', bg: 'rgba(245, 158, 11, .10)' },
   absence:  { label: 'Absent',  emoji: '⛔', color: '#EF4444', bg: 'rgba(239, 68, 68, .10)' },
+  pending:  { label: 'Non pointé', emoji: '⚠️', color: '#B45309', bg: 'rgba(245, 158, 11, .12)' },
 };
 
 const card = {
@@ -69,6 +73,12 @@ const lateMinutesOf = (ev) => {
   if (Number.isFinite(n) && n >= 0) return n;
   const m = /(\d+)\s*min/i.exec(String(ev.title || ''));
   return m ? Number.parseInt(m[1], 10) : null;
+};
+
+const justificationOf = (ev) => {
+  if (typeof ev.isJustified === 'boolean') return ev.isJustified;
+  const meta = ev.metadata && typeof ev.metadata === 'object' ? ev.metadata : null;
+  return typeof meta?.isJustified === 'boolean' ? meta.isJustified : null;
 };
 
 /** « 1 h 25 » au-delà de l'heure, « 25 min » en dessous. */
@@ -115,6 +125,7 @@ const Count = ({ mark, n }) => {
 };
 
 export default function AppelHistoryPanel() {
+  const qc = useQueryClient();
   const [preset, setPreset] = useState('7');
   const [customFrom, setCustomFrom] = useState(shiftDays(-6));
   const [customTo, setCustomTo] = useState(dayKey(new Date()));
@@ -122,6 +133,7 @@ export default function AppelHistoryPanel() {
   const [scheduleFilter, setScheduleFilter] = useState('');
   const [markFilter, setMarkFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [pendingAction, setPendingAction] = useState(null);
 
   const active = PRESETS.find((p) => p.key === preset) || PRESETS[1];
   const from = active.from ? active.from() : customFrom;
@@ -143,22 +155,41 @@ export default function AppelHistoryPanel() {
     }),
   });
 
-  const events = data?.data?.data?.events || [];
+  const { data: callsData, isLoading: callsLoading, isError: callsError } = useQuery({
+    queryKey: ['journal', 'appel-calls', from, to],
+    queryFn: () => journalAPI.getCalls({ from, to }),
+  });
+
+  const { data: typesRes } = useQuery({
+    queryKey: ['absence-types'],
+    queryFn: () => absencesAPI.getTypes(),
+  });
+
+  const events = useMemo(() => data?.data?.data?.events || [], [data]);
   const scopeLabel = data?.data?.data?.scopeLabel;
   const truncated = events.length >= MAX_EVENTS;
+  const callInfo = useMemo(() => callsData?.data?.data || {}, [callsData]);
+  const serverToday = callInfo.today || dayKey(new Date());
+  const missing = useMemo(() => (callInfo.calls || [])
+    .filter((call) => call.date < serverToday && !call.isDeclared)
+    .map((call) => ({ ...call, id: `pending:${call.key}`, type: 'pending', reporterName: null })), [callInfo, serverToday]);
+  const absenceTypes = (typesRes?.data?.data || []).filter((t) => !t.is_leave);
+  const lateType = absenceTypes.find((t) => t.code === 'retard' || /retard/i.test(t.name || ''));
+  const absentType = absenceTypes.find((t) => t.code === 'absence_injustifiee')
+    || absenceTypes.find((t) => !/retard/i.test(t.name || ''));
 
   const schedules = useMemo(() => {
     const m = new Map();
-    events.forEach((ev) => {
+    [...events, ...missing].forEach((ev) => {
       const id = ev.scheduleId || '__none__';
       if (!m.has(id)) m.set(id, ev.scheduleName || 'Hors planning');
     });
     return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], 'fr'));
-  }, [events]);
+  }, [events, missing]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return events
+    return [...events, ...missing]
       .filter((ev) => MARKS[ev.type])
       .filter((ev) => !scheduleFilter || (ev.scheduleId || '__none__') === scheduleFilter)
       .filter((ev) => !markFilter || ev.type === markFilter)
@@ -169,14 +200,61 @@ export default function AppelHistoryPanel() {
           || (ev.scheduleName || '').toLowerCase().includes(q)
           || (ev.departmentName || '').toLowerCase().includes(q);
       })
-      .map((ev) => ({ ...ev, lateMinutes: ev.type === 'late' ? lateMinutesOf(ev) : null }));
-  }, [events, scheduleFilter, markFilter, search]);
+      .map((ev) => ({
+        ...ev,
+        lateMinutes: ev.type === 'late' ? lateMinutesOf(ev) : null,
+        isJustified: ['late', 'absence'].includes(ev.type) ? justificationOf(ev) : null,
+      }));
+  }, [events, missing, scheduleFilter, markFilter, search]);
 
   const totals = useMemo(() => {
-    const t = { presence: 0, late: 0, absence: 0 };
+    const t = { presence: 0, late: 0, absence: 0, pending: 0 };
     rows.forEach((r) => { t[r.type] += 1; });
     return t;
   }, [rows]);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['journal', 'appel-history'] });
+    qc.invalidateQueries({ queryKey: ['journal', 'appel-calls'] });
+    qc.invalidateQueries({ queryKey: ['journal-overview'] });
+    qc.invalidateQueries({ queryKey: ['journal-alerts'] });
+    qc.invalidateQueries({ queryKey: ['shift-absences'] });
+  };
+
+  const catchup = useMutation({
+    mutationFn: async ({ call, mark, details = {} }) => {
+      if (mark === 'presence') {
+        return journalAPI.addEvent({
+          departmentId: call.departmentId, scheduleId: call.scheduleId,
+          eventType: 'presence', userId: call.userId, dutyDate: call.date,
+          severity: 'info', title: `Présence rattrapée — ${call.userName}`,
+          description: `Déclaration tardive pour la garde du ${SHORT_DATE(call.date)}`,
+        });
+      }
+      const type = mark === 'late' ? lateType : absentType;
+      return absencesShiftAPI.report({
+        userId: call.userId, scheduleId: call.scheduleId, date: call.date,
+        absenceTypeId: type?.id, absenceKind: mark === 'late' ? 'late' : 'absence',
+        reason: details.reason || undefined, isJustified: details.isJustified,
+        severity: mark === 'late' ? 'info' : 'warning',
+        lateMinutes: mark === 'late' && details.lateMinutes !== '' ? Number(details.lateMinutes) : undefined,
+      });
+    },
+    onSuccess: (_data, vars) => {
+      toast.success(`${MARKS[vars.mark].label} enregistré(e) pour le ${SHORT_DATE(vars.call.date)}`);
+      setPendingAction(null);
+      refresh();
+    },
+    onError: (e) => toast.error(e?.response?.data?.message || 'Rattrapage impossible'),
+  });
+
+  const startCatchup = (call, mark) => {
+    if (mark === 'presence') {
+      catchup.mutate({ call, mark });
+    } else {
+      setPendingAction({ call, mark });
+    }
+  };
 
   /** Regroupement demandé : par garde, ou par jour. */
   const groups = useMemo(() => {
@@ -270,10 +348,11 @@ export default function AppelHistoryPanel() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
-          <strong style={{ color: 'var(--text-secondary)' }}>{rows.length}</strong> déclaration(s)
+          <strong style={{ color: 'var(--text-secondary)' }}>{rows.length}</strong> ligne(s)
           <Count mark="presence" n={totals.presence} />
           <Count mark="late"     n={totals.late} />
           <Count mark="absence"  n={totals.absence} />
+          <Count mark="pending"  n={totals.pending} />
           <span>· {SHORT_DATE(from)} → {SHORT_DATE(to)}</span>
           {scopeLabel && <span>· {scopeLabel}</span>}
         </div>
@@ -290,19 +369,19 @@ export default function AppelHistoryPanel() {
       </div>
 
       {/* ── Résultats ───────────────────────────────────────── */}
-      {isError ? (
+      {(isError || callsError) ? (
         <div style={{ ...card, padding: 40, textAlign: 'center', color: 'var(--color-danger)' }}>
           {error?.response?.status === 403
             ? "Votre rôle ne donne pas accès à l'historique des appels."
             : "L'historique des appels n'a pas pu être chargé."}
         </div>
-      ) : isLoading ? (
+      ) : (isLoading || callsLoading) ? (
         <div style={{ ...card, padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
           Chargement de l'historique…
         </div>
       ) : !groups.length ? (
         <div style={{ ...card, padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-          🗂️ Aucune déclaration sur cette période
+          🗂️ Aucun appel sur cette période
           <div style={{ fontSize: 12, marginTop: 8 }}>
             Les pointages faits depuis l'onglet « Pointer aujourd'hui » apparaissent ici
             immédiatement.
@@ -311,7 +390,7 @@ export default function AppelHistoryPanel() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {groups.map((g) => {
-            const t = { presence: 0, late: 0, absence: 0 };
+            const t = { presence: 0, late: 0, absence: 0, pending: 0 };
             g.items.forEach((i) => { t[i.type] += 1; });
             return (
               <div key={g.key} style={{ ...card, overflow: 'hidden' }}>
@@ -332,13 +411,14 @@ export default function AppelHistoryPanel() {
                   <Count mark="presence" n={t.presence} />
                   <Count mark="late"     n={t.late} />
                   <Count mark="absence"  n={t.absence} />
+                  <Count mark="pending"  n={t.pending} />
                 </div>
 
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-sm)' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        {['Personnel concerné', 'État déclaré', groupBy === 'day' ? 'Garde' : 'Date', 'Déclaré par', 'Horodatage'].map((h) => (
+                        {['Personnel concerné', 'État déclaré', groupBy === 'day' ? 'Garde' : 'Date', 'Déclaré par', 'Horodatage / Action'].map((h) => (
                           <th key={h} style={{
                             textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)',
                             fontWeight: 700, textTransform: 'uppercase', fontSize: 10,
@@ -375,6 +455,14 @@ export default function AppelHistoryPanel() {
                                   {durationLabel(ev.lateMinutes) || 'durée non précisée'}
                                 </span>
                               )}
+                              {['late', 'absence'].includes(ev.type) && typeof ev.isJustified === 'boolean' && (
+                                <span style={{ display: 'inline-block', marginLeft: 6 }}>
+                                  <JustificationBadge value={ev.isJustified} />
+                                </span>
+                              )}
+                              {ev.type === 'pending' && (
+                                <div style={{ fontSize: 10, color: '#92400E', marginTop: 2 }}>Aucune déclaration enregistrée</div>
+                              )}
                               {ev.description && (
                                 <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400, marginTop: 2, maxWidth: 260 }}>
                                   {ev.description}
@@ -385,10 +473,18 @@ export default function AppelHistoryPanel() {
                               {groupBy === 'day' ? (ev.scheduleName || 'Hors planning') : SHORT_DATE(ev.date)}
                             </td>
                             <td style={{ padding: '9px 12px', color: 'var(--text-secondary)', fontSize: 12 }}>
-                              {ev.reporterName || '—'}
+                              {ev.reporterName || (ev.type === 'pending' ? 'À rattraper' : '—')}
                             </td>
                             <td style={{ padding: '9px 12px', color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
-                              {SHORT_DATE(ev.date)}{ev.hour ? ` · ${ev.hour}` : ''}
+                              {ev.type === 'pending' ? (
+                                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                  <button className="btn btn-sm" disabled={catchup.isPending} onClick={() => startCatchup(ev, 'presence')}>✅ Présent</button>
+                                  <button className="btn btn-sm" disabled={catchup.isPending} onClick={() => startCatchup(ev, 'late')}>⏰ Retard</button>
+                                  <button className="btn btn-sm" disabled={catchup.isPending} onClick={() => startCatchup(ev, 'absence')}>⛔ Absent</button>
+                                </div>
+                              ) : (
+                                <>{ev.declaredDate && ev.declaredDate !== ev.date ? `Garde ${SHORT_DATE(ev.date)} · saisi ${SHORT_DATE(ev.declaredDate)}` : SHORT_DATE(ev.date)}{ev.hour ? ` · ${ev.hour}` : ''}</>
+                              )}
                             </td>
                           </tr>
                         );
@@ -403,10 +499,17 @@ export default function AppelHistoryPanel() {
       )}
 
       <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.6 }}>
-        L'historique est en lecture seule et ne peut pas être modifié : chaque ligne est la trace
-        d'une déclaration faite à l'appel du jour. Un agent repointé apparaît autant de fois qu'il a
-        été déclaré — c'est ce qui rend la traçabilité complète.
+        Les déclarations existantes restent en lecture seule. Seules les gardes passées sans aucun
+        pointage peuvent recevoir leur première déclaration depuis cet historique.
       </p>
+
+      {pendingAction && (
+        <HistoryCatchupModal
+          call={pendingAction.call} mark={pendingAction.mark} busy={catchup.isPending}
+          onClose={() => !catchup.isPending && setPendingAction(null)}
+          onConfirm={(details) => catchup.mutate({ ...pendingAction, details })}
+        />
+      )}
     </div>
   );
 }

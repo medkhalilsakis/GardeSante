@@ -14,7 +14,6 @@ const SchedulesPage            = lazy(() => import('./pages/schedules/SchedulesP
 const ScheduleDetailPage       = lazy(() => import('./pages/schedules/ScheduleDetailPage'));
 const ShiftsPage               = lazy(() => import('./pages/shifts/ShiftsPage'));
 const AbsencesPage             = lazy(() => import('./pages/absences/AbsencesPage'));
-const ReplacementsPage         = lazy(() => import('./pages/replacements/ReplacementsPage'));
 const StatisticsPage           = lazy(() => import('./pages/statistics/StatisticsPage'));
 const UsersPage                = lazy(() => import('./pages/users/UsersPage'));
 const DepartmentsPage          = lazy(() => import('./pages/departments/DepartmentsPage'));
@@ -31,6 +30,7 @@ const NotificationsPage        = lazy(() => import('./pages/notifications/Notifi
 const AppelDuJourPage          = lazy(() => import('./pages/appel/AppelDuJourPage'));
 const NotesPage                = lazy(() => import('./pages/notes/NotesPage'));
 const ServicePortfolioPage     = lazy(() => import('./pages/portfolio/ServicePortfolioPage'));
+const IncidentsPage            = lazy(() => import('./pages/incidents/IncidentsPage'));
 
 // Query Client
 const queryClient = new QueryClient({
@@ -154,11 +154,6 @@ export default function App() {
                 </ProtectedRoute>
               } />
 
-              <Route path="/replacements" element={
-                <ProtectedRoute permission="replacements.read">
-                  <ReplacementsPage />
-                </ProtectedRoute>
-              } />
 
               <Route path="/statistics" element={
                 <ProtectedRoute permission="stats.read">
@@ -254,6 +249,12 @@ export default function App() {
               <Route path="/appel-du-jour" element={
                 <ProtectedRoute>
                   <AppelDuJourPage />
+                </ProtectedRoute>
+              } />
+
+              <Route path="/incidents" element={
+                <ProtectedRoute>
+                  <IncidentsPage />
                 </ProtectedRoute>
               } />
 

@@ -1,14 +1,11 @@
 const PERSONNEL_CATEGORIES = [
   { code: 'medical', label: 'Personnel médical', requiresDepartment: true,
-    examples: ['Médecin senior', 'Chef de service', 'Résident', 'Interne', 'Médecin généraliste', 'Médecin spécialiste', 'Pharmacien'] },
-  { code: 'paramedical', label: 'Personnel paramédical', requiresDepartment: true,
-    examples: ['Infirmier', 'Sage-femme', 'Kinésithérapeute', 'Aide-soignant', 'Technicien de laboratoire', 'Technicien de radiologie', 'Psychologue clinicien'] },
+    examples: ['Médecin', 'Infirmier', 'Pharmacien', 'Sage-femme', 'Aide-soignant', 'Technicien de soins'] },
   { code: 'administrative', label: 'Personnel administratif', requiresDepartment: false,
-    examples: ['RH', 'Comptable', 'Secrétaire', 'Agent administratif', 'Gestionnaire de stock', 'Informaticien'] },
-  { code: 'technical_logistics', label: 'Personnel technique et logistique', requiresDepartment: false,
-    examples: ['Ambulancier', 'Brancardier', 'Technicien biomédical', 'Maintenance', 'Hygiène', 'Sécurité', 'Restauration'] },
-  { code: 'other', label: 'Autre personnel', requiresDepartment: false, examples: [] },
+    examples: ['Directeur', 'Surveillant', 'Secrétaire', 'Agent d’accueil', 'Informaticien', 'Comptable'] },
+  { code: 'auxiliary', label: 'Personnel auxiliaire', requiresDepartment: false,
+    examples: ['Ambulancier', 'Concierge', 'Chauffeur', 'Brancardier', 'Sécurité', 'Nettoyage', 'Maintenance'] },
 ];
 
-const CARE_CATEGORIES = new Set(['medical', 'paramedical']);
+const CARE_CATEGORIES = new Set(['medical']);
 module.exports = { PERSONNEL_CATEGORIES, CARE_CATEGORIES };

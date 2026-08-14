@@ -5,6 +5,7 @@ import { authAPI, notificationsAPI } from '../../api';
 import { useRealtime } from '../../hooks/useRealtime';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import UrgentNotesBanner from '../notes/UrgentNotesBanner';
 
 export default function AppLayout({ title = 'GardeSante', subtitle, headerActions }) {
   const { isAuthenticated } = useAuthStore();
@@ -67,6 +68,7 @@ export default function AppLayout({ title = 'GardeSante', subtitle, headerAction
       <div className={`main-content ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
         <Header title={title} subtitle={subtitle} actions={headerActions} />
         <main className="page-container">
+          <UrgentNotesBanner />
           <div className="animate-in">
             <Outlet />
           </div>

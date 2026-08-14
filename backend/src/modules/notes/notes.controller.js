@@ -239,7 +239,7 @@ const publishNote = async (req, res) => {
 // Listing (GET /api/notes) — visibilité par portée
 // ============================================================
 const listNotes = async (req, res) => {
-  const { page = 1, limit = 20, category, scope } = req.query;
+  const { page = 1, limit = 20, category, scope, priority, unreadOnly } = req.query;
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   // L'utilisateur ne voit que les notes qui le concernent :
@@ -259,6 +259,8 @@ const listNotes = async (req, res) => {
   if (req.user.departmentId) filterValues.push(req.user.departmentId);
   if (category) filterValues.push(category);
   if (scope) filterValues.push(scope);
+  if (priority) filterValues.push(priority);
+  if (unreadOnly === 'true') filterValues.push(req.user.id);
 
   // La clause WHERE est reconstruite avec un décalage, car la requête principale
   // lie req.user.id en $1 (accusé de lecture) alors que le COUNT ne le fait pas.
@@ -286,6 +288,8 @@ const listNotes = async (req, res) => {
     const conditions = [`(${scopeClauses.join(' OR ')})`];
     if (category) conditions.push(`n.category = $${i++}`);
     if (scope) conditions.push(`n.scope = $${i++}`);
+    if (priority) conditions.push(`n.priority = $${i++}`);
+    if (unreadOnly === 'true') conditions.push(`NOT EXISTS (SELECT 1 FROM note_reads unread_nr WHERE unread_nr.note_id = n.id AND unread_nr.user_id = $${i++})`);
     return { where: conditions.join(' AND '), nextIdx: i };
   };
 
@@ -334,6 +338,7 @@ const listNotes = async (req, res) => {
       readCount: parseInt(r.read_count),
       isRead: r.is_read,
       attachmentsCount: parseInt(r.attachments_count),
+      canViewReaders: r.author_id === req.user.id || req.user.isSuperAdmin === true || isDirector,
     })),
     total: parseInt(count.rows[0].count),
   });
@@ -384,6 +389,11 @@ const getNote = async (req, res) => {
      ON CONFLICT (note_id, user_id) DO NOTHING`,
     [note.id, req.user.id]
   );
+  await query(
+    `UPDATE notifications SET is_read = TRUE, read_at = NOW()
+      WHERE recipient_id = $1 AND entity_type = 'notes' AND entity_id = $2`,
+    [req.user.id, note.id]
+  );
 
   const attachments = await query(
     `SELECT id, kind, file_url, file_name, mime_type, size_bytes FROM note_attachments
@@ -413,8 +423,58 @@ const getNote = async (req, res) => {
       isAuthor: note.author_id === req.user.id || req.user.isSuperAdmin === true,
       readCount: parseInt(readCount.rows[0].count),
       attachments: attachments.rows,
+      canViewReaders: note.author_id === req.user.id || req.user.isSuperAdmin === true || isDirector,
     },
   });
+};
+
+const markNoteRead = async (req, res) => {
+  const visible = await query(
+    `SELECT n.id
+       FROM notes n
+       LEFT JOIN departments d ON d.id = n.department_id
+      WHERE n.id = $1 AND (
+        (n.scope = 'platform_directors' AND ($2 = ANY(ARRAY['director','hospital_admin']) OR $3 = TRUE))
+        OR (n.scope = 'establishment_staff' AND n.establishment_id = $4)
+        OR (n.scope = 'department' AND (n.department_id = $5 OR ($6 = 'general_supervisor' AND d.establishment_id = $4)))
+      )`,
+    [req.params.id, req.user.roleCode, req.user.isSuperAdmin === true, req.user.establishmentId, req.user.departmentId, req.user.roleCode]
+  );
+  if (!visible.rows.length) return res.status(404).json({ success: false, message: 'Note introuvable ou non destinée' });
+  await query(
+    `INSERT INTO note_reads (note_id, user_id) VALUES ($1, $2)
+     ON CONFLICT (note_id, user_id) DO NOTHING`,
+    [req.params.id, req.user.id]
+  );
+  await query(`UPDATE notifications SET is_read = TRUE, read_at = NOW() WHERE recipient_id = $1 AND entity_type = 'notes' AND entity_id = $2`, [req.user.id, req.params.id]);
+  return res.json({ success: true, message: 'Note marquée comme lue' });
+};
+
+const listNoteReaders = async (req, res) => {
+  const noteRes = await query(
+    `SELECT n.id, n.author_id, n.scope, n.establishment_id, n.department_id, d.establishment_id AS department_establishment_id
+       FROM notes n LEFT JOIN departments d ON d.id = n.department_id WHERE n.id = $1`,
+    [req.params.id]
+  );
+  const note = noteRes.rows[0];
+  if (!note) return res.status(404).json({ success: false, message: 'Note introuvable' });
+  const canRead = req.user.isSuperAdmin === true
+    || note.author_id === req.user.id
+    || ([ROLES.DIRECTOR, ROLES.HOSPITAL_ADMIN].includes(req.user.roleCode)
+      && (note.establishment_id === req.user.establishmentId || note.department_establishment_id === req.user.establishmentId));
+  if (!canRead) return res.status(403).json({ success: false, message: 'La liste des lecteurs est réservée à la direction' });
+  const readers = await query(
+    `SELECT nr.user_id, nr.read_at, u.first_name, u.last_name, r.name AS role_name
+       FROM note_reads nr JOIN users u ON u.id = nr.user_id LEFT JOIN roles r ON r.id = u.role_id
+      WHERE nr.note_id = $1 ORDER BY nr.read_at ASC`,
+    [req.params.id]
+  );
+  return res.json({ success: true, data: readers.rows.map(reader => ({
+    userId: reader.user_id,
+    name: `${reader.first_name || ''} ${reader.last_name || ''}`.trim() || 'Utilisateur',
+    roleName: reader.role_name,
+    readAt: reader.read_at,
+  })) });
 };
 
 // ============================================================
@@ -473,6 +533,8 @@ module.exports = {
   publishNote,
   listNotes,
   getNote,
+  markNoteRead,
+  listNoteReaders,
   deleteNote,
   resolveScope,
   resolveRecipients,

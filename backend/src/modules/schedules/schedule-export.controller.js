@@ -2,6 +2,7 @@ const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const { query } = require('../../config/database');
 const { log, getIp } = require('../history/history.controller');
+const { normalizePeriods } = require('./periods');
 
 const dateKey = (value) => {
   if (!value) return '';
@@ -70,6 +71,7 @@ async function loadSpreadsheet(scheduleId, establishmentId) {
       phone: source.phone || fallback.phone || '',
       matricule: source.matricule || fallback.matricule || '',
       roleName: source.roleName || source.role_name || fallback.role_name || '',
+      periods: normalizePeriods(source, dateKey(schedule.start_date), dateKey(schedule.end_date)),
       periodStart: dateKey(source.periodStart || source.period_start) || dateKey(schedule.start_date),
       periodEnd: dateKey(source.periodEnd || source.period_end) || dateKey(schedule.end_date),
       shiftStart: source.shiftStart || '07:00',
@@ -89,20 +91,26 @@ async function loadSpreadsheet(scheduleId, establishmentId) {
   return { schedule, dates, rows: [...rowsByPerson.values()], customColumns };
 }
 
-function spreadsheetHeaders(customColumns, dates) {
+const isSpecialSchedule = schedule => schedule.schedule_type === 'special_weekend_holiday'
+  || schedule.metadata?.schedule_kind === 'weekend_holiday'
+  || schedule.metadata?.special_days_only === true;
+
+function spreadsheetHeaders(customColumns, dates, schedule) {
   return [
     '#', 'Nom', 'Prénom', 'Tél', 'Matricule', 'Fonction',
-    'Période - début', 'Période - fin', 'Durée - début', 'Durée - fin',
+    ...(isSpecialSchedule(schedule) ? [] : ['Périodes']),
+    'Durée - début', 'Durée - fin',
     ...customColumns.map(column => column.label || column.name || column.key),
     ...dates.map(displayDate),
   ];
 }
 
 function spreadsheetValues(data) {
-  const { rows, customColumns, dates } = data;
+  const { rows, customColumns, dates, schedule } = data;
   return rows.map((row, index) => [
     index + 1, row.lastName, row.firstName, row.phone, row.matricule, row.roleName,
-    row.periodStart, row.periodEnd, row.shiftStart, row.shiftEnd,
+    ...(isSpecialSchedule(schedule) ? [] : [row.periods.map(period => `${period.startDate} au ${period.endDate}`).join('; ')]),
+    row.shiftStart, row.shiftEnd,
     ...customColumns.map(column => row.custom?.[column.key] || ''),
     ...dates.map(date => row.shifts?.[date] || ''),
   ]);
@@ -112,7 +120,7 @@ async function exportExcel(req, res) {
   const data = await loadSpreadsheet(req.params.scheduleId, req.user.establishmentId);
   if (!data) return res.status(404).json({ success: false, message: 'Planning introuvable' });
   const { schedule, dates, rows, customColumns } = data;
-  const headers = spreadsheetHeaders(customColumns, dates);
+  const headers = spreadsheetHeaders(customColumns, dates, schedule);
   const values = spreadsheetValues(data);
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'GardeSante';
@@ -142,7 +150,7 @@ async function exportExcel(req, res) {
       if (rowNumber % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
     });
   }
-  const widths = [5, 16, 16, 15, 14, 20, 15, 15, 14, 14, ...customColumns.map(() => 16), ...dates.map(() => 9)];
+  const widths = [5, 16, 16, 15, 14, 20, ...(isSpecialSchedule(schedule) ? [] : [34]), 14, 14, ...customColumns.map(() => 16), ...dates.map(() => 9)];
   widths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
   sheet.views = [{ state: 'frozen', ySplit: 4, xSplit: 2 }];
   const filename = `Tableur_${safeName(schedule.name)}.xlsx`;
@@ -156,7 +164,7 @@ async function exportExcel(req, res) {
 async function exportCSV(req, res) {
   const data = await loadSpreadsheet(req.params.scheduleId, req.user.establishmentId);
   if (!data) return res.status(404).json({ success: false, message: 'Planning introuvable' });
-  const content = [spreadsheetHeaders(data.customColumns, data.dates), ...spreadsheetValues(data)]
+  const content = [spreadsheetHeaders(data.customColumns, data.dates, data.schedule), ...spreadsheetValues(data)]
     .map(row => row.map(csvCell).join(';')).join('\r\n');
   const filename = `Tableur_${safeName(data.schedule.name)}.csv`;
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -181,7 +189,8 @@ async function exportPDF(req, res) {
   const fixed = [
     { key: 'index', label: '#', width: 18 }, { key: 'lastName', label: 'Nom', width: 62 }, { key: 'firstName', label: 'Prénom', width: 58 },
     { key: 'phone', label: 'Tél', width: 58 }, { key: 'matricule', label: 'Matricule', width: 54 }, { key: 'roleName', label: 'Fonction', width: 70 },
-    { key: 'periodStart', label: 'Début', width: 48 }, { key: 'periodEnd', label: 'Fin', width: 48 }, { key: 'shiftStart', label: 'H. début', width: 42 }, { key: 'shiftEnd', label: 'H. fin', width: 42 },
+    ...(isSpecialSchedule(schedule) ? [] : [{ key: 'periods', label: 'Périodes', width: 92 }]),
+    { key: 'shiftStart', label: 'H. début', width: 42 }, { key: 'shiftEnd', label: 'H. fin', width: 42 },
     ...customColumns.map(column => ({ key: `custom:${column.key}`, label: column.label || column.key, width: 60 })),
   ];
   const dateColumns = dates.map(date => ({ key: `date:${date}`, label: displayDate(date).replace(/\s/g, '\n'), width: 30 }));
@@ -211,6 +220,7 @@ async function exportPDF(req, res) {
       if (column.key === 'index') value = String(index + 1);
       else if (column.key.startsWith('custom:')) value = row.custom?.[column.key.slice(7)] || '';
       else if (column.key.startsWith('date:')) value = row.shifts?.[column.key.slice(5)] || '';
+      else if (column.key === 'periods') value = row.periods.map(period => `${period.startDate} au ${period.endDate}`).join('; ');
       else value = row[column.key] || '';
       doc.fillColor(column.key.startsWith('date:') && value ? '#1B4FCA' : '#1F2937').font(value && column.key.startsWith('date:') ? 'Helvetica-Bold' : 'Helvetica').fontSize(6.5)
         .text(String(value), x + 2, y + 7, { width: column.width - 4, align: column.key.startsWith('date:') ? 'center' : 'left', lineBreak: false });

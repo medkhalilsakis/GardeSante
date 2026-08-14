@@ -171,6 +171,37 @@ const dateKey = (value) => {
   return `${y}-${m}-${d}`;
 };
 
+const normalizeRowPeriods = (row, fallbackStart = '', fallbackEnd = '') => {
+  const source = Array.isArray(row?.periods)
+    ? row.periods
+    : [{ startDate: row?.periodStart || row?.period_start || fallbackStart, endDate: row?.periodEnd || row?.period_end || fallbackEnd }];
+  const periods = source
+    .map(period => ({
+      startDate: dateKey(period?.startDate || period?.start || period?.periodStart || period?.period_start),
+      endDate: dateKey(period?.endDate || period?.end || period?.periodEnd || period?.period_end),
+    }))
+    .filter(period => period.startDate || period.endDate)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+  return periods.filter((period, index) => index === 0
+    || period.startDate !== periods[index - 1].startDate
+    || period.endDate !== periods[index - 1].endDate);
+};
+
+const periodBounds = (periods = []) => ({
+  startDate: periods[0]?.startDate || '',
+  endDate: periods.at(-1)?.endDate || '',
+});
+
+const dateInRowPeriods = (date, row, fallbackStart = '', fallbackEnd = '') => {
+  const key = dateKey(date);
+  return normalizeRowPeriods(row, fallbackStart, fallbackEnd)
+    .some(period => key >= period.startDate && key <= period.endDate);
+};
+
+const periodsLabel = (periods = [], compact = false) => periods
+  .map(period => compact ? `${period.startDate} → ${period.endDate}` : `du ${period.startDate} au ${period.endDate}`)
+  .join(' ; ');
+
 // ── Status badge ────────────────────────────────────────────────────────
 const STATUS_META = {
   draft:              { label: 'Brouillon',           bg: '#F3F4F6', text: '#6B7280' },
@@ -278,111 +309,143 @@ function ShiftCell({ code, onClick, isProposed, isConflict, proposedCode, origin
   );
 }
 
-function PeriodCalendar({ value, min, max, anchor, onSelect, onClose, isSpecialSchedule, holidays = [] }) {
-  const toDate = (key) => new Date(`${key}T12:00:00`);
-  const initial = value || min;
-  const [cursor, setCursor] = useState(() => toDate(initial));
-  const year = cursor.getFullYear(), month = cursor.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const prevEnabled = new Date(year, month, 0) >= toDate(min);
-  const nextEnabled = new Date(year, month + 1, 1) <= toDate(max);
-  const cells = Array.from({ length: firstDay + daysInMonth }, (_, i) => i < firstDay ? null : i - firstDay + 1);
-  const keyFor = (day) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+function MultiPeriodPicker({ row, min, max, onChange, onClose }) {
+  const [periods, setPeriods] = useState(() => normalizeRowPeriods(row, min, max));
+  const [range, setRange] = useState({ startDate: min, endDate: max });
+
+  const addRange = () => {
+    if (!range.startDate || !range.endDate || range.startDate > range.endDate) {
+      toast.error('Choisissez une période valide.');
+      return;
+    }
+    if (range.startDate < min || range.endDate > max) {
+      toast.error(`La période doit rester comprise entre le ${min} et le ${max}.`);
+      return;
+    }
+    const next = [...periods, range]
+      .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+    if (next.some((period, index) => index > 0 && period.startDate <= next[index - 1].endDate)) {
+      toast.error('Les périodes ne peuvent pas se chevaucher.');
+      return;
+    }
+    setPeriods(next);
+  };
+
+  const save = () => {
+    if (!periods.length) {
+      toast.error('Ajoutez au moins une période.');
+      return;
+    }
+    const bounds = periodBounds(periods);
+    onChange({ periods, periodStart: bounds.startDate, periodEnd: bounds.endDate });
+    onClose();
+  };
 
   return (
-    <div style={{
-      position: 'fixed', zIndex: 5000,
-      top: Math.min((anchor?.bottom || 0) + 6, window.innerHeight - 410),
-      left: Math.min(anchor?.left || 8, window.innerWidth - 320),
-      width: 300, padding: 14, borderRadius: 12,
-      background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-      boxShadow: '0 16px 36px rgba(0,0,0,.25)'
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <button type="button" disabled={!prevEnabled} onClick={() => setCursor(new Date(year, month - 1, 1))} style={{ ...calendarNav, opacity: prevEnabled ? 1 : .35 }}>‹</button>
-        <strong style={{ fontSize: 13 }}>{MONTH_FR[month]} {year}</strong>
-        <button type="button" disabled={!nextEnabled} onClick={() => setCursor(new Date(year, month + 1, 1))} style={{ ...calendarNav, opacity: nextEnabled ? 1 : .35 }}>›</button>
-      </div>
-
-      {isSpecialSchedule && (
-        <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(234, 179, 8, 0.12)', border: '1px solid #CA8A04', fontSize: 10, fontWeight: 700, color: '#713F12', marginBottom: 10, textAlign: 'center' }}>
-          ⚡ Planning Spécial : Seuls les Week-ends et Jours Fériés sont sélectionnables.
+    <div style={{ position: 'fixed', inset: 0, zIndex: 5200, background: 'rgba(15,23,42,.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ width: 'min(680px, 100%)', maxHeight: '88vh', overflow: 'auto', background: 'var(--bg-card)', borderRadius: 16, padding: 20, boxShadow: '0 24px 70px rgba(0,0,0,.35)' }} onClick={event => event.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+          <div>
+            <strong>Périodes d'affectation</strong>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+              Affectez la période complète ou plusieurs plages distinctes comprises dans le planning.
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ ...btnGhost, padding: '5px 9px' }}>✕</button>
         </div>
-      )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3, textAlign: 'center' }}>
-        {['D','L','M','M','J','V','S'].map((day, i) => <span key={`${day}-${i}`} style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', padding: 2 }}>{day}</span>)}
-        {cells.map((day, i) => {
-          if (!day) return <span key={`empty-${i}`} />;
-          const key = keyFor(day);
-          const dateObj = new Date(`${key}T12:00:00`);
-          const isWeekendDay = dateObj.getDay() === 0 || dateObj.getDay() === 6;
-          const matchingHolidays = holidays.filter(h => {
-            const hStart = String(h.start_date).slice(0, 10);
-            const hEnd = String(h.end_date).slice(0, 10);
-            return key >= hStart && key <= hEnd;
-          });
-          const isHolidayDay = matchingHolidays.length > 0;
-          const isSpecialDay = isWeekendDay || isHolidayDay;
+        <button type="button" onClick={() => setPeriods([{ startDate: min, endDate: max }])} style={{ ...btnGhost, width: '100%', justifyContent: 'center', marginBottom: 12, background: 'var(--color-primary-10)', borderColor: 'var(--color-primary-30)', color: 'var(--color-primary)' }}>
+          Utiliser toute la période du planning : {min} → {max}
+        </button>
 
-          const outOfRange = key < min || key > max;
-          const disabled = outOfRange || (isSpecialSchedule && !isSpecialDay);
-          const selected = key === value;
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, padding: 12, borderRadius: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', marginBottom: 14 }}>
+          <input type="date" value={range.startDate} min={min} max={max} onChange={event => setRange(value => ({ ...value, startDate: event.target.value, endDate: event.target.value > value.endDate ? event.target.value : value.endDate }))} style={weekInputStyle} />
+          <input type="date" value={range.endDate} min={range.startDate || min} max={max} onChange={event => setRange(value => ({ ...value, endDate: event.target.value }))} style={weekInputStyle} />
+          <button type="button" onClick={addRange} style={{ ...btnGhost, background: 'var(--color-primary)', color: '#fff' }}>Ajouter</button>
+        </div>
 
-          let cellBg = selected ? 'var(--color-primary)' : 'var(--bg-elevated)';
-          let cellColor = selected ? '#fff' : 'var(--text-primary)';
-          let cellBorder = 'none';
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {periods.map((period, index) => (
+            <div key={`${period.startDate}-${period.endDate}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border-subtle)', background: 'var(--bg-card)' }}>
+              <span style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--color-primary-10)', color: 'var(--color-primary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>{index + 1}</span>
+              <strong style={{ flex: 1, fontSize: 12 }}>{period.startDate} → {period.endDate}</strong>
+              <button type="button" onClick={() => setPeriods(current => current.filter((_, itemIndex) => itemIndex !== index))} title="Supprimer cette période" style={{ ...btnGhost, padding: '5px 8px', color: 'var(--color-danger)' }}><IcoTrash /></button>
+            </div>
+          ))}
+          {!periods.length && <div style={{ padding: 24, textAlign: 'center', border: '1px dashed var(--border-default)', borderRadius: 9, color: 'var(--text-muted)', fontSize: 12 }}>Aucune période ajoutée.</div>}
+        </div>
 
-          if (!selected && !disabled) {
-            if (isHolidayDay) {
-              cellBg = '#FEF9C3';
-              cellColor = '#713F12';
-              cellBorder = '1px solid #CA8A04';
-            } else if (isWeekendDay) {
-              cellBg = '#F3E8FF';
-              cellColor = '#581C87';
-              cellBorder = '1px solid #C084FC';
-            }
-          }
-
-          return (
-            <button
-              type="button"
-              key={key}
-              disabled={disabled}
-              onClick={() => { onSelect(key); onClose(); }}
-              title={
-                isHolidayDay
-                  ? `🟡 Jour Férié : ${matchingHolidays.map(h => h.name).join(', ')}`
-                  : isWeekendDay
-                  ? '🟣 Week-end'
-                  : isSpecialSchedule
-                  ? '🚫 Jour de semaine (non sélectionnable)'
-                  : undefined
-              }
-              style={{
-                border: cellBorder, borderRadius: 6, minHeight: 30,
-                cursor: disabled ? 'not-allowed' : 'pointer',
-                fontSize: 11, fontWeight: selected || isSpecialDay ? 800 : 500,
-                background: cellBg, color: cellColor,
-                opacity: disabled ? (isSpecialSchedule ? .18 : .3) : 1,
-                transition: 'all 0.15s',
-                position: 'relative'
-              }}>
-              {day}
-              {isHolidayDay && !selected && (
-                <span style={{ position: 'absolute', top: 1, right: 2, fontSize: 8 }}>🟡</span>
-              )}
-            </button>
-          );
-        })}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button type="button" onClick={onClose} style={btnGhost}>Annuler</button>
+          <button type="button" onClick={save} style={{ ...btnGhost, background: 'var(--color-primary)', color: '#fff' }}>Enregistrer les périodes</button>
+        </div>
       </div>
+    </div>
+  );
+}
 
-      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border-subtle)', fontSize: 9, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
-        <span>🟣 Week-end</span>
-        <span>🟡 Férié</span>
-        {isSpecialSchedule && <span style={{ opacity: 0.6 }}>⚪ Non-férié (désactivé)</span>}
+function SpecialDatesPicker({ row, allowedDays, holidays = [], onChange, onClose }) {
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
+  const selected = new Set(Object.entries(row?.shifts || {})
+    .filter(([, code]) => code && code !== 'R')
+    .map(([date]) => dateKey(date)));
+  const allowedKeys = allowedDays.map(dateKey);
+  const holidayName = key => holidays
+    .filter(h => key >= dateKey(h.start_date) && key <= dateKey(h.end_date))
+    .map(h => h.name).join(', ');
+
+  const commit = (nextSelected) => {
+    const nextShifts = { ...(row?.shifts || {}) };
+    allowedKeys.forEach(key => {
+      if (nextSelected.has(key)) nextShifts[key] = nextShifts[key] && nextShifts[key] !== 'R' ? nextShifts[key] : 'G';
+      else delete nextShifts[key];
+    });
+    onChange(nextShifts);
+  };
+
+  const toggle = key => {
+    const next = new Set(selected);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    commit(next);
+  };
+
+  const addRange = () => {
+    if (!rangeStart || !rangeEnd || rangeStart > rangeEnd) return toast.error('Choisissez une plage valide.');
+    const next = new Set(selected);
+    allowedKeys.filter(key => key >= rangeStart && key <= rangeEnd).forEach(key => next.add(key));
+    if (next.size === selected.size) return toast.error('Cette plage ne contient aucun week-end ou jour férié autorisé.');
+    commit(next);
+    setRangeStart(''); setRangeEnd('');
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 5200, background: 'rgba(15,23,42,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ width: 'min(760px, 100%)', maxHeight: '86vh', overflow: 'auto', background: 'var(--bg-card)', borderRadius: 16, padding: 20, boxShadow: '0 24px 70px rgba(0,0,0,.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+          <div><strong>Jours de garde spéciaux</strong><div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Sélectionnez un jour, plusieurs jours, ou une plage. Seuls les samedis, dimanches et jours fériés seront ajoutés.</div></div>
+          <button type="button" onClick={onClose} style={{ ...btnGhost, padding: '5px 9px' }}>✕</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, padding: 12, borderRadius: 10, background: '#FFFBEB', border: '1px solid #FDE68A', marginBottom: 14 }}>
+          <input type="date" value={rangeStart} min={allowedKeys[0]} max={allowedKeys.at(-1)} onChange={e => setRangeStart(e.target.value)} style={weekInputStyle} />
+          <input type="date" value={rangeEnd} min={rangeStart || allowedKeys[0]} max={allowedKeys.at(-1)} onChange={e => setRangeEnd(e.target.value)} style={weekInputStyle} />
+          <button type="button" onClick={addRange} style={{ ...btnGhost, background: '#FEF3C7', color: '#92400E', borderColor: '#F59E0B' }}>Ajouter la plage</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 8 }}>
+          {allowedKeys.map(key => {
+            const date = new Date(`${key}T12:00:00`);
+            const holiday = holidayName(key);
+            const checked = selected.has(key);
+            return <button type="button" key={key} onClick={() => toggle(key)} style={{ padding: '9px 10px', textAlign: 'left', borderRadius: 9, cursor: 'pointer', border: `1.5px solid ${checked ? '#7C3AED' : holiday ? '#D97706' : '#C4B5FD'}`, background: checked ? '#EDE9FE' : holiday ? '#FFFBEB' : '#F5F3FF', color: checked ? '#5B21B6' : 'var(--text-primary)' }}>
+              <div style={{ fontSize: 11, fontWeight: 900 }}>{checked ? '✓ ' : ''}{DOW_FR[date.getDay()]} {date.getDate()} {MONTH_FR[date.getMonth()]}</div>
+              <div style={{ fontSize: 9, color: holiday ? '#B45309' : 'var(--text-muted)', marginTop: 2 }}>{holiday || 'Week-end'}</div>
+            </button>;
+          })}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: '#6D28D9' }}>{selected.size} date(s) sélectionnée(s)</span>
+          <button type="button" onClick={onClose} style={{ ...btnGhost, background: 'var(--color-primary)', color: '#fff' }}>Terminer</button>
+        </div>
       </div>
     </div>
   );
@@ -404,13 +467,11 @@ export function PeriodTimeline({ rows, start, end }) {
           {monthMarkers.map(marker => <span key={marker.label} style={{ position: 'absolute', left: `${marker.left}%`, transform: 'translateX(4px)', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)' }}>{marker.label}</span>)}
         </div>
         {rows.filter(row => row.userId).map(row => {
-          const periodStart = dateKey(row.periodStart) || dateKey(start), periodEnd = dateKey(row.periodEnd) || dateKey(end);
-          const left = Math.max(0, ((toDay(periodStart) - first) / total) * 100);
-          const width = Math.max(2, ((toDay(periodEnd) - toDay(periodStart) + 1) / total) * 100);
+          const periods = normalizeRowPeriods(row, dateKey(start), dateKey(end));
           return <div key={row.id} style={{ display: 'grid', gridTemplateColumns: '210px 1fr', minHeight: 52, borderBottom: '1px solid var(--border-subtle)', alignItems: 'center' }}>
-            <div style={{ paddingRight: 12 }}><strong style={{ fontSize: 12 }}>{row.lastName} {row.firstName}</strong><div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{row.roleName || 'Fonction non renseignée'}</div></div>
+            <div style={{ paddingRight: 12 }}><strong style={{ fontSize: 12 }}>{row.lastName} {row.firstName}</strong><div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{row.roleName || 'Fonction non renseignée'} · {periods.length} période(s)</div></div>
             <div style={{ height: 24, position: 'relative', background: 'var(--bg-elevated)', borderRadius: 6 }}>
-              <div title={`${periodStart} 00:00:00 → ${periodEnd} 23:59:59`} style={{ position: 'absolute', left: `${left}%`, width: `${width}%`, minWidth: 12, top: 2, bottom: 2, borderRadius: 5, background: 'linear-gradient(90deg,var(--color-primary),#7C3AED)', color: '#fff', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', padding: '0 7px', overflow: 'hidden', whiteSpace: 'nowrap' }}>{periodStart} → {periodEnd}</div>
+              {periods.map((period, index) => { const left = Math.max(0, ((toDay(period.startDate) - first) / total) * 100); const width = Math.max(2, ((toDay(period.endDate) - toDay(period.startDate) + 1) / total) * 100); return <div key={`${period.startDate}-${period.endDate}-${index}`} title={`${period.startDate} 00:00:00 → ${period.endDate} 23:59:59`} style={{ position: 'absolute', left: `${left}%`, width: `${width}%`, minWidth: 12, top: 2, bottom: 2, borderRadius: 5, background: index % 2 ? '#7C3AED' : 'var(--color-primary)', color: '#fff', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', padding: '0 7px', overflow: 'hidden', whiteSpace: 'nowrap' }}>{period.startDate} → {period.endDate}</div>; })}
             </div>
           </div>;
         })}
@@ -433,7 +494,7 @@ const STAFF_PALETTE = [
   '#DC2626', // Red
 ];
 
-export function DetailedCalendar({ rows, days, start, end, holidays = [], weekOrganization = [] }) {
+export function DetailedCalendar({ rows, days, start, end, holidays = [], weekOrganization = [], isSpecialSchedule = false }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const staff = useMemo(() => rows
     .filter(row => row.userId || row.lastName)
@@ -443,8 +504,8 @@ export function DetailedCalendar({ rows, days, start, end, holidays = [], weekOr
       color: STAFF_PALETTE[index % STAFF_PALETTE.length],
       name: `${row.lastName} ${row.firstName}`.trim() || 'Agent',
       role: row.roleName || 'Fonction non renseignée',
-      periodStart: dateKey(row.periodStart) || dateKey(start),
-      periodEnd: dateKey(row.periodEnd) || dateKey(end),
+      periods: normalizeRowPeriods(row, dateKey(start), dateKey(end)),
+      selectedDates: new Set(Object.entries(row.shifts || {}).filter(([, code]) => code && code !== 'R').map(([date]) => dateKey(date))),
     })), [rows, start, end]);
 
   const dailyMap = useMemo(() => {
@@ -452,11 +513,11 @@ export function DetailedCalendar({ rows, days, start, end, holidays = [], weekOr
     staff.forEach(person => {
       days.forEach(day => {
         const key = dateKey(day);
-        if (key >= person.periodStart && key <= person.periodEnd) map[key].push(person);
+        if (isSpecialSchedule ? person.selectedDates.has(key) : person.periods.some(period => key >= period.startDate && key <= period.endDate)) map[key].push(person);
       });
     });
     return map;
-  }, [days, staff]);
+  }, [days, staff, isSpecialSchedule]);
 
   const totalPresences = useMemo(() => Object.values(dailyMap).reduce((total, people) => total + people.length, 0), [dailyMap]);
 
@@ -530,7 +591,7 @@ export function DetailedCalendar({ rows, days, start, end, holidays = [], weekOr
               </div>
               <button type="button" onClick={() => setSelectedDay(null)} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer' }}>✕</button>
             </div>
-            {selectedDay.people.length ? <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>{selectedDay.people.map(person => <div key={person.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, borderRadius: 8, background: 'var(--bg-elevated)', borderLeft: `5px solid ${person.color}` }}><span style={{ width: 12, height: 12, borderRadius: '50%', background: person.color }} /><div><strong style={{ fontSize: 13 }}>{person.name}</strong><div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{person.role} · {person.periodStart} → {person.periodEnd}</div></div></div>)}</div> : <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>Aucun personnel prévu ce jour.</div>}
+            {selectedDay.people.length ? <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>{selectedDay.people.map(person => <div key={person.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, borderRadius: 8, background: 'var(--bg-elevated)', borderLeft: `5px solid ${person.color}` }}><span style={{ width: 12, height: 12, borderRadius: '50%', background: person.color }} /><div><strong style={{ fontSize: 13 }}>{person.name}</strong><div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{person.role} · {periodsLabel(person.periods, true)}</div></div></div>)}</div> : <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>Aucun personnel prévu ce jour.</div>}
           </div>
         </div>
       )}
@@ -606,7 +667,7 @@ function CellProposalModal({ cellInfo, onClose, onApplyValue }) {
               <button
                 type="button"
                 onClick={() => {
-                  onApplyValue(prop.proposedVal || prop.proposedCode);
+                  onApplyValue(prop.rawValue ?? prop.proposedVal ?? prop.proposedCode);
                   onClose();
                 }}
                 style={{
@@ -632,7 +693,6 @@ function CellProposalModal({ cellInfo, onClose, onApplyValue }) {
 }
 
 const weekInputStyle = { padding: '6px 8px', borderRadius: 6, border: '1px solid #C4B5FD', background: '#fff', color: 'var(--text-primary)', fontSize: 11 };
-const calendarNav = { border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', borderRadius: 6, cursor: 'pointer', width: 25, height: 24, fontSize: 18, lineHeight: 1 };
 
 // ── Main ─────────────────────────────────────────────────────────────────
 export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onManageProposals }) {
@@ -654,6 +714,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
   const [pickerRowId, setPickerRowId] = useState(null);
   const [personSearch, setPersonSearch] = useState(null);
   const [periodPicker, setPeriodPicker] = useState(null);
+  const [specialDatesPicker, setSpecialDatesPicker] = useState(null);
   const [shiftHelp, setShiftHelp] = useState(null);
   const [viewMode, setViewMode] = useState('table');
   const [dragOverRow, setDragOverRow] = useState(null);
@@ -811,7 +872,10 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
 
     activeProposalsToEvaluate.forEach(prop => {
       if (row.isProposedNewRow) {
-        const proposedVal = String(row[colKey] || '').trim();
+        const rawValue = row[colKey];
+        const proposedVal = colKey === 'periods'
+          ? periodsLabel(normalizeRowPeriods(row), true)
+          : String(rawValue || '').trim();
         if (proposedVal) {
           cellProps.push({
             proposalId: prop.id,
@@ -820,6 +884,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
             roleIcon: prop.roleIcon,
             originalVal: 'Non présent dans l’officiel',
             proposedVal,
+            rawValue,
             palette: prop.palette,
             comment: prop.comment
           });
@@ -827,8 +892,13 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
       } else {
         const propRow = prop.mapByUserId[row.userId || row.id];
         if (propRow) {
-          const currentVal = String(row[colKey] || '').trim();
-          const proposedVal = String(propRow[colKey] || propRow[colKey === 'periodStart' ? 'period_start' : colKey === 'periodEnd' ? 'period_end' : colKey] || '').trim();
+          const rawValue = propRow[colKey] || propRow[colKey === 'periodStart' ? 'period_start' : colKey === 'periodEnd' ? 'period_end' : colKey];
+          const currentVal = colKey === 'periods'
+            ? periodsLabel(normalizeRowPeriods(row), true)
+            : String(row[colKey] || '').trim();
+          const proposedVal = colKey === 'periods'
+            ? periodsLabel(normalizeRowPeriods(propRow), true)
+            : String(rawValue || '').trim();
           if (proposedVal && proposedVal !== currentVal) {
             cellProps.push({
               proposalId: prop.id,
@@ -837,6 +907,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
               roleIcon: prop.roleIcon,
               originalVal: currentVal || 'Non renseigné',
               proposedVal,
+              rawValue: colKey === 'periods' ? normalizeRowPeriods(propRow) : rawValue,
               palette: prop.palette,
               comment: prop.comment
             });
@@ -899,6 +970,10 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
     } else if (colKey && colKey.startsWith('custom_')) {
       setRows(prev => prev.map(r => r.id === rowId ? { ...r, custom: { ...(r.custom || {}), [colKey]: val } } : r));
       dirty();
+    } else if (colKey === 'periods') {
+      const periods = normalizeRowPeriods({ periods: val });
+      const bounds = periodBounds(periods);
+      updateRow(rowId, { periods, periodStart: bounds.startDate, periodEnd: bounds.endDate });
     } else if (colKey) {
       updateRow(rowId, { [colKey]: val });
     }
@@ -945,6 +1020,9 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
   // Les deux ouvrent le droit de proposer une modification : sans 'active', les
   // surveillants perdraient ce droit au moment même où le planning démarre.
   const canProposeChanges = ['submitted', 'active'].includes(schedule?.status) && ['service_supervisor', 'general_supervisor'].includes(user?.roleCode);
+  const canDirectEdit = schedule?.status === 'draft'
+    || (['submitted', 'active'].includes(schedule?.status) && user?.roleCode === 'department_head');
+  const canManageProposals = ['submitted', 'active'].includes(schedule?.status) && user?.roleCode === 'department_head';
   // En revanche l'annulation d'envoi s'arrête au démarrage : un planning en
   // cours ne peut plus revenir en brouillon.
   const canCancelSubmission = schedule?.status === 'submitted' && user?.roleCode === 'department_head';
@@ -975,6 +1053,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
         id: `row-${personnelId}`, userId: personnelId,
         lastName: m.last_name || m.lastName || '', firstName: m.first_name || m.firstName || '',
         roleName: m.role_name || m.roleName || '', phone: m.phone || '', matricule: m.matricule || '',
+        periods: normalizeRowPeriods(m, dateKey(schedule.start_date), dateKey(schedule.end_date)),
         periodStart: dateKey(m.periodStart || m.period_start) || dateKey(schedule.start_date),
         periodEnd: dateKey(m.periodEnd || m.period_end) || dateKey(schedule.end_date),
         shiftStart: m.shiftStart || '07:00', shiftEnd: m.shiftEnd || '07:00',
@@ -999,6 +1078,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
   const emptyRow = (idx = Date.now()) => ({
     id: `new-${idx}`, userId: null,
     lastName: '', firstName: '', roleName: '', phone: '', matricule: '',
+    periods: [{ startDate: dateKey(schedule?.start_date), endDate: dateKey(schedule?.end_date) }],
     periodStart: dateKey(schedule?.start_date), periodEnd: dateKey(schedule?.end_date),
     shiftStart: '07:00', shiftEnd: '07:00',
     atHome: false,
@@ -1013,14 +1093,19 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
     { key: 'phone',      label: 'Tél',            w: 100 },
     { key: 'matricule',  label: 'Matricule',      w: 90  },
     { key: 'roleName',   label: 'Fonction',       w: 135 },
-    { key: 'periodStart', label: 'Période - début', w: 118, type: 'date' },
-    { key: 'periodEnd',   label: 'Période - fin',   w: 118, type: 'date' },
+    { key: 'periods',     label: 'Périodes',        w: 230, type: 'periods' },
     { key: 'shiftStart',  label: 'Durée - début', w: 105, type: 'time' },
     { key: 'shiftEnd',    label: 'Durée - fin',    w: 105, type: 'time' },
     // Nature de la garde : décochée par défaut ⇒ garde à l'hôpital, en présence.
     { key: 'atHome',      label: 'Garde à domicile', w: 112, type: 'bool' },
   ];
-  const visibleFixedCols = fixedCols.filter(c => !hiddenCols.has(c.key));
+  const specialFixedCols = [
+    ...fixedCols.slice(0, 5),
+    { key: 'specialDates', label: 'Jours / périodes autorisés', w: 190, type: 'special-dates' },
+    ...fixedCols.filter(c => ['shiftStart', 'shiftEnd', 'atHome'].includes(c.key)),
+  ];
+  const activeFixedCols = isWeekendHolidaySchedule ? specialFixedCols : fixedCols;
+  const visibleFixedCols = activeFixedCols.filter(c => !hiddenCols.has(c.key));
   const visibleCols = visibleFixedCols; // backward compat alias
   const roles = [...new Set(rows.map(r => r.roleName).filter(Boolean))];
 
@@ -1039,26 +1124,38 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
   }, [rows]);
 
   const periodErrors = useMemo(() => {
-    const roster = rows.filter(r => r.userId);
+    const isHeadEditingPublished = user?.roleCode === 'department_head'
+      && ['submitted', 'active'].includes(schedule?.status);
+    const roster = rows.filter(r => r.userId && !(isHeadEditingPublished && r.isProposedNewRow));
     if (!roster.length || !schedule) return [];
     const start = dateKey(schedule.start_date);
     const end = dateKey(schedule.end_date);
     const errors = [];
     roster.forEach(r => {
       const name = `${r.lastName} ${r.firstName}`.trim() || 'Personnel sélectionné';
-      const pStart = dateKey(r.periodStart), pEnd = dateKey(r.periodEnd);
-      if (!pStart) errors.push(`${name} : date de début requise.`);
-      else if (pStart < start) errors.push(`${name} : la date de début ne peut pas être avant le ${start}.`);
-      else if (pStart > end) errors.push(`${name} : la date de début ne peut pas être après le ${end}.`);
-      if (!pEnd) errors.push(`${name} : date de fin requise.`);
-      else if (pEnd > end) errors.push(`${name} : la date de fin ne peut pas dépasser le ${end}.`);
-      else if (pEnd < start) errors.push(`${name} : la date de fin ne peut pas être avant le ${start}.`);
-      if (pStart && pEnd && pStart > pEnd) errors.push(`${name} : la date de début doit être antérieure ou égale à la date de fin.`);
+      if (isWeekendHolidaySchedule) {
+        const selected = Object.entries(r.shifts || {}).filter(([, code]) => code && code !== 'R').map(([date]) => dateKey(date));
+        if (!selected.length) errors.push(`${name} : sélectionnez au moins un week-end ou jour férié.`);
+        const invalid = selected.find(date => !days.some(day => dateKey(day) === date));
+        if (invalid) errors.push(`${name} : la date ${invalid} n'est pas un week-end ou un jour férié autorisé.`);
+        return;
+      }
+      const periods = normalizeRowPeriods(r, start, end);
+      if (!periods.length) errors.push(`${name} : ajoutez au moins une période.`);
+      periods.forEach((period, index) => {
+        const label = periods.length > 1 ? `période ${index + 1}` : 'période';
+        if (!period.startDate || !period.endDate) errors.push(`${name} : les deux dates de la ${label} sont obligatoires.`);
+        else if (period.startDate < start || period.endDate > end) errors.push(`${name} : la ${label} doit rester entre le ${start} et le ${end}.`);
+        else if (period.startDate > period.endDate) errors.push(`${name} : le début de la ${label} doit précéder sa fin.`);
+        if (index > 0 && period.startDate <= periods[index - 1].endDate) errors.push(`${name} : les périodes ${index} et ${index + 1} se chevauchent.`);
+      });
     });
-    if (!roster.some(r => dateKey(r.periodStart) === start)) errors.push(`Couverture manquante : au moins un personnel doit commencer le ${start}.`);
-    if (!roster.some(r => dateKey(r.periodEnd) === end)) errors.push(`Couverture manquante : au moins un personnel doit finir le ${end}.`);
+    if (!isWeekendHolidaySchedule) {
+      if (!roster.some(r => normalizeRowPeriods(r, start, end).some(period => period.startDate === start))) errors.push(`Couverture manquante : au moins un personnel doit commencer le ${start}.`);
+      if (!roster.some(r => normalizeRowPeriods(r, start, end).some(period => period.endDate === end))) errors.push(`Couverture manquante : au moins un personnel doit finir le ${end}.`);
+    }
     return errors;
-  }, [rows, schedule]);
+  }, [rows, schedule, user?.roleCode, isWeekendHolidaySchedule, days]);
 
   const dirty = useCallback(() => { saveVersion.current += 1; setIsDirty(true); }, []);
 
@@ -1083,12 +1180,13 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
     dirty();
   };
 
-  const cycleShift = (rowId, dateStr) => {
+  const cycleShift = (rowId, dateStr, forcedCode) => {
     setRows(prev => prev.map(r => {
       if (r.id !== rowId) return r;
+      if (!isWeekendHolidaySchedule && !dateInRowPeriods(dateStr, r, dateKey(schedule?.start_date), dateKey(schedule?.end_date))) return r;
       const cur = r.shifts[dateStr];
       const idx = cur ? SHIFT_CODES.indexOf(cur) : -1;
-      const next = SHIFT_CODES[(idx + 1) % (SHIFT_CODES.length + 1)];
+      const next = forcedCode ?? SHIFT_CODES[(idx + 1) % (SHIFT_CODES.length + 1)];
       const shifts = { ...r.shifts };
       if (!next || idx === SHIFT_CODES.length - 1) delete shifts[dateStr];
       else shifts[dateStr] = next;
@@ -1111,7 +1209,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
 
   const duplicateRow = idx => {
     const src = rows[idx];
-    const copy = { ...src, id: `new-${Date.now()}`, isNew: true, shifts: { ...src.shifts } };
+    const copy = { ...src, id: `new-${Date.now()}`, isNew: true, periods: normalizeRowPeriods(src).map(period => ({ ...period })), shifts: { ...src.shifts } };
     setRows(prev => { const arr = [...prev]; arr.splice(idx + 1, 0, copy); return arr; });
     dirty();
   };
@@ -1211,10 +1309,16 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
   // ── Save / Submit ──
   const saveDraft = async (silent = false) => {
     if (periodErrors.length) {
-      toast.error(`Brouillon non enregistré : ${periodErrors[0]}`);
+      toast.error(`Modification non enregistrée : ${periodErrors[0]}`);
       return;
     }
     const versionAtStart = saveVersion.current;
+    // Les nouvelles lignes jaunes appartiennent encore à une proposition en
+    // attente. Une sauvegarde directe du chef ne doit pas les accepter en bloc :
+    // elles passent par les boutons d'acceptation/refus des propositions.
+    const rowsToSave = canDirectEdit && ['submitted', 'active'].includes(schedule?.status)
+      ? rows.filter(row => !row.isProposedNewRow)
+      : rows;
     setSaving(true);
     try {
       if (canProposeChanges) {
@@ -1223,18 +1327,19 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
         if (!silent) toast.success('Proposition envoyée au chef de service');
         return;
       }
-      const res = await scheduleBuilderAPI.saveDraft(scheduleId, { rows, customCols, week_organization: weekOrganization });
+      const res = await scheduleBuilderAPI.saveDraft(scheduleId, { rows: rowsToSave, customCols, week_organization: weekOrganization });
       // Une modification intervenue pendant la requête reste marquée à sauvegarder.
       if (saveVersion.current === versionAtStart) setIsDirty(false);
       qc.invalidateQueries({ queryKey: ['schedule-detail', scheduleId] });
       qc.invalidateQueries({ queryKey: ['staff-loans'] });
       if (!silent) {
         const waiting = res?.data?.data?.pendingExternal?.length || 0;
-        if (waiting) toast.success(`Brouillon enregistré — ${waiting} agent(s) externe(s) en attente de l'accord de leur chef`);
-        else toast.success('Brouillon enregistré');
+        const savedLabel = schedule?.status === 'draft' ? 'Brouillon enregistré' : 'Planning mis à jour';
+        if (waiting) toast.success(`${savedLabel} — ${waiting} agent(s) externe(s) en attente de l'accord de leur chef`);
+        else toast.success(savedLabel);
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Impossible d\'enregistrer le brouillon. Vérifiez la connexion au serveur.');
+      toast.error(err.response?.data?.message || 'Impossible d\'enregistrer les modifications. Vérifiez la connexion au serveur.');
     } finally { setSaving(false); }
   };
 
@@ -1285,19 +1390,8 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
   if (!schedule) return <div style={{ textAlign: 'center', padding: 40 }}>Planning introuvable</div>;
 
   const statusMeta = STATUS_META[schedule.status] || STATUS_META.draft;
-  const periodPickerRow = periodPicker ? rows.find(row => row.id === periodPicker.rowId) : null;
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      {periodPicker && periodPickerRow && (
-        <PeriodCalendar
-          value={periodPickerRow[periodPicker.key] || ''}
-          min={dateKey(schedule.start_date)} max={dateKey(schedule.end_date)} anchor={periodPicker.anchor}
-          onSelect={(date) => updateRow(periodPicker.rowId, { [periodPicker.key]: date })}
-          onClose={() => setPeriodPicker(null)}
-        />
-      )}
-
       {/* ══ TOOLBAR ══════════════════════════════════════════════════════ */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
@@ -1441,7 +1535,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
       {showColPanel && (
         <div style={{ display: 'flex', gap: 8, padding: '8px 14px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Colonnes :</span>
-          {fixedCols.map(c => {
+          {activeFixedCols.map(c => {
             const vis = !hiddenCols.has(c.key);
             return (
               <button key={c.key} onClick={() => {
@@ -1725,7 +1819,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
       </div>
       <div style={{ display: 'flex', gap: 6, padding: '8px 14px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
         <button type="button" onClick={() => setViewMode('table')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border-subtle)', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: viewMode === 'table' ? 'var(--color-primary)' : 'var(--bg-card)', color: viewMode === 'table' ? '#fff' : 'var(--text-secondary)' }}>📊 Tableur</button>
-        <button type="button" onClick={() => setViewMode('calendar')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border-subtle)', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: viewMode === 'calendar' ? 'var(--color-primary)' : 'var(--bg-card)', color: viewMode === 'calendar' ? '#fff' : 'var(--text-secondary)' }}>📈 Calendrier synthétique</button>
+        {!isWeekendHolidaySchedule && <button type="button" onClick={() => setViewMode('calendar')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border-subtle)', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: viewMode === 'calendar' ? 'var(--color-primary)' : 'var(--bg-card)', color: viewMode === 'calendar' ? '#fff' : 'var(--text-secondary)' }}>📈 Calendrier synthétique</button>}
         <button type="button" onClick={() => setViewMode('detailed')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border-subtle)', cursor: 'pointer', fontSize: 11, fontWeight: 700, background: viewMode === 'detailed' ? 'var(--color-primary)' : 'var(--bg-card)', color: viewMode === 'detailed' ? '#fff' : 'var(--text-secondary)' }}>📅 Calendrier détaillé (par jour)</button>
       </div>
 
@@ -1736,7 +1830,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
       </div>
 
       {viewMode === 'calendar' && <PeriodTimeline rows={filteredRows} start={schedule.start_date} end={schedule.end_date} />}
-      {viewMode === 'detailed' && <DetailedCalendar rows={filteredRows} days={days} start={schedule.start_date} end={schedule.end_date} holidays={publicHolidays} weekOrganization={weekOrganization} />}
+      {viewMode === 'detailed' && <DetailedCalendar rows={filteredRows} days={days} start={schedule.start_date} end={schedule.end_date} holidays={publicHolidays} weekOrganization={weekOrganization} isSpecialSchedule={isWeekendHolidaySchedule} />}
 
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0, display: viewMode === 'table' ? 'block' : 'none' }}>
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
@@ -1895,13 +1989,13 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
                       ? `⚠️ Proposition (${topProp.proposerName} - ${topProp.roleTitle}) :\nActuel : ${topProp.originalVal}\nProposé : ${topProp.proposedVal}`
                       : undefined;
 
-                    if (col.type === 'date') {
-                      const isOpen = periodPicker?.rowId === row.id && periodPicker?.key === col.key;
-                      const displayVal = hasProps ? (isConflict ? cellProps.map(p => p.proposedVal).join(' / ') : topProp.proposedVal) : val;
+                    if (col.type === 'periods') {
+                      const currentPeriods = normalizeRowPeriods(row, dateKey(schedule.start_date), dateKey(schedule.end_date));
+                      const displayVal = hasProps ? (isConflict ? cellProps.map(p => p.proposedVal).join(' / ') : topProp.proposedVal) : periodsLabel(currentPeriods, true);
                       return (
                         <td key={col.key} style={{ ...tdBase, background: cellBg, border: cellBorder }}>
                           <button type="button"
-                            onClick={(event) => {
+                            onClick={() => {
                               if (hasProps) {
                                 setCellModalInfo({
                                   rowId: row.id,
@@ -1913,7 +2007,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
                                   isShift: false
                                 });
                               } else {
-                                setPeriodPicker(isOpen ? null : { rowId: row.id, key: col.key, anchor: event.currentTarget.getBoundingClientRect() });
+                                setPeriodPicker({ rowId: row.id });
                               }
                             }}
                             title={tooltipTitle}
@@ -1924,10 +2018,19 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
                               color: isConflict ? '#581C87' : hasProps ? pal.textDark : val ? 'var(--text-primary)' : 'var(--text-muted)',
                               fontWeight: hasProps ? 800 : 500
                             }}>
-                            {displayVal || 'Choisir une date'} {isConflict ? '⚡' : hasProps ? pal.dot : '📅'}
+                            {displayVal || 'Choisir les périodes'} {isConflict ? '⚡' : hasProps ? pal.dot : '📅'}
                           </button>
                         </td>
                       );
+                    }
+                    if (col.type === 'special-dates') {
+                      const selectedDates = Object.entries(row.shifts || {}).filter(([, code]) => code && code !== 'R').map(([date]) => dateKey(date));
+                      const label = selectedDates.length === 0 ? 'Choisir les jours' : `${selectedDates.length} jour(s) sélectionné(s)`;
+                      return <td key={col.key} style={{ ...tdBase, background: cellBg, border: cellBorder }}>
+                        <button type="button" onClick={() => setSpecialDatesPicker({ rowId: row.id })} title="Sélectionner un ou plusieurs week-ends / jours fériés" style={{ width: '100%', padding: '6px 7px', borderRadius: 6, border: hasProps ? `1px solid ${pal.borderDark}` : '1px solid #F59E0B', background: hasProps ? pal.bgDark : '#FFFBEB', color: hasProps ? pal.textDark : '#92400E', cursor: 'pointer', fontSize: 10, fontWeight: 800 }}>
+                          📅 {label}
+                        </button>
+                      </td>;
                     }
                     if (col.type === 'time') {
                       const displayTime = hasProps ? (isConflict ? topProp.proposedVal : topProp.proposedVal) : (val || '07:00');
@@ -2086,14 +2189,16 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
 
                   {/* Day cells (masques dans la vue compacte) */}
                   {showDailyGrid && days.map(d => {
-                    const dateStr = d.toISOString().split('T')[0];
+                    const dateStr = dateKey(d);
                     const code = row.shifts[dateStr];
                     const propShiftStatus = getProposedShiftStatus(row, dateStr);
+                    const inPeriod = isWeekendHolidaySchedule || dateInRowPeriods(dateStr, row, dateKey(schedule.start_date), dateKey(schedule.end_date));
                     return (
                       <td key={dateStr} style={{
                         ...tdBase, padding: '4px 3px', textAlign: 'center',
                         borderLeft: isWeekend(d) ? '1px solid rgba(99,102,241,.2)' : '1px solid var(--border-subtle)',
-                        background: propShiftStatus?.isProposed ? activePalette.bgDark : isWeekend(d) && !code ? 'rgba(99,102,241,.04)' : undefined,
+                        background: !inPeriod ? 'rgba(148,163,184,.10)' : propShiftStatus?.isProposed ? activePalette.bgDark : isWeekend(d) && !code ? 'rgba(99,102,241,.04)' : undefined,
+                        opacity: inPeriod ? 1 : .38,
                       }}>
                         <ShiftCell
                           code={code}
@@ -2101,7 +2206,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
                           proposedCode={propShiftStatus?.proposedCode}
                           originalCode={propShiftStatus?.originalCode}
                           proposerName={propShiftStatus?.proposerName}
-                          onClick={() => cycleShift(row.id, dateStr)}
+                          onClick={() => { if (inPeriod) cycleShift(row.id, dateStr); }}
                         />
                       </td>
                     );
@@ -2161,9 +2266,9 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
             : <span style={{ color: '#10B981', fontWeight: 700 }}>✓ Tout est sauvegardé</span>}
         </div>
 
-        <button onClick={saveDraft} disabled={!isDirty || saving}
+        <button onClick={() => saveDraft(false)} disabled={(!canDirectEdit && !canProposeChanges) || !isDirty || saving}
           style={{ ...btnGhost, opacity: isDirty ? 1 : 0.5, gap: 6, display: 'flex', alignItems: 'center', padding: '8px 16px' }}>
-          <IcoSave /> {saving ? 'Sauvegarde...' : canProposeChanges ? 'Envoyer la proposition' : 'Enregistrer brouillon'}
+          <IcoSave /> {saving ? 'Sauvegarde...' : canProposeChanges ? 'Envoyer la proposition' : schedule.status === 'draft' ? 'Enregistrer brouillon' : 'Enregistrer les modifications'}
         </button>
 
         {schedule.status === 'draft' && <button onClick={confirmSubmit} disabled={submitting}
@@ -2175,7 +2280,7 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
           }}>
           <IcoSend /> {submitting ? 'Envoi...' : 'Confirmer — Envoyer au surveillant'}
         </button>}
-        {canCancelSubmission && <button onClick={onManageProposals} style={{ ...btnGhost, color: 'var(--color-primary)', padding: '8px 14px' }}>Gérer les propositions</button>}
+        {canManageProposals && <button onClick={onManageProposals} style={{ ...btnGhost, color: 'var(--color-primary)', padding: '8px 14px' }}>Gérer les propositions</button>}
         {canCancelSubmission && <button onClick={cancelSubmission} style={{ ...btnGhost, color: '#DC2626', borderColor: '#FCA5A5', padding: '8px 14px' }}>Annuler l’envoi</button>}
       </div>
 
@@ -2204,18 +2309,22 @@ export default function SmartSpreadsheet({ scheduleId, departmentId, onBack, onM
 
       {/* ══ PERIOD DATE PICKER CALENDAR ════════════════════════════════ */}
       {periodPicker && (
-        <PeriodCalendar
-          value={(rows.find(r => r.id === periodPicker.rowId) || {})[periodPicker.key]}
+        <MultiPeriodPicker
+          row={rows.find(r => r.id === periodPicker.rowId)}
           min={dateKey(schedule?.start_date)}
           max={dateKey(schedule?.end_date)}
-          anchor={periodPicker.anchor}
-          isSpecialSchedule={isWeekendHolidaySchedule}
-          holidays={publicHolidays}
-          onSelect={(newDate) => {
-            updateRow(periodPicker.rowId, { [periodPicker.key]: newDate });
-            setPeriodPicker(null);
-          }}
+          onChange={(patch) => updateRow(periodPicker.rowId, patch)}
           onClose={() => setPeriodPicker(null)}
+        />
+      )}
+
+      {specialDatesPicker && (
+        <SpecialDatesPicker
+          row={rows.find(r => r.id === specialDatesPicker.rowId)}
+          allowedDays={days}
+          holidays={publicHolidays}
+          onChange={shifts => updateRow(specialDatesPicker.rowId, { shifts })}
+          onClose={() => setSpecialDatesPicker(null)}
         />
       )}
 

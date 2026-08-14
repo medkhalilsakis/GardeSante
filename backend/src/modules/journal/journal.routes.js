@@ -7,12 +7,14 @@ const {
   listAlerts,
   updateAlert,
   getServiceOverview,
+  listCallRoster,
 } = require('./journal.controller');
 
 router.use(authenticate);
 
 // Vue d'ensemble du service (tableau de bord rapide)
 router.get('/overview', getServiceOverview);
+router.get('/calls', listCallRoster);
 
 // Alertes — déclarées avant '/' pour ne pas être absorbées par le journal
 router.get('/alerts', listAlerts);

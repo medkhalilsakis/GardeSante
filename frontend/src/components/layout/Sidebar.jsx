@@ -35,6 +35,7 @@ const Icon = ({ name, size = 20 }) => {
     appel:       <><path d="M9 2h6a1 1 0 011 1v1H8V3a1 1 0 011-1z"/><path d="M16 4h1a2 2 0 012 2v13a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2h1"/><polyline points="9,13 11,15 15,11"/></>,
     // Notes et circulaires (point 7) : porte-voix.
     notes:       <><path d="M3 11l18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 11-5.8-1.6"/></>,
+    incidents:   <><path d="M10.3 2.9L1.8 17a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 2.9a2.5 2.5 0 00-4.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -88,13 +89,13 @@ export default function Sidebar({ unreadCount = 0 }) {
       { to: '/schedules',    icon: 'schedules',    label: t('nav.schedules'), show: canManageSchedules && !hasServiceSpace },
       { to: '/shifts',       icon: 'shifts',       label: t('nav.shifts') },
       { to: '/absences',     icon: 'absences',     label: t('nav.absences') },
-      { to: '/replacements', icon: 'replacements', label: t('nav.replacements') },
     ]},
     // Un écran par métier : le chef garde le tableur, le surveillant reçoit le
     // suivi des gardes courantes, le surveillant général la supervision hôpital.
     { key: 'chef', label: 'Mon Service', show: isChef, items: [
       { to: '/chef-de-service',          icon: 'planning',  label: '📋 Planning des Gardes' },
       { to: '/appel-du-jour',            icon: 'appel',     label: '📝 Appel du jour' },
+      { to: '/incidents',                 icon: 'incidents', label: 'Alertes et incidents' },
       // Consultation de tout l'effectif du service (point 5) — lecture seule.
       { to: '/portfolio',                icon: 'personnel', label: '👥 Portfolio du service' },
       { to: '/staff-loans',              icon: 'personnel', label: '🤝 Prêts de personnel' },
@@ -102,12 +103,14 @@ export default function Sidebar({ unreadCount = 0 }) {
     { key: 'surveillance', label: 'Mon Service', show: isServiceSupervisor, items: [
       { to: '/surveillant',              icon: 'planning',  label: '🩺 Surveillance du Service' },
       { to: '/appel-du-jour',            icon: 'appel',     label: '📝 Appel du jour' },
+      { to: '/incidents',                 icon: 'incidents', label: 'Alertes et incidents' },
       { to: '/planning-a-consulter',     icon: 'review',    label: '📅 Planning à Consulter' },
     ]},
     { key: 'supervision', label: 'Supervision', show: isGeneralSupervisor, items: [
       { to: '/supervision',              icon: 'dashboard', label: '🏥 Supervision Générale' },
       { to: '/chef-de-service',          icon: 'planning',  label: '📋 Plannings de l\'Hôpital' },
       { to: '/appel-du-jour',            icon: 'appel',     label: '📝 Appel du jour' },
+      { to: '/incidents',                 icon: 'incidents', label: 'Alertes et incidents' },
       { to: '/planning-a-consulter',     icon: 'review',    label: '📅 Planning à Consulter' },
       { to: '/staff-loans',              icon: 'personnel', label: '🤝 Prêts de personnel' },
       { to: '/surveillant',              icon: 'shifts',    label: '🩺 Suivi des Gardes' },

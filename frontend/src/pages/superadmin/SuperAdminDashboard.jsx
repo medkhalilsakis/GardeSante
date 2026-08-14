@@ -707,30 +707,30 @@ export default function SuperAdminDashboard() {
   });
 
   // ── Mutations ─────────────────────────────────────────────────
-  const mut = (fn, keys, msg) => useMutation({
+  const useAppMutation = (fn, keys, msg) => useMutation({
     mutationFn: fn,
     onSuccess: r => { toast.success(r.data.message || msg); setModal(null); setConfirm(null); inv(...(Array.isArray(keys) ? keys : [keys])); },
     onError: e => toast.error(e.response?.data?.message || 'Erreur'),
   });
 
-  const createEst         = mut(d => establishmentsAPI.create(d),               ['establishments'], 'Établissement créé');
-  const updateEst         = mut(({ id, ...d }) => establishmentsAPI.update(id, d), ['establishments'], 'Mis à jour');
-  const deactivateEst     = mut(id => adminAPI.deactivateEst(id),               ['establishments', 'admin-stats'], 'Établissement désactivé');
-  const activateEst       = mut(({ id, ...d }) => adminAPI.activateEst(id, d),  ['establishments', 'admin-stats', 'director'], 'Établissement réactivé');
-  const createDir         = mut(d => usersAPI.create(d),                        ['establishments', 'director'], 'Directeur créé');
-  const updateDir         = mut(({ id, ...d }) => establishmentsAPI.updateDirector(id, d), ['director', 'establishments'], 'Directeur mis à jour');
-  const toggleDirStatus   = mut(id => adminAPI.toggleDirectorStatus(id),        ['director', 'establishments'], 'Statut mis à jour');
-  const resetDirPwd       = mut(({ id, ...d }) => adminAPI.resetDirectorPwd(id, d), ['director'], 'Mot de passe réinitialisé');
-  const removeStaff       = mut(id => establishmentsAPI.removePersonnel(id),    ['personnel'], 'Compte désactivé');
-  const updateStaff       = mut(({ id, ...d }) => establishmentsAPI.updatePersonnel(id, d), ['personnel', 'salary'], 'Informations mises à jour');
+  const createEst         = useAppMutation(d => establishmentsAPI.create(d),               ['establishments'], 'Établissement créé');
+  const updateEst         = useAppMutation(({ id, ...d }) => establishmentsAPI.update(id, d), ['establishments'], 'Mis à jour');
+  const deactivateEst     = useAppMutation(id => adminAPI.deactivateEst(id),               ['establishments', 'admin-stats'], 'Établissement désactivé');
+  const activateEst       = useAppMutation(({ id, ...d }) => adminAPI.activateEst(id, d),  ['establishments', 'admin-stats', 'director'], 'Établissement réactivé');
+  const createDir         = useAppMutation(d => usersAPI.create(d),                        ['establishments', 'director'], 'Directeur créé');
+  const updateDir         = useAppMutation(({ id, ...d }) => establishmentsAPI.updateDirector(id, d), ['director', 'establishments'], 'Directeur mis à jour');
+  const toggleDirStatus   = useAppMutation(id => adminAPI.toggleDirectorStatus(id),        ['director', 'establishments'], 'Statut mis à jour');
+  const resetDirPwd       = useAppMutation(({ id, ...d }) => adminAPI.resetDirectorPwd(id, d), ['director'], 'Mot de passe réinitialisé');
+  const removeStaff       = useAppMutation(id => establishmentsAPI.removePersonnel(id),    ['personnel'], 'Compte désactivé');
+  const updateStaff       = useAppMutation(({ id, ...d }) => establishmentsAPI.updatePersonnel(id, d), ['personnel', 'salary'], 'Informations mises à jour');
   // Archivage — blocage total et réversible, distinct de la clôture ci-dessus.
-  const archiveStaff      = mut(({ id, reason }) => userArchiveAPI.archive(id, { reason }), ['personnel', 'establishments'], 'Compte archivé');
-  const unarchiveStaff    = mut(id => userArchiveAPI.unarchive(id),             ['personnel', 'establishments'], 'Compte réactivé');
+  const archiveStaff      = useAppMutation(({ id, reason }) => userArchiveAPI.archive(id, { reason }), ['personnel', 'establishments'], 'Compte archivé');
+  const unarchiveStaff    = useAppMutation(id => userArchiveAPI.unarchive(id),             ['personnel', 'establishments'], 'Compte réactivé');
 
-  const createHoliday     = mut(d => adminAPI.createHoliday(d),                 ['admin-holidays'], 'Jour férié enregistré');
-  const updateHoliday     = mut(({ id, ...d }) => adminAPI.updateHoliday(id, d), ['admin-holidays'], 'Jour férié mis à jour');
-  const deleteHoliday     = mut(id => adminAPI.deleteHoliday(id),               ['admin-holidays'], 'Jour férié supprimé');
-  const seedTunisiaHolidays = mut(year => adminAPI.seedTunisiaHolidays({ year }), ['admin-holidays'], 'Jours fériés tunisiens préchargés !');
+  const createHoliday     = useAppMutation(d => adminAPI.createHoliday(d),                 ['admin-holidays'], 'Jour férié enregistré');
+  const updateHoliday     = useAppMutation(({ id, ...d }) => adminAPI.updateHoliday(id, d), ['admin-holidays'], 'Jour férié mis à jour');
+  const deleteHoliday     = useAppMutation(id => adminAPI.deleteHoliday(id),               ['admin-holidays'], 'Jour férié supprimé');
+  const seedTunisiaHolidays = useAppMutation(year => adminAPI.seedTunisiaHolidays({ year }), ['admin-holidays'], 'Jours fériés tunisiens préchargés !');
 
   // ── Handlers ──────────────────────────────────────────────────
   const goToEst   = useCallback(id => { setSelectedEstId(id); setActiveTab('overview'); }, []);

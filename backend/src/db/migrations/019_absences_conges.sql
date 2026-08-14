@@ -62,7 +62,7 @@ BEGIN
     -- Absences en garde courante (is_leave = false)
     INSERT INTO absence_types (establishment_id, code, name, name_ar, requires_justification, is_paid, is_leave, color, is_active)
     VALUES
-      (est.id, 'absence_injustifiee', 'Absence injustifiée', 'غياب غير مبرر', FALSE, FALSE, FALSE, '#EF4444', TRUE),
+      (est.id, 'absence_injustifiee', 'Absence', 'غياب', FALSE, FALSE, FALSE, '#EF4444', TRUE),
       (est.id, 'retard', 'Retard', 'تأخر', FALSE, FALSE, FALSE, '#F97316', TRUE)
     ON CONFLICT (establishment_id, code) DO NOTHING;
   END LOOP;

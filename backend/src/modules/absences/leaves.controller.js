@@ -4,6 +4,11 @@
  * Le contrôleur absences.controller.js existant n'est pas modifié.
  */
 
+const path = require('path');
+const fs = require('fs').promises;
+const { randomUUID } = require('crypto');
+const multer = require('multer');
+const sharp = require('sharp');
 const { query } = require('../../config/database');
 const { ROLES } = require('../../config/constants');
 const { createNotification } = require('../notifications/notifications.controller');
@@ -11,6 +16,66 @@ const { emitToUser, emitToEstablishment } = require('../../realtime/emit');
 const history = require('../history/history.controller');
 
 const MANAGER_ROLES = [ROLES.DIRECTOR, ROLES.HOSPITAL_ADMIN];
+const UPLOAD_DIR = path.join(__dirname, '../../../uploads/leaves');
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const ALLOWED_ATTACHMENT_MIME = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_ATTACHMENT_SIZE, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_ATTACHMENT_MIME.has(file.mimetype)) {
+      const err = new Error('Format non supporté : PDF, JPEG, PNG, WebP ou GIF uniquement');
+      err.status = 400;
+      return cb(err);
+    }
+    return cb(null, true);
+  },
+});
+
+const uploadLeaveAttachment = (req, res, next) => {
+  upload.single('attachment')(req, res, (err) => {
+    if (!err) return next();
+    err.status = 400;
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      err.message = 'La pièce jointe ne doit pas dépasser 10 Mo';
+    }
+    return next(err);
+  });
+};
+
+const persistLeaveAttachment = async (file) => {
+  if (!file) return null;
+  await fs.mkdir(UPLOAD_DIR, { recursive: true });
+  const token = randomUUID();
+
+  if (file.mimetype === 'application/pdf') {
+    if (file.buffer.subarray(0, 5).toString('ascii') !== '%PDF-') {
+      const err = new Error('Le fichier transmis n’est pas un PDF valide');
+      err.status = 400;
+      throw err;
+    }
+    const filename = `leave_${token}.pdf`;
+    const diskPath = path.join(UPLOAD_DIR, filename);
+    await fs.writeFile(diskPath, file.buffer);
+    return { url: `/uploads/leaves/${filename}`, diskPath };
+  }
+
+  const filename = `leave_${token}.webp`;
+  const diskPath = path.join(UPLOAD_DIR, filename);
+  await sharp(file.buffer, { animated: false })
+    .rotate()
+    .resize(1800, 1800, { fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 84 })
+    .toFile(diskPath);
+  return { url: `/uploads/leaves/${filename}`, diskPath };
+};
 
 /**
  * GET /api/leaves
@@ -19,7 +84,10 @@ const MANAGER_ROLES = [ROLES.DIRECTOR, ROLES.HOSPITAL_ADMIN];
 const listLeaves = async (req, res) => {
   try {
     const { establishmentId, isSuperAdmin } = req.user;
-    const { userId, departmentId, activeOnly, from, to, limit = 100 } = req.query;
+    const {
+      userId, departmentId, absenceTypeId, activeOnly,
+      from, to, search, reason, limit = 100,
+    } = req.query;
 
     const conditions = ["a.kind = 'leave'", "a.status <> 'cancelled'"];
     const params = [];
@@ -30,14 +98,29 @@ const listLeaves = async (req, res) => {
 
     if (userId)       { conditions.push(`a.user_id = $${params.length + 1}`); params.push(userId); }
     if (departmentId) { conditions.push(`a.department_id = $${params.length + 1}`); params.push(departmentId); }
+    if (absenceTypeId) { conditions.push(`a.absence_type_id = $${params.length + 1}`); params.push(absenceTypeId); }
     if (activeOnly === 'true') conditions.push('a.end_date >= CURRENT_DATE');
     if (from) { conditions.push(`a.end_date   >= $${params.length + 1}::date`); params.push(from); }
     if (to)   { conditions.push(`a.start_date <= $${params.length + 1}::date`); params.push(to); }
+    if (search) {
+      conditions.push(`(
+        (u.first_name || ' ' || u.last_name) ILIKE $${params.length + 1}
+        OR u.matricule ILIKE $${params.length + 1}
+        OR d.name ILIKE $${params.length + 1}
+        OR at.name ILIKE $${params.length + 1}
+        OR COALESCE(a.reason, '') ILIKE $${params.length + 1}
+      )`);
+      params.push(`%${String(search).trim()}%`);
+    }
+    if (reason) {
+      conditions.push(`COALESCE(a.reason, '') ILIKE $${params.length + 1}`);
+      params.push(`%${String(reason).trim()}%`);
+    }
 
-    params.push(parseInt(limit));
+    params.push(Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500));
 
     const result = await query(
-      `SELECT a.id, a.user_id, a.reason, a.status, a.created_at,
+      `SELECT a.id, a.user_id, a.reason, a.status, a.justification_url, a.created_at,
               TO_CHAR(a.start_date, 'YYYY-MM-DD') AS start_date,
               TO_CHAR(a.end_date,   'YYYY-MM-DD') AS end_date,
               at.id AS type_id, at.name AS type_name, at.color AS type_color,
@@ -90,6 +173,8 @@ const getLeaveTypes = async (req, res) => {
  * Pose un congé pour un agent de son établissement.
  */
 const createLeave = async (req, res) => {
+  let savedAttachment = null;
+  let leaveInserted = false;
   try {
     const { roleCode, establishmentId, id: actorId, isSuperAdmin } = req.user;
 
@@ -145,7 +230,7 @@ const createLeave = async (req, res) => {
 
     // Le type doit être un congé
     const typeCheck = await query(
-      `SELECT id, name, is_leave FROM absence_types
+      `SELECT id, name, is_leave, requires_justification FROM absence_types
        WHERE id = $1 AND establishment_id = $2 AND is_active = TRUE`,
       [absenceTypeId, agent.establishment_id]
     );
@@ -157,6 +242,12 @@ const createLeave = async (req, res) => {
         success: false,
         message: 'Ce type n\'est pas un congé',
         message_ar: 'هذا النوع ليس إجازة'
+      });
+    }
+    if (typeCheck.rows[0].requires_justification && !req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Ce type de congé exige une pièce jointe (PDF ou image)',
       });
     }
 
@@ -178,17 +269,20 @@ const createLeave = async (req, res) => {
       });
     }
 
+    savedAttachment = await persistLeaveAttachment(req.file);
+
     const inserted = await query(
       `INSERT INTO absences
          (establishment_id, department_id, user_id, absence_type_id,
-          start_date, end_date, reason, declared_by, kind, reported_by_role,
+          start_date, end_date, reason, justification_url, declared_by, kind, reported_by_role,
           status, approved_by, approved_at)
-       VALUES ($1,$2,$3,$4,$5::date,$6::date,$7,$8,'leave',$9,'approved',$8,NOW())
+       VALUES ($1,$2,$3,$4,$5::date,$6::date,$7,$8,$9,'leave',$10,'approved',$9,NOW())
        RETURNING id`,
       [agent.establishment_id, agent.department_id, userId, absenceTypeId,
-       start, end, reason || null, actorId, roleCode]
+       start, end, reason || null, savedAttachment?.url || null, actorId, roleCode]
     );
     const leaveId = inserted.rows[0].id;
+    leaveInserted = true;
 
     // Drapeau rapide sur le profil si le congé est en cours
     await query(
@@ -204,7 +298,7 @@ const createLeave = async (req, res) => {
       description: `Congé ${typeCheck.rows[0].name} posé pour ${agent.first_name} ${agent.last_name} du ${start} au ${end}`,
       entityType: 'absences',
       entityId: leaveId,
-      metadata: { userId, startDate: start, endDate: end },
+      metadata: { userId, startDate: start, endDate: end, hasAttachment: Boolean(savedAttachment) },
       ipAddress: history.getIp(req),
       userAgent: req.headers['user-agent']
     });
@@ -229,7 +323,14 @@ const createLeave = async (req, res) => {
     return res.status(201).json({ success: true, data: { id: leaveId }, message: 'Congé enregistré' });
   } catch (err) {
     console.error('createLeave error:', err);
-    return res.status(500).json({ success: false, message: 'Erreur lors de l\'enregistrement du congé' });
+    if (savedAttachment?.diskPath && !leaveInserted) {
+      await fs.unlink(savedAttachment.diskPath).catch(() => {});
+    }
+    const status = err.status || err.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      message: status < 500 ? err.message : 'Erreur lors de l\'enregistrement du congé',
+    });
   }
 };
 
@@ -330,4 +431,10 @@ const cancelLeave = async (req, res) => {
   }
 };
 
-module.exports = { listLeaves, getLeaveTypes, createLeave, cancelLeave };
+module.exports = {
+  uploadLeaveAttachment,
+  listLeaves,
+  getLeaveTypes,
+  createLeave,
+  cancelLeave,
+};
