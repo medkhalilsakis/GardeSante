@@ -36,6 +36,7 @@ const Icon = ({ name, size = 20 }) => {
     // Notes et circulaires (point 7) : porte-voix.
     notes:       <><path d="M3 11l18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 11-5.8-1.6"/></>,
     incidents:   <><path d="M10.3 2.9L1.8 17a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 2.9a2.5 2.5 0 00-4.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>,
+    map:         <><polygon points="1 6 8 2 16 6 23 2 23 18 16 22 8 18 1 22 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/><circle cx="12" cy="11" r="2"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -53,7 +54,6 @@ export default function Sidebar({ unreadCount = 0 }) {
 
   const hasPermission  = useAuthStore((s) => s.hasPermission);
   const isSuperAdmin   = user?.roleCode === 'super_admin';
-  const isAdmin        = ['super_admin', 'hospital_admin'].includes(user?.roleCode);
   const isDirector     = user?.roleCode === 'director';
   // Chaque métier a désormais son écran ; `isChef` ne couvre plus que le chef de service.
   const isChef              = user?.roleCode === 'department_head';
@@ -63,7 +63,6 @@ export default function Sidebar({ unreadCount = 0 }) {
   const hasServiceSpace     = isChef || isServiceSupervisor || isGeneralSupervisor;
   const isManagement   = ['super_admin', 'hospital_admin', 'director', 'general_supervisor'].includes(user?.roleCode);
   const canManageSchedules = hasPermission('schedules.read');
-  const canManageUsers     = hasPermission('users.read');
 
   const avatarUrl = user?.avatarUrl
     ? (user.avatarUrl.startsWith('http') ? user.avatarUrl : `${API_BASE}${user.avatarUrl}`)
@@ -72,7 +71,8 @@ export default function Sidebar({ unreadCount = 0 }) {
   // Navigation super admin : uniquement gestion plateforme
   const superAdminNav = [
     { key: 'platform', label: 'Plateforme', items: [
-      { to: '/admin',                      icon: 'dashboard',   label: 'Tableau de bord' },
+      { to: '/admin',                      icon: 'dashboard',   label: 'Tableau de bord', end: true },
+      { to: '/admin/carte',                icon: 'map',         label: 'Carte des hôpitaux' },
       { to: '/admin/profile-requests',     icon: 'review',      label: 'Demandes profil' },
     ]},
     { key: 'personal', label: 'Mon espace', items: [
@@ -169,7 +169,7 @@ export default function Sidebar({ unreadCount = 0 }) {
             <div key={section.key}>
               {!sidebarCollapsed && <p className="nav-section-title">{section.label}</p>}
               {visible.map((item) => (
-                <NavLink key={item.to} to={item.to}
+                <NavLink key={item.to} to={item.to} end={item.end}
                   className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
                   title={sidebarCollapsed ? item.label : ''}>
                   <span className="nav-icon"><Icon name={item.icon} size={18} /></span>

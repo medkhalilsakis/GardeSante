@@ -10,6 +10,7 @@ const LoginPage                = lazy(() => import('./pages/auth/LoginPage'));
 const DashboardPage            = lazy(() => import('./pages/dashboard/DashboardPage'));
 const DirectorDashboard        = lazy(() => import('./pages/director/DirectorDashboard'));
 const SuperAdminDashboard      = lazy(() => import('./pages/superadmin/SuperAdminDashboard'));
+const SuperAdminMapPage        = lazy(() => import('./pages/superadmin/SuperAdminMapPage'));
 const SchedulesPage            = lazy(() => import('./pages/schedules/SchedulesPage'));
 const ScheduleDetailPage       = lazy(() => import('./pages/schedules/ScheduleDetailPage'));
 const ShiftsPage               = lazy(() => import('./pages/shifts/ShiftsPage'));
@@ -60,10 +61,10 @@ const PageLoader = () => (
 );
 
 // Route protégée
-function ProtectedRoute({ children, permission }) {
-  const { isAuthenticated, hasPermission } = useAuthStore();
+function ProtectedRoute({ children, permission, roles }) {
+  const { isAuthenticated, hasPermission, user } = useAuthStore();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (permission && !hasPermission(permission)) {
+  if ((permission && !hasPermission(permission)) || (roles && !roles.includes(user?.roleCode))) {
     return (
       <div style={{
         height: '100%', display: 'flex', flexDirection: 'column',
@@ -115,6 +116,13 @@ export default function App() {
               <Route path="/admin" element={
                 <ProtectedRoute>
                   <SuperAdminDashboard />
+                </ProtectedRoute>
+              } />
+
+              {/* Super Admin — consultation cartographique des établissements */}
+              <Route path="/admin/carte" element={
+                <ProtectedRoute roles={['super_admin']}>
+                  <SuperAdminMapPage />
                 </ProtectedRoute>
               } />
 

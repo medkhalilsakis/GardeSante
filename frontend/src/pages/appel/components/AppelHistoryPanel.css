@@ -1,0 +1,1425 @@
+.appel-history-panel {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+  color: var(--text-primary);
+}
+
+.appel-history-visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.appel-history-command {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-inline-start: 3px solid var(--appel-violet);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.appel-history-command-header {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 11px;
+  padding: 14px 15px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.appel-history-command-icon,
+.appel-history-group-icon {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  flex: 0 0 35px;
+  place-items: center;
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  border-radius: 8px;
+  background: var(--appel-violet-soft);
+  color: var(--appel-violet);
+}
+
+.appel-history-command-header > div {
+  min-width: 0;
+}
+
+.appel-history-command-header > div > span,
+.appel-history-command-header h3,
+.appel-history-command-header p {
+  display: block;
+}
+
+.appel-history-command-header > div > span {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.appel-history-command-header h3 {
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.appel-history-command-header p {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.appel-history-range {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.appel-history-period-row,
+.appel-history-group-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 105px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.appel-history-group-row {
+  border-bottom: 0;
+}
+
+.appel-history-control-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.appel-history-control-label svg {
+  color: var(--appel-violet);
+}
+
+.appel-history-presets,
+.appel-history-segmented {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.appel-history-preset,
+.appel-history-segmented button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 750;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+
+.appel-history-preset:hover,
+.appel-history-segmented button:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.appel-history-preset.is-active,
+.appel-history-segmented button.is-active {
+  border-color: var(--appel-violet);
+  background: var(--appel-violet-soft);
+  color: var(--appel-violet);
+  box-shadow: var(--shadow-sm);
+}
+
+.appel-history-preset:active,
+.appel-history-segmented button:active {
+  transform: translateY(1px);
+}
+
+.appel-history-custom-range {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.appel-history-custom-range > svg {
+  color: var(--text-muted);
+}
+
+.appel-history-custom-range label {
+  display: grid;
+  gap: 3px;
+}
+
+.appel-history-custom-range label > span {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.appel-history-custom-range input,
+.appel-history-field input,
+.appel-history-field select {
+  min-height: 38px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+.appel-history-custom-range input {
+  width: 132px;
+  padding: 0 8px;
+}
+
+.appel-history-custom-range input:focus,
+.appel-history-field input:focus,
+.appel-history-field select:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-10);
+}
+
+.appel-history-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.4fr) minmax(170px, 1fr) minmax(160px, 0.8fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.appel-history-field {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.appel-history-field > svg {
+  position: absolute;
+  inset-inline-start: 11px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.appel-history-field input,
+.appel-history-field select {
+  width: 100%;
+  padding: 0 10px 0 34px;
+}
+
+[dir='rtl'] .appel-history-field input,
+[dir='rtl'] .appel-history-field select {
+  padding: 0 34px 0 10px;
+}
+
+.appel-history-field input::placeholder {
+  color: var(--text-muted);
+}
+
+.appel-history-field select {
+  cursor: pointer;
+  appearance: auto;
+}
+
+.appel-history-reset,
+.appel-history-state button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.appel-history-reset:hover,
+.appel-history-state button:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.appel-history-scope {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-history-segmented {
+  padding: 3px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+}
+
+.appel-history-segmented button {
+  min-height: 30px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.appel-history-summary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(4, minmax(110px, 1fr));
+  align-items: stretch;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.appel-history-total,
+.appel-history-count {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.appel-history-total {
+  color: var(--appel-blue);
+}
+
+.appel-history-total > div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.appel-history-total strong {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.appel-history-total span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-history-count {
+  border-inline-start: 1px solid var(--border-subtle);
+  color: var(--history-tone);
+}
+
+.appel-history-count.is-success,
+.appel-history-status.is-success { --history-tone: var(--appel-green); --history-tone-soft: var(--appel-green-soft); }
+.appel-history-count.is-warning,
+.appel-history-status.is-warning { --history-tone: var(--appel-amber); --history-tone-soft: var(--appel-amber-soft); }
+.appel-history-count.is-danger,
+.appel-history-status.is-danger { --history-tone: var(--appel-red); --history-tone-soft: var(--appel-red-soft); }
+.appel-history-count.is-pending,
+.appel-history-status.is-pending { --history-tone: var(--appel-violet); --history-tone-soft: var(--appel-violet-soft); }
+
+.appel-history-count strong {
+  font-size: 15px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.appel-history-count > span {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-history-count.is-compact {
+  min-height: 25px;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--history-tone) 22%, transparent);
+  border-radius: 6px;
+  background: var(--history-tone-soft);
+}
+
+.appel-history-count.is-compact strong {
+  font-size: 11px;
+}
+
+.appel-history-limit-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 15px 13px;
+  padding: 8px 10px;
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  border-inline-start: 3px solid var(--appel-amber);
+  border-radius: 7px;
+  background: var(--appel-amber-soft);
+  color: var(--appel-amber);
+}
+
+.appel-history-limit-alert p {
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.appel-history-groups {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.appel-history-group {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  animation: appel-history-rise 360ms ease both;
+}
+
+.appel-history-group:nth-child(2) { animation-delay: 35ms; }
+.appel-history-group:nth-child(3) { animation-delay: 70ms; }
+.appel-history-group:nth-child(4) { animation-delay: 105ms; }
+
+.appel-history-group-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.appel-history-group-icon {
+  width: 31px;
+  height: 31px;
+  flex-basis: 31px;
+  border-color: rgba(8, 145, 178, 0.2);
+  background: var(--appel-cyan-soft);
+  color: var(--appel-cyan);
+}
+
+.appel-history-group-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.appel-history-group-copy h3 {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.appel-history-group-copy p {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-history-group-counts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.appel-history-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.appel-history-table {
+  width: 100%;
+  min-width: 780px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.appel-history-table th {
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.appel-history-table td {
+  min-width: 0;
+  padding: 10px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+
+.appel-history-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.appel-history-table tbody tr {
+  transition: background var(--transition-fast);
+}
+
+.appel-history-table tbody tr:hover {
+  background: var(--bg-card-hover);
+}
+
+.appel-history-table tbody tr > td:first-child {
+  border-inline-start: 3px solid var(--history-tone);
+}
+
+.appel-history-table tbody tr.is-success { --history-tone: var(--appel-green); }
+.appel-history-table tbody tr.is-warning { --history-tone: var(--appel-amber); }
+.appel-history-table tbody tr.is-danger { --history-tone: var(--appel-red); }
+.appel-history-table tbody tr.is-pending { --history-tone: var(--appel-violet); }
+
+.appel-history-person {
+  display: flex;
+  min-width: 150px;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.appel-history-person > span {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 29px;
+  place-items: center;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 7px;
+  background: var(--appel-blue-soft);
+  color: var(--appel-blue);
+}
+
+.appel-history-person > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.appel-history-person strong {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.appel-history-person small {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.appel-history-status-stack {
+  display: grid;
+  min-width: 160px;
+  gap: 4px;
+}
+
+.appel-history-status-stack > div:first-child {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.appel-history-status {
+  display: inline-flex;
+  min-height: 25px;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--history-tone) 28%, transparent);
+  border-radius: 6px;
+  background: var(--history-tone-soft);
+  color: var(--history-tone);
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.appel-history-duration {
+  display: inline-flex;
+  min-height: 23px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid rgba(217, 119, 6, 0.22);
+  border-radius: 6px;
+  background: var(--appel-amber-soft);
+  color: var(--appel-amber);
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.appel-history-justification {
+  display: inline-flex;
+}
+
+.appel-history-justification [style*='border-radius'] {
+  border-radius: 6px !important;
+}
+
+.appel-history-pending-copy,
+.appel-history-status-stack p {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.appel-history-pending-copy {
+  color: var(--appel-violet);
+  font-weight: 750;
+}
+
+.appel-history-cell-detail,
+.appel-history-timestamp {
+  display: inline-flex;
+  min-width: 100px;
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.appel-history-cell-detail svg,
+.appel-history-timestamp svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--text-muted);
+}
+
+.appel-history-timestamp {
+  min-width: 150px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.appel-history-catchup-actions {
+  display: flex;
+  min-width: 190px;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.appel-history-catchup-actions button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 850;
+  transition: background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.appel-history-catchup-actions button.is-success { --catchup-tone: var(--appel-green); color: var(--catchup-tone); }
+.appel-history-catchup-actions button.is-warning { --catchup-tone: var(--appel-amber); color: var(--catchup-tone); }
+.appel-history-catchup-actions button.is-danger { --catchup-tone: var(--appel-red); color: var(--catchup-tone); }
+
+.appel-history-catchup-actions button:hover:not(:disabled) {
+  background: var(--catchup-tone);
+  color: #fff;
+}
+
+.appel-history-catchup-actions button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.appel-history-loading {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.appel-history-loading span {
+  display: block;
+  min-height: 128px;
+  border: 1px solid var(--border-subtle);
+  border-inline-start: 4px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  animation: appel-history-pulse 1.25s ease-in-out infinite;
+}
+
+.appel-history-loading span:nth-child(2) { animation-delay: 110ms; }
+.appel-history-loading span:nth-child(3) { animation-delay: 220ms; }
+
+.appel-history-state {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 28px 20px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.appel-history-state-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.appel-history-state.is-danger .appel-history-state-icon {
+  background: var(--appel-red-soft);
+  color: var(--appel-red);
+}
+
+.appel-history-state strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.appel-history-state p {
+  max-width: 520px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.appel-history-footnote {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 9px 0 0;
+  border-top: 1px solid var(--border-default);
+  color: var(--text-muted);
+}
+
+.appel-history-footnote svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--color-primary);
+}
+
+.appel-history-footnote p {
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+/* Catch-up dialog */
+.appel-catchup-overlay {
+  padding: 16px;
+  z-index: 1200;
+}
+
+.appel-catchup-modal {
+  width: min(100%, 570px);
+  max-width: 570px !important;
+  max-height: min(92vh, 760px);
+  overflow: auto;
+  border: 1px solid var(--border-default);
+  border-top: 3px solid var(--appel-amber);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-xl);
+  animation: appel-history-dialog-in 220ms ease both;
+}
+
+.appel-catchup-modal.is-danger {
+  border-top-color: var(--appel-red);
+}
+
+.appel-catchup-header {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 15px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.appel-catchup-title-icon,
+.appel-catchup-context-icon {
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+}
+
+.appel-catchup-title-icon {
+  width: 38px;
+  height: 38px;
+  background: var(--appel-amber-soft);
+  color: var(--appel-amber);
+}
+
+.appel-catchup-modal.is-danger .appel-catchup-title-icon {
+  background: var(--appel-red-soft);
+  color: var(--appel-red);
+}
+
+.appel-catchup-header > div:nth-child(2) {
+  min-width: 0;
+}
+
+.appel-catchup-header > div:nth-child(2) > span {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.appel-catchup-header h2 {
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.appel-catchup-header p {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.appel-catchup-close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.appel-catchup-close:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.appel-catchup-close:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.appel-catchup-context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 14px 16px 0;
+}
+
+.appel-catchup-context > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+}
+
+.appel-catchup-context-icon {
+  width: 29px;
+  height: 29px;
+  flex: 0 0 29px;
+  background: var(--appel-blue-soft);
+  color: var(--appel-blue);
+}
+
+.appel-catchup-context > div > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.appel-catchup-context small {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.appel-catchup-context strong {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.appel-catchup-body {
+  display: grid;
+  gap: 15px;
+  padding: 16px;
+}
+
+.appel-catchup-fieldset {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.appel-catchup-field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+}
+
+.appel-catchup-field-label > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.appel-catchup-field-label > span svg {
+  color: var(--appel-violet);
+}
+
+.appel-catchup-field-label small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.appel-catchup-number {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 42px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-input);
+}
+
+.appel-catchup-number:focus-within {
+  border-color: var(--appel-amber);
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.12);
+}
+
+.appel-catchup-number input {
+  width: 82px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.appel-catchup-number span {
+  padding-inline-end: 10px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.appel-catchup-duration-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.appel-catchup-duration-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.appel-catchup-duration-presets button {
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.appel-catchup-duration-presets button:hover,
+.appel-catchup-duration-presets button.is-active {
+  border-color: var(--appel-amber);
+  background: var(--appel-amber-soft);
+  color: var(--appel-amber);
+}
+
+.appel-catchup-fieldset textarea {
+  width: 100%;
+  min-height: 82px;
+  resize: vertical;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.appel-catchup-fieldset textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-10);
+}
+
+.appel-catchup-fieldset textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.appel-catchup-justification [role='radiogroup'] > label {
+  border-radius: 8px !important;
+}
+
+.appel-catchup-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-subtle);
+  border-inline-start: 3px solid var(--appel-cyan);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.appel-catchup-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--appel-cyan);
+}
+
+.appel-catchup-note p {
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.appel-catchup-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.appel-catchup-cancel,
+.appel-catchup-submit {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 850;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.appel-catchup-cancel {
+  border: 1px solid var(--border-default);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.appel-catchup-cancel:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.appel-catchup-submit {
+  border: 1px solid var(--appel-violet);
+  background: var(--appel-violet);
+  color: #fff;
+}
+
+.appel-catchup-submit:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+.appel-catchup-submit:disabled,
+.appel-catchup-cancel:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.appel-catchup-submit .is-spinning {
+  animation: appel-history-spin 750ms linear infinite;
+}
+
+@keyframes appel-history-rise {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes appel-history-dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes appel-history-pulse {
+  0%, 100% { opacity: 0.62; }
+  50% { opacity: 1; }
+}
+
+@keyframes appel-history-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 960px) {
+  .appel-history-filter-grid {
+    grid-template-columns: minmax(200px, 1.4fr) minmax(170px, 1fr);
+  }
+
+  .appel-history-filter-grid .appel-history-field:nth-child(3) {
+    grid-column: 1;
+  }
+
+  .appel-history-filter-grid .appel-history-reset {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .appel-history-summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .appel-history-total {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .appel-history-count:first-of-type {
+    border-inline-start: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .appel-history-command-header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .appel-history-range {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .appel-history-period-row,
+  .appel-history-group-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .appel-history-custom-range {
+    justify-content: flex-start;
+  }
+
+  .appel-history-custom-range input {
+    width: 128px;
+  }
+
+  .appel-history-group-row .appel-history-scope {
+    max-width: 100%;
+  }
+
+  .appel-history-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .appel-history-filter-grid .appel-history-field:nth-child(3),
+  .appel-history-filter-grid .appel-history-reset {
+    grid-column: auto;
+  }
+
+  .appel-history-filter-grid .appel-history-reset {
+    justify-self: start;
+  }
+
+  .appel-history-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .appel-history-total {
+    grid-column: 1 / -1;
+  }
+
+  .appel-history-count:nth-child(4) {
+    border-inline-start: 0;
+  }
+
+  .appel-history-group {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .appel-history-group-header {
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    background: var(--bg-card);
+  }
+
+  .appel-history-group-counts {
+    max-width: 140px;
+  }
+
+  .appel-history-table-wrap {
+    overflow: visible;
+  }
+
+  .appel-history-table {
+    min-width: 0;
+  }
+
+  .appel-history-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  .appel-history-table,
+  .appel-history-table tbody,
+  .appel-history-table tr,
+  .appel-history-table td {
+    display: block;
+  }
+
+  .appel-history-table tbody {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .appel-history-table tbody tr {
+    border: 1px solid var(--border-default);
+    border-inline-start: 3px solid var(--history-tone);
+    border-radius: 8px;
+    background: var(--bg-card);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .appel-history-table tbody tr > td:first-child {
+    border-inline-start: 0;
+  }
+
+  .appel-history-table td {
+    display: grid;
+    grid-template-columns: 125px minmax(0, 1fr);
+    gap: 10px;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .appel-history-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .appel-history-table td::before {
+    color: var(--text-muted);
+    content: attr(data-label);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .appel-history-person,
+  .appel-history-status-stack,
+  .appel-history-cell-detail,
+  .appel-history-timestamp,
+  .appel-history-catchup-actions {
+    min-width: 0;
+  }
+
+  .appel-history-catchup-actions {
+    justify-content: flex-start;
+  }
+
+  .appel-history-state {
+    min-height: 160px;
+  }
+
+  .appel-catchup-context {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .appel-history-command-header,
+  .appel-history-period-row,
+  .appel-history-group-row,
+  .appel-history-filter-grid {
+    padding-inline: 11px;
+  }
+
+  .appel-history-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .appel-history-total {
+    grid-column: 1 / -1;
+  }
+
+  .appel-history-count {
+    padding-inline: 9px;
+  }
+
+  .appel-history-table td {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .appel-history-group-header {
+    align-items: flex-start;
+  }
+
+  .appel-history-group-counts {
+    max-width: 100px;
+  }
+
+  .appel-catchup-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .appel-catchup-modal {
+    width: 100%;
+    max-height: 94vh;
+    border-radius: 8px 8px 0 0;
+  }
+
+  .appel-catchup-footer {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+  }
+
+  .appel-catchup-cancel,
+  .appel-catchup-submit {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appel-history-group,
+  .appel-catchup-modal,
+  .appel-history-loading span {
+    animation: none;
+  }
+
+  .appel-history-panel *,
+  .appel-history-panel *::before,
+  .appel-history-panel *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

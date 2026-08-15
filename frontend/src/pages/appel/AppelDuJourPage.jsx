@@ -1,36 +1,24 @@
-/**
- * Appel du jour (point 6) — déclarer la présence ou l'absence dans une garde du
- * jour courant. Écran dédié, ouvert au chef de service, au surveillant de
- * service, au surveillant général et au directeur.
- *
- * POURQUOI UN ÉCRAN À PART : la demande couvre quatre rôles dont les tableaux de
- * bord n'ont rien en commun. Un onglet dans chacun d'eux aurait signifié quatre
- * modifications d'écrans existants ; une page unique n'en modifie aucun.
- *
- * SOURCE DES GARDES : `GET /api/journal/overview` → `todayGuards[]`, qui lit le
- * tableur (`metadata.spreadsheet.rows`) des plannings à l'état `en_cours`
- * uniquement. C'est exactement le périmètre où le serveur accepte un
- * signalement, donc l'écran ne propose jamais une action qui sera refusée.
- *
- * TROIS ÉTATS DÉCLARABLES, DEUX CHEMINS :
- *   • Présent → `POST /api/journal` (`eventType: 'presence'`), pur journal.
- *   • Absent / Retard → `POST /api/absences-shift`, l'API existante qui crée
- *     l'absence, l'événement de journal, l'alerte de service, la notification à
- *     l'agent et les quatre emits temps réel. On ne réimplémente rien de tout ça.
- *     Le type « Retard » existe en base dans chaque établissement (code
- *     `retard`) et `absences-shift` en déduit lui-même l'événement `late`.
- *
- * L'état déjà déclaré est relu depuis le journal du jour pour ne pas pointer
- * deux fois le même agent.
- *
- * DEUX ONGLETS depuis le point 1 : le pointage du jour (ci-dessous, inchangé) et
- * l'historique des appels (`components/AppelHistoryPanel`). La durée d'un retard
- * est saisie dans la modale de motif et voyage jusqu'au serveur dans
- * `lateMinutes` — c'est la seule donnée qui manquait à la traçabilité.
- */
-
-import React, { useMemo, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Activity,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  ClipboardCheck,
+  Clock3,
+  Filter,
+  History,
+  Radio,
+  RefreshCw,
+  Search,
+  Send,
+  Sparkles,
+  UserX,
+  UsersRound,
+  WifiOff,
+  X,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { journalAPI, absencesShiftAPI, absencesAPI } from '../../api';
 import { useAuthStore } from '../../store';
@@ -38,158 +26,316 @@ import ContextBadge from '../../components/layout/ContextBadge';
 import PlanningStateBadge from '../../components/planning/PlanningStateBadge';
 import JustificationChoice, { JustificationBadge } from '../../components/common/JustificationChoice';
 import AppelHistoryPanel from './components/AppelHistoryPanel';
+import './AppelDuJourPage.css';
 
-/** Rôles autorisés à pointer — miroir exact des gardes serveur (journal + absences-shift). */
 const CALLER_ROLES = ['department_head', 'service_supervisor', 'general_supervisor', 'director'];
+const LIVE_REFRESH_INTERVAL = 15000;
 
-/**
- * Deux onglets (point 1) : le pointage du jour, inchangé, et la consultation de
- * l'historique des appels. Les rôles visés par la demande — chef de service,
- * surveillant de service, surveillant général — sont déjà tous dans
- * `CALLER_ROLES`, donc aucune règle d'accès ne bouge.
- */
 const TABS = [
-  { id: 'pointer', label: "Pointer aujourd'hui" },
-  { id: 'history', label: 'Historique des appels' },
+  { id: 'pointer', label: "Appel d'aujourd'hui", icon: ClipboardCheck },
+  { id: 'history', label: 'Historique', icon: History },
 ];
 
-/** Date du jour en 'YYYY-MM-DD', assemblée depuis les parties locales (jamais toISOString). */
+const handleTabKeyDown = (event, currentId, setTab) => {
+  const currentIndex = TABS.findIndex((item) => item.id === currentId);
+  if (currentIndex < 0) return;
+
+  let nextIndex = currentIndex;
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % TABS.length;
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + TABS.length) % TABS.length;
+  if (event.key === 'Home') nextIndex = 0;
+  if (event.key === 'End') nextIndex = TABS.length - 1;
+  if (nextIndex === currentIndex) return;
+
+  event.preventDefault();
+  const nextId = TABS[nextIndex].id;
+  setTab(nextId);
+  window.requestAnimationFrame(() => document.getElementById(`appel-tab-${nextId}`)?.focus());
+};
+
+const MARKS = {
+  present: { label: 'Présent', color: '#059669', tone: 'success', icon: CheckCircle2 },
+  late: { label: 'Retard', color: '#D97706', tone: 'warning', icon: Clock3 },
+  absent: { label: 'Absent', color: '#DC2626', tone: 'danger', icon: UserX },
+};
+
+const STATUS_FILTERS = [
+  { value: '', label: 'Tous' },
+  { value: 'pending', label: 'À pointer' },
+  { value: 'present', label: 'Présents' },
+  { value: 'late', label: 'Retards' },
+  { value: 'absent', label: 'Absents' },
+];
+
+const SHIFT_COLORS = {
+  J: { color: '#2563EB', soft: '#EFF6FF' },
+  N: { color: '#4F46E5', soft: '#EEF2FF' },
+  S: { color: '#7C3AED', soft: '#F5F3FF' },
+  G: { color: '#DC2626', soft: '#FEF2F2' },
+  R: { color: '#64748B', soft: '#F1F5F9' },
+};
+
 const todayKey = () => {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const values = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Tunis',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date()).filter(({ type }) => type !== 'literal').map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
 };
 
 const LONG_DATE = (iso) => {
-  const d = new Date(`${iso}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const date = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString('fr-FR', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
 };
 
-/** Les trois issues possibles d'un pointage, dans l'ordre d'affichage. */
-const MARKS = {
-  present: { label: 'Présent',  emoji: '✅', color: '#10B981', bg: 'rgba(16, 185, 129, .10)' },
-  late:    { label: 'Retard',   emoji: '⏰', color: '#F59E0B', bg: 'rgba(245, 158, 11, .10)' },
-  absent:  { label: 'Absent',   emoji: '⛔', color: '#EF4444', bg: 'rgba(239, 68, 68, .10)' },
+const formatSyncTime = (timestamp) => {
+  if (!timestamp) return 'Synchronisation en attente';
+  return `Synchronisé à ${new Date(timestamp).toLocaleTimeString('fr-FR', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })}`;
 };
 
-/** Codes du tableur — miroir de SHIFT_LABELS côté serveur. */
-const SHIFT_COLORS = { J: '#3B82F6', N: '#6366F1', S: '#8B5CF6', G: '#EF4444', R: '#9CA3AF' };
+const guardKey = (guard) => `${guard.userId || '—'}|${guard.scheduleId || '—'}`;
 
-const card = {
-  background: 'var(--bg-card)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 12,
-  padding: 16,
-};
+const initialsOf = (name = '') => name
+  .trim()
+  .split(/\s+/)
+  .slice(0, 2)
+  .map((part) => part.charAt(0).toUpperCase())
+  .join('') || '—';
 
-const KPI = ({ label, value, color }) => (
-  <div style={{ ...card, borderTop: `3px solid ${color}`, padding: '14px 16px' }}>
-    <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-      {label}
-    </p>
-    <p style={{ fontSize: 26, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.15, marginTop: 4 }}>
-      {value}
-    </p>
-  </div>
-);
+function LiveControl({ enabled, onToggle, isFetching, lastSyncedAt, arrivals }) {
+  return (
+    <div className={`appel-live-control ${enabled ? 'is-live' : 'is-paused'}`}>
+      <button
+        type="button"
+        className="appel-live-toggle"
+        onClick={onToggle}
+        aria-pressed={enabled}
+        title={enabled ? 'Mettre les mises à jour automatiques en pause' : 'Activer les mises à jour automatiques'}
+      >
+        <span className="appel-live-signal" aria-hidden="true"><span /></span>
+        <span className="appel-live-copy">
+          <strong>{enabled ? 'APPEL EN DIRECT' : 'APPEL EN PAUSE'}</strong>
+          <small>{enabled ? 'Actualisation automatique' : 'Actualisation manuelle'}</small>
+        </span>
+        {enabled ? <Radio size={18} /> : <WifiOff size={18} />}
+      </button>
+      <div className="appel-live-meta">
+        <span className={isFetching ? 'is-syncing' : ''}>
+          <RefreshCw size={12} />
+          {isFetching ? 'Synchronisation…' : formatSyncTime(lastSyncedAt)}
+        </span>
+        {arrivals > 0 && <b role="status" aria-live="polite" aria-atomic="true"><Sparkles size={12} />{arrivals} mise{arrivals > 1 ? 's' : ''} à jour live</b>}
+      </div>
+    </div>
+  );
+}
 
-/**
- * Modale de motif pour un retard ou une absence. Le motif reste facultatif —
- * le serveur ne l'exige pas — mais la trace est bien plus utile avec.
- *
- * Pour un retard, la DURÉE est demandée (point 1) : elle est facultative côté
- * serveur mais mise en avant ici, c'est l'information qui manquait à
- * l'historique. Elle n'apparaît jamais pour une absence.
- */
+function MetricCard({ label, value, detail, tone, icon: Icon, progress }) {
+  return (
+    <article className={`appel-metric appel-metric-${tone}`}>
+      <div className="appel-metric-icon"><Icon size={18} strokeWidth={2.2} /></div>
+      <div className="appel-metric-copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{detail}</small>
+      </div>
+      {typeof progress === 'number' && (
+        <div className="appel-metric-progress" aria-label={`${progress}% complété`}>
+          <span style={{ '--appel-progress': `${Math.min(100, Math.max(0, progress))}%` }} />
+        </div>
+      )}
+    </article>
+  );
+}
+
+function MarkBadge({ declaration }) {
+  if (!declaration) {
+    return <span className="appel-status-badge appel-status-pending"><span className="appel-status-dot" />À pointer</span>;
+  }
+  const meta = MARKS[declaration.mark] || MARKS.present;
+  const Icon = meta.icon;
+  return <span className={`appel-status-badge appel-status-${meta.tone}`}><Icon size={13} />{meta.label}</span>;
+}
+
+function GuardCard({ guard, declaration, busy, mutationBusy, isNew, onMark }) {
+  const shift = SHIFT_COLORS[guard.code] || { color: '#475569', soft: '#F1F5F9' };
+  const state = declaration?.mark || 'pending';
+
+  return (
+    <article className={`appel-guard-card is-${state}${isNew ? ' is-live-arrival' : ''}`}>
+      {isNew && <span className="appel-arrival-label"><Sparkles size={12} />Mise à jour live</span>}
+      <div className="appel-guard-head">
+        <div className="appel-agent-identity">
+          <div className="appel-agent-avatar" aria-hidden="true">{initialsOf(guard.name)}</div>
+          <div>
+            <h3>{guard.name}</h3>
+            <p>{guard.roleName || 'Personnel de garde'}</p>
+          </div>
+        </div>
+        <MarkBadge declaration={declaration} />
+      </div>
+
+      <div className="appel-guard-details">
+        <div>
+          <span className="appel-detail-icon appel-detail-service"><Building2 size={15} /></span>
+          <div><small>Service</small><strong>{guard.departmentName || 'Non précisé'}</strong></div>
+        </div>
+        <div>
+          <span className="appel-detail-icon appel-detail-shift" style={{ '--shift-color': shift.color, '--shift-soft': shift.soft }}><Clock3 size={15} /></span>
+          <div>
+            <small>Garde</small>
+            <strong>{guard.label || guard.code || 'Service'}</strong>
+            {guard.shiftStart && guard.shiftEnd && <em>{guard.shiftStart} → {guard.shiftEnd}</em>}
+          </div>
+        </div>
+        <div>
+          <span className="appel-detail-icon appel-detail-planning"><CalendarDays size={15} /></span>
+          <div>
+            <small>Planning</small>
+            <strong>{guard.scheduleName || 'Planning en cours'}</strong>
+            <PlanningStateBadge state="en_cours" size="sm" />
+          </div>
+        </div>
+      </div>
+
+      {declaration && (
+        <div className={`appel-declaration-summary appel-declaration-${MARKS[declaration.mark]?.tone || 'success'}`}>
+          <div>
+            <span>Déclaration enregistrée</span>
+            <strong>{MARKS[declaration.mark]?.label || 'Pointé'}{declaration.hour ? ` à ${declaration.hour}` : ''}</strong>
+          </div>
+          {declaration.reporter && <small>Par {declaration.reporter}</small>}
+          {declaration.mark !== 'present' && typeof declaration.isJustified === 'boolean' && <JustificationBadge value={declaration.isJustified} />}
+        </div>
+      )}
+
+      <div className="appel-guard-actions" aria-label={`Pointer ${guard.name}`}>
+        {Object.entries(MARKS).map(([mark, meta]) => {
+          const Icon = meta.icon;
+          const selected = declaration?.mark === mark;
+          return (
+            <button
+              type="button"
+              key={mark}
+              className={`appel-mark-action appel-mark-${meta.tone}${selected ? ' is-selected' : ''}`}
+              onClick={() => onMark(guard, mark)}
+              disabled={busy || mutationBusy || Boolean(declaration)}
+              title={declaration ? `Déjà pointé ${MARKS[declaration.mark].label.toLowerCase()}` : `Déclarer ${meta.label.toLowerCase()}`}
+            >
+              <Icon size={16} /><span>{meta.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
+function StatePanel({ tone = 'neutral', icon: Icon, title, children }) {
+  return (
+    <div className={`appel-state-panel appel-state-${tone}`}>
+      <div className="appel-state-icon"><Icon size={22} /></div>
+      <strong>{title}</strong>
+      {children && <p>{children}</p>}
+    </div>
+  );
+}
+
 function ReasonModal({ mark, guard, onClose, onConfirm, busy }) {
   const [reason, setReason] = useState('');
   const [isJustified, setIsJustified] = useState(null);
   const [lateMinutes, setLateMinutes] = useState('');
+  const closeButtonRef = useRef(null);
+  const previousActiveElementRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  const busyRef = useRef(busy);
   const meta = MARKS[mark];
+  const Icon = meta.icon;
   const isLate = mark === 'late';
 
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    busyRef.current = busy;
+  }, [onClose, busy]);
+
+  useEffect(() => {
+    previousActiveElementRef.current = document.activeElement;
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && !busyRef.current) {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousActiveElementRef.current?.focus?.();
+    };
+  }, []);
+
   return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ maxWidth: 460 }}>
-        <div className="modal-header">
+    <div className="modal-overlay appel-modal-overlay" onClick={(event) => event.target === event.currentTarget && onClose()}>
+      <div className={`modal appel-reason-modal appel-reason-${meta.tone}`} role="dialog" aria-modal="true" aria-labelledby="appel-reason-title" aria-describedby="appel-reason-description">
+        <div className="appel-reason-header">
+          <div className="appel-reason-title-icon"><Icon size={20} /></div>
           <div>
-            <h2 className="modal-title">{meta.emoji} Déclarer « {meta.label} »</h2>
-            <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
-              {guard.name} — {guard.departmentName || 'Service'} · {guard.label || guard.code}
-            </p>
+            <span>Déclaration individuelle</span>
+            <h2 id="appel-reason-title">Déclarer « {meta.label} »</h2>
+            <p id="appel-reason-description">{guard.name} · {guard.departmentName || 'Service'} · {guard.label || guard.code}</p>
           </div>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}>✕</button>
+          <button ref={closeButtonRef} type="button" className="appel-modal-close" onClick={onClose} aria-label="Fermer"><X size={18} /></button>
         </div>
 
-        <form onSubmit={(e) => { e.preventDefault(); onConfirm({ reason, isJustified, lateMinutes }); }}>
-          <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <form onSubmit={(event) => { event.preventDefault(); onConfirm({ reason, isJustified, lateMinutes }); }}>
+          <div className="appel-reason-body">
             {isLate && (
-              <div className="form-group">
-                <label className="form-label">Durée du retard (minutes)</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <input
-                    type="number"
-                    className="form-control"
-                    style={{ maxWidth: 130 }}
-                    min={0}
-                    max={1440}
-                    step={5}
-                    value={lateMinutes}
-                    onChange={(e) => setLateMinutes(e.target.value)}
-                    placeholder="ex. 25"
-                  />
-                  {[15, 30, 60, 120].map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setLateMinutes(String(n))}
-                      style={{
-                        padding: '4px 10px', borderRadius: 8, cursor: 'pointer',
-                        fontSize: 11, fontWeight: 700, fontFamily: 'inherit',
-                        border: `1px solid ${String(n) === lateMinutes ? '#F59E0B' : 'var(--border-default)'}`,
-                        background: String(n) === lateMinutes ? '#F59E0B' : 'var(--bg-elevated)',
-                        color: String(n) === lateMinutes ? '#fff' : '#B45309',
-                      }}
-                    >
-                      {n < 60 ? `${n} min` : `${n / 60} h`}
-                    </button>
-                  ))}
+              <div className="appel-reason-section">
+                <div className="appel-field-heading">
+                  <div><Clock3 size={15} /><span>Durée du retard</span></div><small>Facultatif</small>
                 </div>
-                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                  La durée apparaît dans l'historique des appels, dans le journal de service
-                  et dans les absences du planning. Laissez vide si elle n'est pas connue.
-                </p>
+                <div className="appel-duration-row">
+                  <div className="appel-duration-input">
+                    <input type="number" min={0} max={1440} step={5} value={lateMinutes} onChange={(event) => setLateMinutes(event.target.value)} placeholder="25" aria-label="Durée du retard en minutes" />
+                    <span>minutes</span>
+                  </div>
+                  <div className="appel-duration-presets">
+                    {[15, 30, 60, 120].map((minutes) => (
+                      <button type="button" key={minutes} className={String(minutes) === lateMinutes ? 'is-selected' : ''} onClick={() => setLateMinutes(String(minutes))}>
+                        {minutes < 60 ? `${minutes} min` : `${minutes / 60} h`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
-            <div className="form-group">
-              <label className="form-label">Motif</label>
-              <textarea
-                className="form-control form-control-textarea"
-                rows={3}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Précisions sur le signalement…"
-              />
+            <div className="appel-reason-section">
+              <label className="appel-field-heading" htmlFor="appel-reason-text">
+                <div><ClipboardCheck size={15} /><span>Motif et contexte</span></div><small>Facultatif</small>
+              </label>
+              <textarea id="appel-reason-text" className="appel-reason-textarea" rows={4} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Précisez les faits constatés ou les informations utiles…" />
             </div>
-            <JustificationChoice
-              value={isJustified}
-              onChange={setIsJustified}
-              subject={isLate ? 'Retard' : 'Absence'}
-              label={isLate ? 'Qualification du retard' : 'Qualification de l’absence'}
-              required
-            />
-            <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              L'agent est notifié et la trace reste dans le journal de service et dans l'historique.
-            </p>
+
+            <div className="appel-justification-shell">
+              <JustificationChoice value={isJustified} onChange={setIsJustified} subject={isLate ? 'Retard' : 'Absence'} label={isLate ? 'Qualification du retard' : 'Qualification de l’absence'} required />
+            </div>
+
+            <div className="appel-notification-note"><Send size={15} /><span>L’agent sera notifié et la déclaration restera disponible dans le journal et l’historique.</span></div>
           </div>
 
-          <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Annuler</button>
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? 'Envoi…' : `Déclarer ${meta.label.toLowerCase()}`}
-            </button>
+          <div className="appel-reason-footer">
+            <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>Annuler</button>
+            <button type="submit" className={`appel-confirm-button appel-confirm-${meta.tone}`} disabled={busy}><Icon size={16} />{busy ? 'Enregistrement…' : `Confirmer ${meta.label.toLowerCase()}`}</button>
           </div>
         </form>
       </div>
@@ -201,93 +347,159 @@ export default function AppelDuJourPage() {
   const qc = useQueryClient();
   const { user } = useAuthStore();
   const today = todayKey();
-
   const [deptFilter, setDeptFilter] = useState('');
-  const [pending, setPending] = useState(null);   // { mark, guard } en attente de motif
-  const [busyKey, setBusyKey] = useState(null);   // ligne en cours d'envoi
+  const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [pending, setPending] = useState(null);
+  const [busyKey, setBusyKey] = useState(null);
   const [tab, setTab] = useState('pointer');
-
+  const [liveMode, setLiveMode] = useState(true);
+  const [liveArrivalKeys, setLiveArrivalKeys] = useState(() => new Set());
+  const previousGuardKeys = useRef(null);
+  const previousDeclaredKeys = useRef(null);
+  const arrivalTimers = useRef(new Map());
   const canCall = CALLER_ROLES.includes(user?.roleCode) || user?.roleCode === 'super_admin';
+  const liveInterval = liveMode && tab === 'pointer' ? LIVE_REFRESH_INTERVAL : false;
 
-  // --- Gardes du jour ---------------------------------------------------
-  const { data: overviewRes, isLoading, isError, error } = useQuery({
+  const { data: overviewRes, isLoading, isError, error, isFetching: overviewFetching, dataUpdatedAt: overviewUpdatedAt } = useQuery({
     queryKey: ['journal-overview'],
     queryFn: () => journalAPI.getOverview(),
     enabled: canCall,
+    refetchInterval: liveInterval,
+    refetchIntervalInBackground: true,
   });
   const overview = overviewRes?.data?.data;
   const guards = useMemo(() => overview?.todayGuards || [], [overview]);
   const serverToday = overview?.today || today;
 
-  // --- Ce qui a déjà été pointé aujourd'hui ------------------------------
-  const { data: eventsRes } = useQuery({
+  const { data: eventsRes, isFetching: eventsFetching, dataUpdatedAt: eventsUpdatedAt } = useQuery({
     queryKey: ['journal', 'appel', serverToday],
     queryFn: () => journalAPI.getEvents({ from: serverToday, to: serverToday, limit: 300 }),
     enabled: canCall,
+    refetchInterval: liveInterval,
+    refetchIntervalInBackground: true,
   });
-
-  /**
-   * Clé de pointage : agent + planning. Un même agent peut être en garde sur
-   * deux plannings le même jour ; les deux lignes se pointent séparément.
-   */
-  const markKey = (userId, scheduleId) => `${userId || '—'}|${scheduleId || '—'}`;
 
   const declared = useMemo(() => {
     const map = {};
     const byType = { presence: 'present', late: 'late', absence: 'absent' };
-    for (const ev of eventsRes?.data?.data?.events || []) {
-      const mark = byType[ev.type];
-      if (!mark || !ev.userId) continue;
-      const key = markKey(ev.userId, ev.scheduleId);
-      // Les événements arrivent du plus récent au plus ancien : le premier vu
-      // pour une clé est le dernier déclaré, c'est celui qui fait foi.
+    for (const event of eventsRes?.data?.data?.events || []) {
+      const mark = byType[event.type];
+      if (!mark || !event.userId) continue;
+      const key = `${event.userId || '—'}|${event.scheduleId || '—'}`;
       if (!map[key]) {
-        const metadataJustification = ev.metadata && typeof ev.metadata === 'object'
-          ? ev.metadata.isJustified
-          : undefined;
-        map[key] = {
-          mark,
-          hour: ev.hour,
-          reporter: ev.reporterName,
-          id: ev.id,
-          isJustified: typeof ev.isJustified === 'boolean' ? ev.isJustified : metadataJustification,
-        };
+        const metadataJustification = event.metadata && typeof event.metadata === 'object' ? event.metadata.isJustified : undefined;
+        map[key] = { mark, hour: event.hour, reporter: event.reporterName, id: event.id, isJustified: typeof event.isJustified === 'boolean' ? event.isJustified : metadataJustification };
       }
     }
     return map;
   }, [eventsRes]);
 
-  // --- Types d'absence (partage la clé de cache du modal existant) --------
   const { data: typesRes } = useQuery({
     queryKey: ['absence-types'],
     queryFn: () => absencesAPI.getTypes(),
     enabled: canCall,
   });
-  const types = (typesRes?.data?.data || []).filter((t) => !t.is_leave);
-  const lateType = types.find((t) => t.code === 'retard' || /retard/i.test(t.name || ''));
-  const absentType = types.find((t) => t.code === 'absence_injustifiee')
-    || types.find((t) => !/retard/i.test(t.name || ''))
-    || types[0];
+  const types = (typesRes?.data?.data || []).filter((type) => !type.is_leave);
+  const lateType = types.find((type) => type.code === 'retard' || /retard/i.test(type.name || ''));
+  const absentType = types.find((type) => type.code === 'absence_injustifiee') || types.find((type) => !/retard/i.test(type.name || '')) || types[0];
 
   const services = useMemo(() => {
-    const m = new Map();
-    guards.forEach((g) => { if (g.departmentId) m.set(g.departmentId, g.departmentName || 'Service'); });
-    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], 'fr'));
+    const map = new Map();
+    guards.forEach((guard) => { if (guard.departmentId) map.set(guard.departmentId, guard.departmentName || 'Service'); });
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], 'fr'));
   }, [guards]);
 
-  const visible = useMemo(
-    () => (deptFilter ? guards.filter((g) => g.departmentId === deptFilter) : guards),
-    [guards, deptFilter]
-  );
+  const visible = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return guards.filter((guard) => {
+      const declaration = declared[guardKey(guard)];
+      const state = declaration?.mark || 'pending';
+      const haystack = `${guard.name || ''} ${guard.roleName || ''} ${guard.departmentName || ''} ${guard.scheduleName || ''}`.toLowerCase();
+      return (!deptFilter || guard.departmentId === deptFilter) && (!statusFilter || state === statusFilter) && (!query || haystack.includes(query));
+    });
+  }, [guards, declared, deptFilter, statusFilter, search]);
 
   const counts = useMemo(() => {
-    const c = { present: 0, late: 0, absent: 0, pending: 0 };
-    visible.forEach((g) => {
-      const d = declared[markKey(g.userId, g.scheduleId)];
-      if (d) c[d.mark] += 1; else c.pending += 1;
+    const result = { present: 0, late: 0, absent: 0, pending: 0 };
+    guards.forEach((guard) => { result[declared[guardKey(guard)]?.mark || 'pending'] += 1; });
+    return result;
+  }, [guards, declared]);
+
+  const completedCount = counts.present + counts.late + counts.absent;
+  const completionPercent = guards.length ? Math.round((completedCount / guards.length) * 100) : 0;
+  const lastSyncedAt = Math.max(overviewUpdatedAt || 0, eventsUpdatedAt || 0);
+  const isFetching = overviewFetching || eventsFetching;
+  const filtersActive = Boolean(deptFilter || statusFilter || search.trim());
+
+  const clearArrivalAnimations = useCallback(() => {
+    arrivalTimers.current.forEach((timer) => window.clearTimeout(timer));
+    arrivalTimers.current.clear();
+    setLiveArrivalKeys(new Set());
+  }, []);
+
+  const announceLiveArrivals = useCallback((keys) => {
+    if (!liveMode || keys.length === 0) return;
+
+    setLiveArrivalKeys((existing) => new Set([...existing, ...keys]));
+    keys.forEach((key) => {
+      const existingTimer = arrivalTimers.current.get(key);
+      if (existingTimer) window.clearTimeout(existingTimer);
+
+      const timer = window.setTimeout(() => {
+        setLiveArrivalKeys((existing) => {
+          const next = new Set(existing);
+          next.delete(key);
+          return next;
+        });
+        arrivalTimers.current.delete(key);
+      }, 2600);
+      arrivalTimers.current.set(key, timer);
     });
-    return c;
-  }, [visible, declared]);
+  }, [liveMode]);
+
+  useEffect(() => () => {
+    arrivalTimers.current.forEach((timer) => window.clearTimeout(timer));
+    arrivalTimers.current.clear();
+  }, []);
+
+  useEffect(() => {
+    previousGuardKeys.current = null;
+    previousDeclaredKeys.current = null;
+    clearArrivalAnimations();
+  }, [serverToday, clearArrivalAnimations]);
+
+  useEffect(() => {
+    if (!liveMode) clearArrivalAnimations();
+  }, [liveMode, clearArrivalAnimations]);
+
+  useEffect(() => {
+    if (!overviewRes) return;
+
+    const current = new Set(guards.map(guardKey));
+    if (previousGuardKeys.current === null) {
+      previousGuardKeys.current = current;
+      return;
+    }
+
+    const additions = [...current].filter((key) => !previousGuardKeys.current.has(key));
+    previousGuardKeys.current = current;
+    announceLiveArrivals(additions);
+  }, [announceLiveArrivals, guards, overviewRes]);
+
+  useEffect(() => {
+    if (!eventsRes) return;
+
+    const current = new Set(Object.keys(declared));
+    if (previousDeclaredKeys.current === null) {
+      previousDeclaredKeys.current = current;
+      return;
+    }
+
+    const additions = [...current].filter((key) => !previousDeclaredKeys.current.has(key));
+    previousDeclaredKeys.current = current;
+    announceLiveArrivals(additions);
+  }, [announceLiveArrivals, declared, eventsRes]);
 
   const refreshAll = () => {
     qc.invalidateQueries({ queryKey: ['journal-overview'] });
@@ -297,17 +509,13 @@ export default function AppelDuJourPage() {
   };
 
   const markPresent = useMutation({
-    mutationFn: (g) => journalAPI.addEvent({
-      departmentId: g.departmentId,
-      scheduleId: g.scheduleId,
-      eventType: 'presence',
-      userId: g.userId,
-      severity: 'info',
-      title: `Présence confirmée — ${g.name}`,
-      description: `Garde ${g.label || g.code} du ${serverToday} · ${g.scheduleName || ''}`.trim(),
+    mutationFn: (guard) => journalAPI.addEvent({
+      departmentId: guard.departmentId, scheduleId: guard.scheduleId, eventType: 'presence', userId: guard.userId,
+      severity: 'info', title: `Présence confirmée — ${guard.name}`,
+      description: `Garde ${guard.label || guard.code} du ${serverToday} · ${guard.scheduleName || ''}`.trim(),
     }),
     onSuccess: () => { toast.success('Présence enregistrée'); refreshAll(); },
-    onError: (e) => toast.error(e?.response?.data?.message || 'Enregistrement impossible'),
+    onError: (mutationError) => toast.error(mutationError?.response?.data?.message || 'Enregistrement impossible'),
     onSettled: () => setBusyKey(null),
   });
 
@@ -315,291 +523,131 @@ export default function AppelDuJourPage() {
     mutationFn: ({ guard, mark, reason, isJustified, lateMinutes }) => {
       const type = mark === 'late' ? lateType : absentType;
       return absencesShiftAPI.report({
-        userId: guard.userId,
-        scheduleId: guard.scheduleId,
-        absenceTypeId: type?.id,
-        absenceKind: mark === 'late' ? 'late' : 'absence',
-        date: serverToday,
-        // Pas de startTime/endTime : `todayGuards[]` vient du tableur, qui ne
-        // porte qu'un code de garde, pas d'horaires. Les deux champs sont
-        // facultatifs côté serveur.
-        reason: reason || undefined,
-        isJustified,
-        severity: mark === 'late' ? 'info' : 'warning',
-        // Durée du retard (point 1) : envoyée seulement quand elle est saisie.
-        // Le serveur l'ignore de toute façon si le type n'est pas un retard.
-        lateMinutes: mark === 'late' && lateMinutes !== '' && lateMinutes !== undefined
-          ? Number(lateMinutes)
-          : undefined,
+        userId: guard.userId, scheduleId: guard.scheduleId, absenceTypeId: type?.id,
+        absenceKind: mark === 'late' ? 'late' : 'absence', date: serverToday, reason: reason || undefined,
+        isJustified, severity: mark === 'late' ? 'info' : 'warning',
+        lateMinutes: mark === 'late' && lateMinutes !== '' && lateMinutes !== undefined ? Number(lateMinutes) : undefined,
       });
     },
-    onSuccess: (_d, vars) => {
-      toast.success(vars.mark === 'late'
-        ? (vars.lateMinutes ? `Retard de ${vars.lateMinutes} min signalé` : 'Retard signalé')
-        : 'Absence signalée');
+    onSuccess: (_data, variables) => {
+      toast.success(variables.mark === 'late' ? (variables.lateMinutes ? `Retard de ${variables.lateMinutes} min signalé` : 'Retard signalé') : 'Absence signalée');
       setPending(null);
       refreshAll();
     },
-    onError: (e) => toast.error(e?.response?.data?.message || 'Signalement impossible'),
+    onError: (mutationError) => toast.error(mutationError?.response?.data?.message || 'Signalement impossible'),
     onSettled: () => setBusyKey(null),
   });
 
   const onMark = (guard, mark) => {
-    if (!guard.userId) {
-      toast.error('Cet agent n\'est pas rattaché à un compte : pointage impossible');
-      return;
-    }
-    if (mark === 'present') {
-      setBusyKey(markKey(guard.userId, guard.scheduleId));
-      markPresent.mutate(guard);
-      return;
-    }
+    if (!guard.userId) { toast.error("Cet agent n'est pas rattaché à un compte : pointage impossible"); return; }
+    if (mark === 'present') { setBusyKey(guardKey(guard)); markPresent.mutate(guard); return; }
     setPending({ mark, guard });
   };
 
+  const resetFilters = () => { setDeptFilter(''); setStatusFilter(''); setSearch(''); };
+
   if (!canCall) {
     return (
-      <div>
+      <div className="appel-page">
         <ContextBadge variant="header" />
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">Appel du jour</h1>
-          </div>
-        </div>
-        <div style={{ ...card, textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-          L'appel du jour est réservé aux chefs de service, surveillants, surveillants généraux
-          et directeurs.
-        </div>
+        <StatePanel tone="danger" icon={UserX} title="Accès non autorisé">L'appel du jour est réservé aux chefs de service, surveillants, surveillants généraux et directeurs.</StatePanel>
       </div>
     );
   }
 
   return (
-    <div>
-      <ContextBadge variant="header" />
-
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Appel du jour</h1>
-          <p className="page-subtitle">
-            {tab === 'pointer'
-              ? `${LONG_DATE(serverToday)} — présence, retard ou absence des agents en garde aujourd'hui`
-              : 'Consultation des déclarations passées — par garde ou par jour'}
-          </p>
+    <div className="appel-page">
+      <section className="appel-command-header">
+        <div className="appel-header-content">
+          <div className="appel-eyebrow"><span />Poste de contrôle quotidien</div>
+          <div className="appel-title-row">
+            <div className="appel-title-icon"><ClipboardCheck size={25} /></div>
+            <div><h1>Appel du jour</h1><p>{LONG_DATE(serverToday)} · Présence, retard et absence des équipes de garde</p></div>
+          </div>
+          <ContextBadge variant="header" className="appel-context-badge" />
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={refreshAll}>↻ Actualiser</button>
-      </div>
+        <LiveControl enabled={liveMode} onToggle={() => setLiveMode((current) => !current)} isFetching={isFetching} lastSyncedAt={lastSyncedAt} arrivals={liveArrivalKeys.size} />
+      </section>
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 18 }}>
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              padding: '8px 14px', borderRadius: 9, border: 'none', cursor: 'pointer',
-              background: tab === t.id ? 'var(--color-primary)' : 'transparent',
-              color: tab === t.id ? '#fff' : 'var(--text-secondary)',
-              fontWeight: 600, fontSize: 13, fontFamily: 'inherit',
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'history' && <AppelHistoryPanel />}
-
-      {tab === 'pointer' && (
-      <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 18 }}>
-        <KPI label="En garde aujourd'hui" value={visible.length}   color="#3B82F6" />
-        <KPI label="Présents"             value={counts.present}   color="#10B981" />
-        <KPI label="Retards"              value={counts.late}      color="#F59E0B" />
-        <KPI label="Absents"              value={counts.absent}    color="#EF4444" />
-        <KPI label="Reste à pointer"      value={counts.pending}   color="#6B7280" />
-      </div>
-
-      {services.length > 1 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-          <button
-            onClick={() => setDeptFilter('')}
-            className={deptFilter === '' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
-          >
-            Tous les services
-          </button>
-          {services.map(([id, name]) => (
+      <div className="appel-navigation-bar">
+        <div className="appel-tabs" role="tablist" aria-label="Vues de l'appel">
+          {TABS.map(({ id, label, icon: Icon }) => (
             <button
+              type="button"
               key={id}
-              onClick={() => setDeptFilter(id)}
-              className={deptFilter === id ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+              id={`appel-tab-${id}`}
+              role="tab"
+              aria-selected={tab === id}
+              aria-controls={`appel-panel-${id}`}
+              tabIndex={tab === id ? 0 : -1}
+              className={tab === id ? 'is-active' : ''}
+              onClick={() => setTab(id)}
+              onKeyDown={(event) => handleTabKeyDown(event, id, setTab)}
             >
-              {name}
+              <Icon size={16} />{label}{id === 'pointer' && <span>{counts.pending}</span>}
             </button>
           ))}
         </div>
-      )}
+        <button type="button" className="appel-refresh-button" onClick={refreshAll} disabled={isFetching}><RefreshCw size={15} className={isFetching ? 'is-spinning' : ''} />Actualiser</button>
+      </div>
 
-      {isError ? (
-        <div style={{ ...card, textAlign: 'center', padding: 40, color: 'var(--color-danger)' }}>
-          {error?.response?.status === 403
-            ? 'Votre rôle ne donne pas accès aux gardes du jour.'
-            : 'Les gardes du jour n\'ont pas pu être chargées.'}
-        </div>
-      ) : isLoading ? (
-        <div style={{ ...card, textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-          Chargement des gardes du jour…
-        </div>
-      ) : visible.length === 0 ? (
-        <div style={{ ...card, textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-          🗓️ Aucune garde à pointer aujourd'hui
-          <div style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6 }}>
-            L'appel ne porte que sur les plannings <strong>en cours</strong> comptant, au {serverToday},
-            au moins un agent de service — soit par un code de garde dans la case du jour,
-            soit par sa période de participation.
-            {overview?.activeSchedules?.length
-              ? ` ${overview.activeSchedules.length} planning(s) en cours, mais personne n'est de service aujourd'hui.`
-              : ' Aucun planning n\'est en cours dans votre périmètre.'}
+      {tab === 'history' && (
+        <section id="appel-panel-history" className="appel-history-stage" role="tabpanel" aria-labelledby="appel-tab-history" tabIndex={0}>
+          <div className="appel-section-heading">
+            <div><span className="appel-section-kicker">Traçabilité</span><h2>Historique des appels</h2><p>Retrouvez les déclarations passées et complétez les jours non renseignés.</p></div>
+            <div className="appel-heading-icon"><History size={19} /></div>
           </div>
-        </div>
-      ) : (
-        <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-sm)' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-default)', background: 'var(--bg-elevated)' }}>
-                  {['Agent', 'Service', 'Garde', 'Planning', 'État déclaré', 'Pointer'].map((h) => (
-                    <th key={h} style={{
-                      textAlign: 'left', padding: '10px 12px', color: 'var(--text-muted)',
-                      fontWeight: 700, textTransform: 'uppercase', fontSize: 10, letterSpacing: '.04em',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((g) => {
-                  const key = markKey(g.userId, g.scheduleId);
-                  const d = declared[key];
-                  const meta = d ? MARKS[d.mark] : null;
-                  const busy = busyKey === key;
-                  return (
-                    <tr key={key} style={{
-                      borderBottom: '1px solid var(--border-subtle)',
-                      background: meta ? meta.bg : 'transparent',
-                    }}>
-                      <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {g.name}
-                        {g.roleName && (
-                          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11 }}> · {g.roleName}</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
-                        {g.departmentName || '—'}
-                      </td>
-                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6,
-                          fontWeight: 700, color: SHIFT_COLORS[g.code] || 'var(--text-primary)',
-                        }}>
-                          <span style={{
-                            width: 8, height: 8, borderRadius: 2,
-                            background: SHIFT_COLORS[g.code] || 'var(--text-muted)',
-                          }} />
-                          {g.label || g.code}
-                        </span>
-                        {/* Sans code journalier, la ligne tient de la période de
-                            participation : les heures de garde disent le reste. */}
-                        {g.shiftStart && g.shiftEnd && (
-                          <div style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 2 }}>
-                            {g.shiftStart} → {g.shiftEnd}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 12 }}>
-                        {g.scheduleName || '—'}
-                        <div style={{ marginTop: 3 }}>
-                          <PlanningStateBadge state="en_cours" size="sm" />
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                        {meta ? (
-                          <div style={{ color: meta.color, fontWeight: 700 }}>
-                            {meta.emoji} {meta.label}
-                            {d.hour && (
-                              <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11 }}> · {d.hour}</span>
-                            )}
-                            {d.reporter && (
-                              <div style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 10 }}>
-                                par {d.reporter}
-                              </div>
-                            )}
-                            {d.mark !== 'present' && typeof d.isJustified === 'boolean' && (
-                              <div style={{ marginTop: 5 }}>
-                                <JustificationBadge value={d.isJustified} />
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Non pointé</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {Object.entries(MARKS).map(([mark, m]) => (
-                            <button
-                              key={mark}
-                              onClick={() => onMark(g, mark)}
-                              disabled={busy || markPresent.isPending || reportAbsence.isPending || Boolean(d)}
-                              title={d ? `Déjà pointé ${MARKS[d.mark].label.toLowerCase()}` : `Déclarer ${m.label.toLowerCase()}`}
-                              style={{
-                                padding: '4px 10px', borderRadius: 8,
-                                cursor: busy ? 'wait' : (d ? 'not-allowed' : 'pointer'),
-                                fontSize: 11, fontWeight: 700, fontFamily: 'inherit',
-                                border: `1px solid ${d?.mark === mark ? m.color : 'var(--border-default)'}`,
-                                background: d?.mark === mark ? m.color : 'var(--bg-elevated)',
-                                color: d?.mark === mark ? '#fff' : m.color,
-                                opacity: busy || d ? 0.5 : 1,
-                              }}
-                            >
-                              {m.emoji} {m.label}
-                            </button>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+          <AppelHistoryPanel />
+        </section>
       )}
 
-      <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.6 }}>
-        Un pointage n'est jamais effacé : « Présent » alimente le journal de service, « Retard » et
-        « Absent » créent en plus une absence, une alerte de service et une notification à l'agent.
-        Une ligne déjà pointée est verrouillée ; sa déclaration reste consultable dans l’onglet
-        « Historique des appels ».
-      </p>
-      </>
+      {tab === 'pointer' && (
+        <section id="appel-panel-pointer" className="appel-pointer-stage" role="tabpanel" aria-labelledby="appel-tab-pointer" tabIndex={0}>
+          <section className="appel-metrics" aria-label="Synthèse de l'appel">
+            <MetricCard label="Équipe attendue" value={guards.length} detail={`${services.length || 1} service${services.length > 1 ? 's' : ''} dans le périmètre`} tone="blue" icon={UsersRound} progress={completionPercent} />
+            <MetricCard label="Présents" value={counts.present} detail="Présences confirmées" tone="green" icon={CheckCircle2} />
+            <MetricCard label="Retards" value={counts.late} detail="Arrivées différées" tone="amber" icon={Clock3} />
+            <MetricCard label="Absents" value={counts.absent} detail="Absences déclarées" tone="red" icon={UserX} />
+            <MetricCard label="À pointer" value={counts.pending} detail={`${completionPercent}% de l'appel complété`} tone="violet" icon={Activity} />
+          </section>
+
+          <section className="appel-live-strip">
+            <div><span className={`appel-live-strip-dot ${liveMode ? 'is-active' : ''}`} /><strong>{liveMode ? 'Mode Live actif' : 'Mode Live en pause'}</strong><p>{liveMode ? 'Les nouvelles gardes et déclarations apparaissent automatiquement avec une animation.' : 'Utilisez Actualiser pour charger les nouvelles déclarations.'}</p></div>
+            <span>{completedCount}/{guards.length} pointés</span>
+          </section>
+
+          <section className="appel-filter-panel">
+            <div className="appel-filter-heading"><div><span className="appel-section-kicker">Équipe de garde</span><h2>Personnels à pointer</h2></div><span className="appel-result-count">{visible.length} résultat{visible.length > 1 ? 's' : ''}</span></div>
+            <div className="appel-filter-grid">
+              <label className="appel-search-control"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher un agent, un service ou un planning…" aria-label="Rechercher dans l'équipe de garde" /></label>
+              <label className="appel-select-control"><Building2 size={15} /><select value={deptFilter} onChange={(event) => setDeptFilter(event.target.value)} aria-label="Filtrer par service"><option value="">Tous les services</option>{services.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+              <div className="appel-status-filters" aria-label="Filtrer par état">
+                {STATUS_FILTERS.map((filter) => <button type="button" key={filter.value || 'all'} className={statusFilter === filter.value ? 'is-active' : ''} onClick={() => setStatusFilter(filter.value)}>{filter.label}</button>)}
+              </div>
+              {filtersActive && <button type="button" className="appel-clear-filters" onClick={resetFilters}><X size={14} />Effacer les filtres</button>}
+            </div>
+          </section>
+
+          {isError ? (
+            <StatePanel tone="danger" icon={UserX} title="Impossible de charger l'appel">{error?.response?.status === 403 ? "Votre rôle ne donne pas accès aux gardes du jour." : "Les gardes du jour n'ont pas pu être chargées."}</StatePanel>
+          ) : isLoading ? (
+            <div className="appel-loading-grid" aria-label="Chargement des gardes">{[1, 2, 3, 4].map((item) => <div className="appel-guard-skeleton" key={item} />)}</div>
+          ) : visible.length === 0 ? (
+            <StatePanel tone="neutral" icon={Filter} title={filtersActive ? 'Aucun résultat' : "Aucune garde à pointer aujourd'hui"}>{filtersActive ? 'Modifiez ou effacez les filtres pour retrouver les personnels de garde.' : overview?.activeSchedules?.length ? `${overview.activeSchedules.length} planning(s) sont en cours, mais personne n'est de service aujourd'hui.` : "Aucun planning n'est en cours dans votre périmètre."}</StatePanel>
+          ) : (
+            <div className="appel-guards-grid">
+              {visible.map((guard) => {
+                const key = guardKey(guard);
+                return <GuardCard key={key} guard={guard} declaration={declared[key]} busy={busyKey === key} mutationBusy={markPresent.isPending || reportAbsence.isPending} isNew={liveArrivalKeys.has(key)} onMark={onMark} />;
+              })}
+            </div>
+          )}
+
+          <div className="appel-usage-note"><ClipboardCheck size={16} /><p>Une ligne déjà pointée est verrouillée. Les présences alimentent le journal ; les retards et absences créent également une alerte et une notification pour l’agent.</p></div>
+        </section>
       )}
 
-      {pending && (
-        <ReasonModal
-          mark={pending.mark}
-          guard={pending.guard}
-          busy={reportAbsence.isPending}
-          onClose={() => setPending(null)}
-          onConfirm={({ reason, isJustified, lateMinutes }) => {
-            setBusyKey(markKey(pending.guard.userId, pending.guard.scheduleId));
-            reportAbsence.mutate({
-              guard: pending.guard, mark: pending.mark, reason, isJustified, lateMinutes,
-            });
-          }}
-        />
-      )}
+      {pending && <ReasonModal mark={pending.mark} guard={pending.guard} busy={reportAbsence.isPending} onClose={() => !reportAbsence.isPending && setPending(null)} onConfirm={({ reason, isJustified, lateMinutes }) => { setBusyKey(guardKey(pending.guard)); reportAbsence.mutate({ guard: pending.guard, mark: pending.mark, reason, isJustified, lateMinutes }); }} />}
     </div>
   );
 }

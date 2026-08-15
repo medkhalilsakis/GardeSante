@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { establishmentsAPI, adminAPI, usersAPI, userArchiveAPI } from '../../api';
 import { useAuthStore } from '../../store';
 import Avatar from '../../components/common/Avatar';
@@ -634,8 +635,10 @@ function HolidaysSection({ onOpenCreate, onEdit, onDelete, onSeedTunisia }) {
 export default function SuperAdminDashboard() {
   const { user } = useAuthStore();
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const establishmentFromUrl = searchParams.get('establishment');
 
-  const [selectedEstId, setSelectedEstId] = useState(null);
+  const [selectedEstId, setSelectedEstId] = useState(establishmentFromUrl);
   const [activeTab, setActiveTab]     = useState('overview');
   const [modal, setModal]             = useState(null);
   const [modalData, setModalData]     = useState({});
@@ -652,6 +655,14 @@ export default function SuperAdminDashboard() {
   const [archiveForm, setArchiveForm] = useState({ reason: '' });
   const [histFilter,  setHistFilter]  = useState({ from: '', to: '', category: '' });
   const [salaryPeriod, setSalaryPeriod] = useState({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 });
+
+  // La carte ouvre la gestion d'un établissement avec
+  // `/admin?establishment=<id>`. Le synchroniser aussi avec précédent/suivant
+  // du navigateur évite de perdre le contexte cartographique.
+  useEffect(() => {
+    setSelectedEstId(establishmentFromUrl);
+    setActiveTab('overview');
+  }, [establishmentFromUrl]);
 
   const inv = (...keys) => keys.forEach(k => qc.invalidateQueries([k]));
 
@@ -733,8 +744,16 @@ export default function SuperAdminDashboard() {
   const seedTunisiaHolidays = useAppMutation(year => adminAPI.seedTunisiaHolidays({ year }), ['admin-holidays'], 'Jours fériés tunisiens préchargés !');
 
   // ── Handlers ──────────────────────────────────────────────────
-  const goToEst   = useCallback(id => { setSelectedEstId(id); setActiveTab('overview'); }, []);
-  const goBack    = useCallback(() => { setSelectedEstId(null); setActiveTab('overview'); }, []);
+  const goToEst = useCallback((id) => {
+    setSelectedEstId(id);
+    setActiveTab('overview');
+    setSearchParams({ establishment: id });
+  }, [setSearchParams]);
+  const goBack = useCallback(() => {
+    setSelectedEstId(null);
+    setActiveTab('overview');
+    setSearchParams({}, { replace: true });
+  }, [setSearchParams]);
   const avatarSrc = u => u?.avatar_url ? (u.avatar_url.startsWith('http') ? u.avatar_url : `${API_BASE}${u.avatar_url}`) : null;
 
   const totalActive    = establishments.filter(e => e.is_active).length;
@@ -812,7 +831,7 @@ export default function SuperAdminDashboard() {
                   {establishments.map(est => (
                     <EstCard key={est.id} est={est}
                       onSelect={goToEst}
-                      onEdit={() => { setEstForm(estToForm(est)); setSelectedEstId(est.id); setModal('edit-est'); }}
+                      onEdit={() => { setEstForm(estToForm(est)); goToEst(est.id); setModal('edit-est'); }}
                       onToggle={() => est.is_active
                         ? setConfirm({ message: `Désactiver "${est.name}" ?`, sub: 'Tous les comptes rattachés seront désactivés.', action: () => deactivateEst.mutate(est.id) })
                         : setConfirm({ message: `Réactiver "${est.name}" ?`, sub: 'Les comptes ne seront pas automatiquement réactivés.', action: () => activateEst.mutate({ id: est.id }), danger: false })
@@ -893,7 +912,6 @@ export default function SuperAdminDashboard() {
           onHistFilter={setHistFilter}
           staffFilter={staffFilter}
           onStaffFilter={setStaffFilter}
-          governorates={governorates}
           onOpenCreateDir={() => { setDirForm({ establishmentId: selectedEstId }); setModal('create-dir'); }}
           onOpenEditDir={() => { setDirForm({ firstName: director?.first_name, lastName: director?.last_name, email: director?.email, phone: director?.phone, matricule: director?.matricule, baseSalary: director?.base_salary, hourlyRate: director?.hourly_rate, hireDate: director?.hire_date?.substring(0, 10) }); setModal('edit-dir'); }}
           onToggleDir={() => setConfirm({ message: director?.is_active ? `Désactiver ${director?.first_name} ${director?.last_name} ?` : `Réactiver ${director?.first_name} ${director?.last_name} ?`, action: () => toggleDirStatus.mutate(selectedEstId), danger: director?.is_active })}
@@ -1146,7 +1164,7 @@ function EstCard({ est, onSelect, onEdit, onToggle }) {
 // ══════════════════════════════════════════════════════════════
 // ESTABLISHMENT DETAIL — 4 onglets
 // ══════════════════════════════════════════════════════════════
-function EstDetail({ est, activeTab, onTabChange, director, personnel, loadingPersonnel, history, loadingHistory, histFilter, onHistFilter, staffFilter, onStaffFilter, governorates, onOpenCreateDir, onOpenEditDir, onToggleDir, onResetDirPwd, onStaffCard, onEditStaff, onRemoveStaff, onArchiveStaff, onUnarchiveStaff, onEditEst, onToggleEst, avatarSrc }) {
+function EstDetail({ est, activeTab, onTabChange, director, personnel, loadingPersonnel, history, loadingHistory, histFilter, onHistFilter, staffFilter, onStaffFilter, onOpenCreateDir, onOpenEditDir, onToggleDir, onResetDirPwd, onStaffCard, onEditStaff, onRemoveStaff, onArchiveStaff, onUnarchiveStaff, onEditEst, onToggleEst, avatarSrc }) {
   const tabs = [
     { id: 'overview',  icon: '📋', label: 'Aperçu' },
     { id: 'director',  icon: '👔', label: 'Directeur' },
@@ -1794,11 +1812,11 @@ function EstForm({ form, setForm, editing, govList }) {
       {/* Coordonnées GPS — facultatives, saisies dès maintenant pour préparer
           la future carte de tous les hôpitaux (la carte n'est pas construite ici). */}
       <Field label="Latitude (optionnel)">
-        <Inp type="number" step="0.000001" placeholder="36.806389"
+        <Inp type="number" step="0.000001" min="30" max="38" placeholder="36.806389"
           value={form.latitude ?? ''} onChange={e => f('latitude', e.target.value)} />
       </Field>
       <Field label="Longitude (optionnel)">
-        <Inp type="number" step="0.000001" placeholder="10.181667"
+        <Inp type="number" step="0.000001" min="7" max="12.5" placeholder="10.181667"
           value={form.longitude ?? ''} onChange={e => f('longitude', e.target.value)} />
       </Field>
       <div style={{ gridColumn: '1/-1', fontSize: 11, color: 'var(--text-muted)', marginTop: -4 }}>

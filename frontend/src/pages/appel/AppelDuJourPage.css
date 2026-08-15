@@ -1,0 +1,1614 @@
+.appel-page {
+  --appel-blue: #2563eb;
+  --appel-blue-soft: #eff6ff;
+  --appel-green: #059669;
+  --appel-green-soft: #ecfdf5;
+  --appel-amber: #d97706;
+  --appel-amber-soft: #fffbeb;
+  --appel-red: #dc2626;
+  --appel-red-soft: #fef2f2;
+  --appel-violet: #7c3aed;
+  --appel-violet-soft: #f5f3ff;
+  --appel-cyan: #0891b2;
+  --appel-cyan-soft: #ecfeff;
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+  padding-bottom: 24px;
+}
+
+.appel-page,
+.appel-page * {
+  letter-spacing: 0;
+}
+
+.appel-page button:focus-visible,
+.appel-page input:focus-visible,
+.appel-page select:focus-visible,
+.appel-page textarea:focus-visible {
+  outline: 3px solid var(--color-primary-20);
+  outline-offset: 2px;
+}
+
+.appel-command-header {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: hidden;
+  padding: 4px 0 20px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.appel-command-header::after {
+  position: absolute;
+  inset-inline-end: 12px;
+  bottom: -30px;
+  width: 120px;
+  height: 74px;
+  border-top: 2px solid var(--appel-blue);
+  border-inline-end: 2px solid var(--appel-red);
+  opacity: 0.12;
+  transform: skewX(-18deg);
+  content: '';
+  pointer-events: none;
+}
+
+.appel-header-content {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.appel-eyebrow,
+.appel-section-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.appel-eyebrow > span {
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--appel-cyan);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.appel-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  margin-top: 9px;
+}
+
+.appel-title-icon,
+.appel-heading-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  border-radius: 8px;
+  background: var(--appel-blue-soft);
+  color: var(--appel-blue);
+}
+
+.appel-title-row h1 {
+  color: var(--text-primary);
+  font-size: 25px;
+  font-weight: 850;
+  line-height: 1.15;
+}
+
+.appel-title-row p {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.appel-context-badge {
+  gap: 7px !important;
+  margin: 12px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.appel-context-badge .ctx-hospital {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.appel-context-badge .ctx-chip {
+  border-radius: 6px;
+  background: var(--bg-elevated);
+}
+
+.appel-live-control {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 288px);
+  flex: 0 0 288px;
+  overflow: hidden;
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.appel-live-control.is-paused {
+  border-color: var(--border-default);
+}
+
+.appel-live-toggle {
+  display: grid;
+  width: 100%;
+  min-height: 64px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(220, 38, 38, 0.12);
+  background: var(--appel-red-soft);
+  color: var(--appel-red);
+  text-align: start;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.appel-live-control.is-paused .appel-live-toggle {
+  border-bottom-color: var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.appel-live-toggle:hover {
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.appel-live-control.is-paused .appel-live-toggle:hover {
+  background: var(--bg-card-hover);
+}
+
+.appel-live-signal {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+}
+
+.appel-live-signal::before,
+.appel-live-signal::after,
+.appel-live-signal > span {
+  position: absolute;
+  border-radius: 50%;
+  content: '';
+}
+
+.appel-live-signal::before {
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(220, 38, 38, 0.26);
+  animation: appel-live-ring 2s ease-out infinite;
+}
+
+.appel-live-signal::after {
+  width: 16px;
+  height: 16px;
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.appel-live-signal > span {
+  z-index: 1;
+  width: 8px;
+  height: 8px;
+  background: var(--appel-red);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+.appel-live-control.is-paused .appel-live-signal::before {
+  animation: none;
+}
+
+.appel-live-control.is-paused .appel-live-signal::before,
+.appel-live-control.is-paused .appel-live-signal::after,
+.appel-live-control.is-paused .appel-live-signal > span {
+  border-color: var(--border-default);
+  background: var(--text-muted);
+  box-shadow: none;
+}
+
+.appel-live-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.appel-live-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-live-copy small {
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.appel-live-meta {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.appel-live-meta span,
+.appel-live-meta b {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.appel-live-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-live-meta b {
+  flex: 0 0 auto;
+  color: var(--appel-red);
+  font-weight: 800;
+}
+
+.appel-live-meta .is-syncing svg,
+.is-spinning {
+  animation: appel-spin 750ms linear infinite;
+}
+
+.appel-navigation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.appel-tabs {
+  display: inline-flex;
+  min-width: 0;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.appel-tabs button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 750;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.appel-tabs button:hover {
+  color: var(--text-primary);
+}
+
+.appel-tabs button.is-active {
+  border-color: var(--border-default);
+  background: var(--bg-card);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.appel-tabs button > span {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--appel-violet-soft);
+  color: var(--appel-violet);
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.appel-refresh-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 750;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+
+.appel-refresh-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.appel-refresh-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.appel-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.appel-metric {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 102px;
+  align-items: flex-start;
+  gap: 10px;
+  overflow: hidden;
+  padding: 13px 13px 15px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.appel-metric::before {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 3px;
+  background: var(--metric-color);
+  content: '';
+}
+
+.appel-metric-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--metric-soft);
+  color: var(--metric-color);
+}
+
+.appel-metric-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.appel-metric-copy > span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.appel-metric-copy strong {
+  color: var(--text-primary);
+  font-size: 25px;
+  font-weight: 850;
+  line-height: 1.05;
+}
+
+.appel-metric-copy small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-metric-progress {
+  position: absolute;
+  inset-inline: 13px;
+  bottom: 8px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--bg-elevated);
+}
+
+.appel-metric-progress > span {
+  display: block;
+  width: var(--appel-progress);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--metric-color);
+  transition: width var(--transition-slow);
+}
+
+.appel-metric-blue { --metric-color: var(--appel-blue); --metric-soft: var(--appel-blue-soft); }
+.appel-metric-green { --metric-color: var(--appel-green); --metric-soft: var(--appel-green-soft); }
+.appel-metric-amber { --metric-color: var(--appel-amber); --metric-soft: var(--appel-amber-soft); }
+.appel-metric-red { --metric-color: var(--appel-red); --metric-soft: var(--appel-red-soft); }
+.appel-metric-violet { --metric-color: var(--appel-violet); --metric-soft: var(--appel-violet-soft); }
+
+.appel-live-strip {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-default);
+  border-inline-start: 3px solid var(--appel-red);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+.appel-live-strip > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.appel-live-strip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.appel-live-strip-dot.is-active {
+  background: var(--appel-red);
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.1);
+  animation: appel-live-dot 1.8s ease-in-out infinite;
+}
+
+.appel-live-strip strong {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.appel-live-strip p {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-live-strip > span {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--appel-blue-soft);
+  color: var(--appel-blue);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.appel-filter-panel {
+  padding: 15px 0;
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.appel-filter-heading,
+.appel-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.appel-filter-heading h2,
+.appel-section-heading h2 {
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.appel-section-heading p {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.appel-result-count {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.appel-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(230px, 1.3fr) minmax(170px, 0.8fr) minmax(350px, 1.5fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.appel-search-control,
+.appel-select-control {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.appel-search-control > svg,
+.appel-select-control > svg {
+  position: absolute;
+  inset-inline-start: 11px;
+  top: 13px;
+  z-index: 1;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.appel-search-control input,
+.appel-select-control select {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 11px 0 35px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+[dir='rtl'] .appel-search-control input,
+[dir='rtl'] .appel-select-control select {
+  padding: 0 35px 0 11px;
+}
+
+.appel-search-control input:focus,
+.appel-select-control select:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-10);
+}
+
+.appel-search-control input::placeholder {
+  color: var(--text-muted);
+}
+
+.appel-status-filters {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.appel-status-filters button {
+  min-height: 34px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 750;
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.appel-status-filters button:hover {
+  color: var(--text-primary);
+}
+
+.appel-status-filters button.is-active {
+  border-color: var(--border-default);
+  background: var(--bg-card);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.appel-clear-filters {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.appel-clear-filters:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.appel-guards-grid,
+.appel-loading-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.appel-guard-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid var(--border-default);
+  border-inline-start: 4px solid var(--appel-violet);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.appel-guard-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.appel-guard-card.is-present { border-inline-start-color: var(--appel-green); }
+.appel-guard-card.is-late { border-inline-start-color: var(--appel-amber); }
+.appel-guard-card.is-absent { border-inline-start-color: var(--appel-red); }
+
+.appel-guard-card.is-live-arrival {
+  animation: appel-live-arrival 1.15s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.appel-arrival-label {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border-end-start-radius: 7px;
+  background: var(--appel-red);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.appel-guard-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-inline-end: 2px;
+}
+
+.appel-agent-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.appel-agent-avatar {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 8px;
+  background: var(--appel-blue-soft);
+  color: var(--appel-blue);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.appel-agent-identity > div:last-child {
+  min-width: 0;
+}
+
+.appel-agent-identity h3 {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.3;
+}
+
+.appel-agent-identity p {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.appel-status-badge {
+  display: inline-flex;
+  min-height: 26px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.appel-status-success { background: var(--appel-green-soft); color: var(--appel-green); }
+.appel-status-warning { background: var(--appel-amber-soft); color: var(--appel-amber); }
+.appel-status-danger { background: var(--appel-red-soft); color: var(--appel-red); }
+.appel-status-pending { background: var(--appel-violet-soft); color: var(--appel-violet); }
+
+.appel-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: appel-pending-pulse 1.8s ease-in-out infinite;
+}
+
+.appel-guard-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.appel-guard-details > div {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.appel-detail-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border-radius: 7px;
+}
+
+.appel-detail-service { background: var(--appel-cyan-soft); color: var(--appel-cyan); }
+.appel-detail-shift { background: var(--shift-soft); color: var(--shift-color); }
+.appel-detail-planning { background: var(--appel-violet-soft); color: var(--appel-violet); }
+
+.appel-guard-details > div > div {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 1px;
+}
+
+.appel-guard-details small {
+  color: var(--text-muted);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.appel-guard-details strong {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-guard-details em {
+  color: var(--text-muted);
+  font-size: 8px;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+.appel-guard-details .planning-state-badge {
+  width: fit-content;
+  margin-top: 2px;
+}
+
+.appel-declaration-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+}
+
+.appel-declaration-summary > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.appel-declaration-summary span {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.appel-declaration-summary strong {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.appel-declaration-summary > small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appel-declaration-success { background: var(--appel-green-soft); color: var(--appel-green); }
+.appel-declaration-warning { background: var(--appel-amber-soft); color: var(--appel-amber); }
+.appel-declaration-danger { background: var(--appel-red-soft); color: var(--appel-red); }
+
+.appel-guard-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.appel-mark-action {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-input);
+  font-size: 10px;
+  font-weight: 800;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.appel-mark-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.appel-mark-success { color: var(--appel-green); }
+.appel-mark-warning { color: var(--appel-amber); }
+.appel-mark-danger { color: var(--appel-red); }
+
+.appel-mark-success:hover:not(:disabled),
+.appel-mark-success.is-selected { border-color: var(--appel-green); background: var(--appel-green-soft); }
+.appel-mark-warning:hover:not(:disabled),
+.appel-mark-warning.is-selected { border-color: var(--appel-amber); background: var(--appel-amber-soft); }
+.appel-mark-danger:hover:not(:disabled),
+.appel-mark-danger.is-selected { border-color: var(--appel-red); background: var(--appel-red-soft); }
+
+.appel-mark-action:disabled:not(.is-selected) {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.appel-mark-action.is-selected:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.appel-state-panel {
+  display: grid;
+  min-height: 230px;
+  place-content: center;
+  justify-items: center;
+  gap: 9px;
+  padding: 28px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.appel-state-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.appel-state-panel strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.appel-state-panel p {
+  max-width: 520px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.appel-state-danger .appel-state-icon {
+  background: var(--appel-red-soft);
+  color: var(--appel-red);
+}
+
+.appel-loading-grid {
+  pointer-events: none;
+}
+
+.appel-guard-skeleton {
+  min-height: 250px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-elevated) 50%, var(--bg-card) 75%);
+  background-size: 240% 100%;
+  animation: appel-skeleton 1.4s ease-in-out infinite;
+}
+
+.appel-usage-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.appel-usage-note svg {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+}
+
+.appel-usage-note p {
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.appel-history-stage {
+  display: grid;
+  gap: 15px;
+}
+
+.appel-pointer-stage {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+}
+
+.appel-section-heading {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.appel-history-stage .input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  outline: none;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.appel-history-stage .input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-10);
+}
+
+.appel-modal-overlay {
+  padding: 16px;
+}
+
+.appel-reason-modal {
+  width: min(100%, 620px);
+  max-width: 620px !important;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-top: 3px solid var(--appel-amber);
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-xl);
+}
+
+.appel-reason-danger { border-top-color: var(--appel-red); }
+
+.appel-reason-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 11px;
+  padding: 16px 17px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.appel-reason-title-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--appel-amber-soft);
+  color: var(--appel-amber);
+}
+
+.appel-reason-danger .appel-reason-title-icon {
+  background: var(--appel-red-soft);
+  color: var(--appel-red);
+}
+
+.appel-reason-header > div:nth-child(2) {
+  min-width: 0;
+}
+
+.appel-reason-header > div:nth-child(2) > span {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.appel-reason-header h2 {
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 850;
+}
+
+.appel-reason-header p {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.appel-modal-close {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  color: var(--text-secondary);
+}
+
+.appel-modal-close:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.appel-reason-body {
+  display: grid;
+  gap: 15px;
+  max-height: min(68vh, 620px);
+  overflow-y: auto;
+  padding: 17px;
+}
+
+.appel-reason-section {
+  display: grid;
+  gap: 7px;
+}
+
+.appel-field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+}
+
+.appel-field-heading > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.appel-field-heading span {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.appel-field-heading small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.appel-duration-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.appel-duration-input {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+
+.appel-duration-input:focus-within {
+  border-color: var(--appel-amber);
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.12);
+}
+
+.appel-duration-input input {
+  width: 82px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.appel-duration-input span {
+  padding-inline-end: 10px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.appel-duration-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.appel-duration-presets button {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.appel-duration-presets button:hover,
+.appel-duration-presets button.is-selected {
+  border-color: var(--appel-amber);
+  background: var(--appel-amber-soft);
+  color: var(--appel-amber);
+}
+
+.appel-reason-textarea {
+  width: 100%;
+  min-height: 108px;
+  padding: 10px 11px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  outline: 0;
+  resize: vertical;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.appel-reason-textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-10);
+}
+
+.appel-reason-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.appel-justification-shell {
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.appel-notification-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 8px;
+  background: var(--appel-blue-soft);
+  color: var(--text-secondary);
+}
+
+.appel-notification-note svg {
+  flex: 0 0 auto;
+  color: var(--appel-blue);
+}
+
+.appel-notification-note span {
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.appel-reason-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 13px 17px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.appel-confirm-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid var(--appel-amber);
+  border-radius: 8px;
+  background: var(--appel-amber);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.appel-confirm-danger {
+  border-color: var(--appel-red);
+  background: var(--appel-red);
+}
+
+.appel-confirm-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+@keyframes appel-live-ring {
+  0% { opacity: 0.7; transform: scale(0.72); }
+  75%, 100% { opacity: 0; transform: scale(1.3); }
+}
+
+@keyframes appel-live-dot {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1); }
+  50% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.03); }
+}
+
+@keyframes appel-pending-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@keyframes appel-live-arrival {
+  0% { border-color: var(--appel-red); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.24); opacity: 0.4; transform: translateY(-8px); }
+  45% { box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.08); opacity: 1; }
+  100% { box-shadow: var(--shadow-sm); transform: translateY(0); }
+}
+
+@keyframes appel-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes appel-skeleton {
+  to { background-position: -140% 0; }
+}
+
+@media (max-width: 1260px) {
+  .appel-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .appel-filter-grid {
+    grid-template-columns: minmax(220px, 1fr) minmax(170px, 0.7fr);
+  }
+
+  .appel-status-filters {
+    grid-column: 1 / -1;
+  }
+
+  .appel-clear-filters {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 980px) {
+  .appel-command-header {
+    flex-direction: column;
+  }
+
+  .appel-live-control {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .appel-guards-grid,
+  .appel-loading-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .appel-page {
+    gap: 15px;
+  }
+
+  .appel-pointer-stage {
+    gap: 15px;
+  }
+
+  .appel-navigation-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .appel-tabs {
+    width: 100%;
+  }
+
+  .appel-tabs button {
+    flex: 1;
+  }
+
+  .appel-refresh-button {
+    width: 100%;
+  }
+
+  .appel-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .appel-live-strip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .appel-live-strip > div {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .appel-live-strip p {
+    grid-column: 2;
+    white-space: normal;
+  }
+
+  .appel-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .appel-status-filters,
+  .appel-clear-filters {
+    grid-column: auto;
+  }
+
+  .appel-status-filters {
+    overflow-x: auto;
+    grid-template-columns: repeat(5, minmax(80px, 1fr));
+  }
+
+  .appel-guard-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .appel-guard-details strong {
+    white-space: normal;
+  }
+
+  .appel-declaration-summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 520px) {
+  .appel-command-header::after {
+    display: none;
+  }
+
+  .appel-title-row {
+    align-items: flex-start;
+  }
+
+  .appel-title-row h1 {
+    font-size: 22px;
+  }
+
+  .appel-title-row p {
+    font-size: 11px;
+  }
+
+  .appel-live-toggle {
+    min-height: 60px;
+  }
+
+  .appel-live-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .appel-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .appel-metric {
+    min-height: 88px;
+  }
+
+  .appel-filter-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .appel-result-count {
+    align-self: flex-start;
+  }
+
+  .appel-guard-card {
+    padding: 12px;
+  }
+
+  .appel-guard-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .appel-status-badge {
+    align-self: flex-start;
+  }
+
+  .appel-guard-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .appel-mark-action {
+    min-height: 44px;
+  }
+
+  .appel-reason-footer {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .appel-reason-footer .btn,
+  .appel-confirm-button {
+    width: 100%;
+  }
+
+  .appel-duration-input,
+  .appel-duration-presets {
+    width: 100%;
+  }
+
+  .appel-duration-presets {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appel-live-signal::before,
+  .appel-live-strip-dot.is-active,
+  .appel-status-dot,
+  .appel-guard-card.is-live-arrival,
+  .appel-live-meta .is-syncing svg,
+  .is-spinning,
+  .appel-guard-skeleton {
+    animation: none;
+  }
+
+  .appel-metric-progress > span,
+  .appel-guard-card,
+  .appel-mark-action {
+    transition: none;
+  }
+}
+
+[data-theme='dark'] .appel-page {
+  --appel-blue-soft: rgba(37, 99, 235, 0.17);
+  --appel-green-soft: rgba(5, 150, 105, 0.18);
+  --appel-amber-soft: rgba(217, 119, 6, 0.18);
+  --appel-red-soft: rgba(220, 38, 38, 0.17);
+  --appel-violet-soft: rgba(124, 58, 237, 0.18);
+  --appel-cyan-soft: rgba(8, 145, 178, 0.18);
+}
+
+[data-theme='dark'] .appel-status-success,
+[data-theme='dark'] .appel-mark-success,
+[data-theme='dark'] .appel-declaration-success {
+  color: #6ee7b7;
+}
+
+[data-theme='dark'] .appel-status-warning,
+[data-theme='dark'] .appel-mark-warning,
+[data-theme='dark'] .appel-declaration-warning {
+  color: #fbbf24;
+}
+
+[data-theme='dark'] .appel-status-danger,
+[data-theme='dark'] .appel-mark-danger,
+[data-theme='dark'] .appel-declaration-danger {
+  color: #fca5a5;
+}
+
+[data-theme='dark'] .appel-status-pending {
+  color: #c4b5fd;
+}
+
+[data-theme='dark'] .appel-detail-shift {
+  background: rgba(99, 102, 241, 0.17);
+  color: #a5b4fc;
+}

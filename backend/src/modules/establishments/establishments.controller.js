@@ -3,6 +3,39 @@ const { log, getIp } = require('../history/history.controller');
 const { initEstablishmentDefaults } = require('../schedules/rules-engine');
 const { ensureDefaultAbsenceTypes } = require('../absences/absence-types.service');
 
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+// Les établissements de cette plateforme sont tunisiens. Accepter une paire
+// GPS complète uniquement et refuser les valeurs qui produiraient un marqueur
+// hors du pays ou une erreur PostgreSQL difficile à comprendre.
+const parseTunisiaCoordinates = (body) => {
+  const hasLatitude = hasOwn(body, 'latitude');
+  const hasLongitude = hasOwn(body, 'longitude');
+
+  if (hasLatitude !== hasLongitude) {
+    return { error: 'La latitude et la longitude doivent être renseignées ensemble.' };
+  }
+  if (!hasLatitude) return { latitude: undefined, longitude: undefined };
+
+  const latitudeBlank = body.latitude === '' || body.latitude == null;
+  const longitudeBlank = body.longitude === '' || body.longitude == null;
+  if (latitudeBlank && longitudeBlank) return { latitude: null, longitude: null };
+  if (latitudeBlank || longitudeBlank) {
+    return { error: 'La latitude et la longitude doivent être renseignées ensemble.' };
+  }
+
+  const latitude = Number(body.latitude);
+  const longitude = Number(body.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return { error: 'Les coordonnées GPS doivent être des nombres valides.' };
+  }
+  if (latitude < 30 || latitude > 38 || longitude < 7 || longitude > 12.5) {
+    return { error: 'Les coordonnées GPS doivent se situer en Tunisie.' };
+  }
+
+  return { latitude, longitude };
+};
+
 // ──────────────────────────────────────────────────────────────
 // GET /api/establishments — liste (super_admin : tous | autres : le leur)
 // ──────────────────────────────────────────────────────────────
@@ -88,10 +121,14 @@ const create = async (req, res) => {
   // pour la future carte des hôpitaux, mais restent facultatives.
   const {
     code, name, nameAr, type = 'hospital', address, city, phone, email, governorate,
-    delegation, postalCode, addressDetails, latitude, longitude,
+    delegation, postalCode, addressDetails,
   } = req.body;
   if (!code || !name) {
     return res.status(400).json({ success: false, message: 'Code et nom de l\'établissement requis' });
+  }
+  const coordinates = parseTunisiaCoordinates(req.body);
+  if (coordinates.error) {
+    return res.status(400).json({ success: false, message: coordinates.error });
   }
 
   const result = await transaction(async (client) => {
@@ -104,8 +141,8 @@ const create = async (req, res) => {
       [code.toUpperCase(), name, nameAr || null, type, address || null, city || null, phone || null,
        email || null, governorate || null,
        delegation || null, postalCode || null, addressDetails || null,
-       latitude === '' || latitude == null ? null : latitude,
-       longitude === '' || longitude == null ? null : longitude]
+       coordinates.latitude ?? null,
+       coordinates.longitude ?? null]
     );
 
     const eid = est.rows[0].id;
@@ -189,8 +226,13 @@ const update = async (req, res) => {
 
   const {
     name, nameAr, type, address, city, phone, email, isActive, governorate,
-    delegation, postalCode, addressDetails, latitude, longitude,
+    delegation, postalCode, addressDetails,
   } = req.body;
+
+  const coordinates = parseTunisiaCoordinates(req.body);
+  if (coordinates.error) {
+    return res.status(400).json({ success: false, message: coordinates.error });
+  }
 
   const num = (v) => (v === '' || v == null ? null : v);
 
@@ -215,7 +257,7 @@ const update = async (req, res) => {
      RETURNING *`,
     [name, nameAr, type, address, city, phone, email, isActive, governorate ?? null,
      delegation ?? null, postalCode ?? null, addressDetails ?? null,
-     num(latitude), num(longitude), req.params.id]
+     num(coordinates.latitude), num(coordinates.longitude), req.params.id]
   );
 
   if (!result.rows[0]) return res.status(404).json({ success: false, message: 'Établissement introuvable' });

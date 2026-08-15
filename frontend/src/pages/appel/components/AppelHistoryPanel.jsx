@@ -1,150 +1,169 @@
-/**
- * AppelHistoryPanel — historique des appels (point 1).
- *
- * Écran neuf, monté en second onglet de l'appel du jour. Aucun composant
- * existant n'est modifié pour l'accueillir.
- *
- * CE QU'IL MONTRE, tel que demandé : qui a déclaré la présence, l'absence ou le
- * retard · dans quelle garde · pour quel agent · à quelle date — et la durée du
- * retard quand il s'agit d'un retard. Deux regroupements : par garde, par jour.
- *
- * SOURCE : `GET /api/journal?type=presence,absence,late` — le journal de service
- * porte déjà les trois issues d'un pointage avec leur déclarant
- * (`reported_by` → `reporterName`). Rien n'est recalculé ni dupliqué ; la portée
- * (service, hôpital) est celle que le serveur applique au rôle de l'appelant.
- *
- * LA DURÉE DU RETARD arrive dans `metadata.lateMinutes`, écrite par
- * `reportShiftAbsence`. Repli sur le titre de l'événement (« Retard signalé(e)
- * — 25 min ») pour rester lisible quelle que soit la source.
- */
-
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Building2,
+  CalendarDays,
+  CalendarRange,
+  CheckCircle2,
+  ClipboardCheck,
+  Clock3,
+  Filter,
+  History,
+  LayoutList,
+  RotateCcw,
+  Search,
+  SearchX,
+  Timer,
+  UserRound,
+  UserX,
+  UsersRound,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { absencesAPI, absencesShiftAPI, journalAPI } from '../../../api';
 import { JustificationBadge } from '../../../components/common/JustificationChoice';
 import HistoryCatchupModal from './HistoryCatchupModal';
+import './AppelHistoryPanel.css';
 
 /** Le serveur plafonne `limit` à 300 : on le demande explicitement. */
 const MAX_EVENTS = 300;
 
 const MARKS = {
-  presence: { label: 'Présent', emoji: '✅', color: '#10B981', bg: 'rgba(16, 185, 129, .10)' },
-  late:     { label: 'Retard',  emoji: '⏰', color: '#F59E0B', bg: 'rgba(245, 158, 11, .10)' },
-  absence:  { label: 'Absent',  emoji: '⛔', color: '#EF4444', bg: 'rgba(239, 68, 68, .10)' },
-  pending:  { label: 'Non pointé', emoji: '⚠️', color: '#B45309', bg: 'rgba(245, 158, 11, .12)' },
+  presence: { label: 'Présent', tone: 'success', icon: CheckCircle2 },
+  late: { label: 'Retard', tone: 'warning', icon: Clock3 },
+  absence: { label: 'Absent', tone: 'danger', icon: UserX },
+  pending: { label: 'Non pointé', tone: 'pending', icon: AlertTriangle },
 };
 
-const card = {
-  background: 'var(--bg-card)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 12,
+/** Date locale en `YYYY-MM-DD` : jamais `toISOString`, qui peut décaler d'un jour. */
+const dayKey = (date) => {
+  const pad = (number) => String(number).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 };
 
-/** Date locale en 'YYYY-MM-DD' — jamais toISOString, qui décale d'un jour. */
-const dayKey = (d) => {
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-
-const shiftDays = (n) => {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return dayKey(d);
+const shiftDays = (number) => {
+  const date = new Date();
+  date.setDate(date.getDate() + number);
+  return dayKey(date);
 };
 
 const LONG_DATE = (iso) => {
-  const d = new Date(`${iso}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const date = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 };
 
 const SHORT_DATE = (iso) => {
-  const d = new Date(`${iso}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const date = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
 };
 
 /** Durée du retard : `metadata` d'abord, titre en repli. */
-const lateMinutesOf = (ev) => {
-  const meta = ev.metadata && typeof ev.metadata === 'object' ? ev.metadata : null;
-  const raw = meta?.lateMinutes;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isFinite(n) && n >= 0) return n;
-  const m = /(\d+)\s*min/i.exec(String(ev.title || ''));
-  return m ? Number.parseInt(m[1], 10) : null;
+const lateMinutesOf = (event) => {
+  const metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : null;
+  const parsed = Number.parseInt(metadata?.lateMinutes, 10);
+  if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  const titleMatch = /(\d+)\s*min/i.exec(String(event.title || ''));
+  return titleMatch ? Number.parseInt(titleMatch[1], 10) : null;
 };
 
-const justificationOf = (ev) => {
-  if (typeof ev.isJustified === 'boolean') return ev.isJustified;
-  const meta = ev.metadata && typeof ev.metadata === 'object' ? ev.metadata : null;
-  return typeof meta?.isJustified === 'boolean' ? meta.isJustified : null;
+const justificationOf = (event) => {
+  if (typeof event.isJustified === 'boolean') return event.isJustified;
+  const metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : null;
+  return typeof metadata?.isJustified === 'boolean' ? metadata.isJustified : null;
 };
 
-/** « 1 h 25 » au-delà de l'heure, « 25 min » en dessous. */
 const durationLabel = (minutes) => {
   if (minutes === null || minutes === undefined) return null;
   if (minutes < 60) return `${minutes} min`;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours} h ${String(remainder).padStart(2, '0')}` : `${hours} h`;
 };
 
 const PRESETS = [
   { key: 'today', label: "Aujourd'hui", from: () => dayKey(new Date()), to: () => dayKey(new Date()) },
-  { key: '7',     label: '7 derniers jours',  from: () => shiftDays(-6),  to: () => dayKey(new Date()) },
-  { key: '30',    label: '30 derniers jours', from: () => shiftDays(-29), to: () => dayKey(new Date()) },
-  { key: 'custom', label: 'Intervalle…', from: null, to: null },
+  { key: '7', label: '7 derniers jours', from: () => shiftDays(-6), to: () => dayKey(new Date()) },
+  { key: '30', label: '30 derniers jours', from: () => shiftDays(-29), to: () => dayKey(new Date()) },
+  { key: 'custom', label: 'Intervalle', from: null, to: null },
 ];
 
-const Chip = ({ active, onClick, children }) => (
-  <button
-    onClick={onClick}
-    style={{
-      padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12,
-      fontWeight: active ? 700 : 500, fontFamily: 'inherit',
-      border: `1px solid ${active ? 'var(--color-primary)' : 'var(--border-default)'}`,
-      background: active ? 'var(--color-primary)' : 'var(--bg-card)',
-      color: active ? '#fff' : 'var(--text-secondary)',
-    }}
-  >
-    {children}
-  </button>
-);
-
-const Count = ({ mark, n }) => {
-  const m = MARKS[mark];
+function PresetButton({ active, onClick, children }) {
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700,
-      color: m.color, background: m.bg, borderRadius: 6, padding: '2px 7px',
-    }}>
-      {m.emoji} {n}
+    <button
+      type="button"
+      className={`appel-history-preset ${active ? 'is-active' : ''}`}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StatusCount({ mark, count, compact = false }) {
+  const metadata = MARKS[mark];
+  const Icon = metadata.icon;
+  return (
+    <span
+      className={`appel-history-count is-${metadata.tone} ${compact ? 'is-compact' : ''}`}
+      title={compact ? `${count} ${metadata.label.toLowerCase()}${count > 1 ? 's' : ''}` : undefined}
+    >
+      <Icon size={compact ? 13 : 15} aria-hidden="true" />
+      <strong>{count}</strong>
+      {!compact && <span>{metadata.label}</span>}
     </span>
   );
-};
+}
+
+function StatusBadge({ mark }) {
+  const metadata = MARKS[mark];
+  const Icon = metadata.icon;
+  return (
+    <span className={`appel-history-status is-${metadata.tone}`}>
+      <Icon size={14} aria-hidden="true" />
+      {metadata.label}
+    </span>
+  );
+}
+
+function ResultState({ tone = 'neutral', icon: Icon, title, children, action }) {
+  return (
+    <div className={`appel-history-state is-${tone}`} role={tone === 'danger' ? 'alert' : 'status'}>
+      <span className="appel-history-state-icon"><Icon size={22} aria-hidden="true" /></span>
+      <strong>{title}</strong>
+      <p>{children}</p>
+      {action}
+    </div>
+  );
+}
 
 export default function AppelHistoryPanel() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   const [preset, setPreset] = useState('7');
   const [customFrom, setCustomFrom] = useState(shiftDays(-6));
   const [customTo, setCustomTo] = useState(dayKey(new Date()));
-  const [groupBy, setGroupBy] = useState('schedule');   // 'schedule' | 'day'
+  const [groupBy, setGroupBy] = useState('schedule');
   const [scheduleFilter, setScheduleFilter] = useState('');
   const [markFilter, setMarkFilter] = useState('');
   const [search, setSearch] = useState('');
   const [pendingAction, setPendingAction] = useState(null);
 
-  const active = PRESETS.find((p) => p.key === preset) || PRESETS[1];
-  const from = active.from ? active.from() : customFrom;
-  const to   = active.to   ? active.to()   : customTo;
+  const activePreset = PRESETS.find((item) => item.key === preset) || PRESETS[1];
+  const from = activePreset.from ? activePreset.from() : customFrom;
+  const to = activePreset.to ? activePreset.to() : customTo;
 
-  /**
-   * Une seule requête, non filtrée par garde : la liste des gardes du sélecteur
-   * est déduite des déclarations réellement présentes dans l'intervalle, ce qui
-   * garantit qu'une option proposée renvoie toujours des lignes. Le filtre garde
-   * et le filtre agent s'appliquent donc côté client, sur le même jeu de données.
-   */
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['journal', 'appel-history', from, to],
     queryFn: () => journalAPI.getEvents({
@@ -160,7 +179,7 @@ export default function AppelHistoryPanel() {
     queryFn: () => journalAPI.getCalls({ from, to }),
   });
 
-  const { data: typesRes } = useQuery({
+  const { data: typesResponse } = useQuery({
     queryKey: ['absence-types'],
     queryFn: () => absencesAPI.getTypes(),
   });
@@ -172,80 +191,93 @@ export default function AppelHistoryPanel() {
   const serverToday = callInfo.today || dayKey(new Date());
   const missing = useMemo(() => (callInfo.calls || [])
     .filter((call) => call.date < serverToday && !call.isDeclared)
-    .map((call) => ({ ...call, id: `pending:${call.key}`, type: 'pending', reporterName: null })), [callInfo, serverToday]);
-  const absenceTypes = (typesRes?.data?.data || []).filter((t) => !t.is_leave);
-  const lateType = absenceTypes.find((t) => t.code === 'retard' || /retard/i.test(t.name || ''));
-  const absentType = absenceTypes.find((t) => t.code === 'absence_injustifiee')
-    || absenceTypes.find((t) => !/retard/i.test(t.name || ''));
+    .map((call) => ({
+      ...call,
+      id: `pending:${call.key}`,
+      type: 'pending',
+      reporterName: null,
+    })), [callInfo, serverToday]);
+  const absenceTypes = (typesResponse?.data?.data || []).filter((type) => !type.is_leave);
+  const lateType = absenceTypes.find((type) => type.code === 'retard' || /retard/i.test(type.name || ''));
+  const absentType = absenceTypes.find((type) => type.code === 'absence_injustifiee')
+    || absenceTypes.find((type) => !/retard/i.test(type.name || ''));
 
   const schedules = useMemo(() => {
-    const m = new Map();
-    [...events, ...missing].forEach((ev) => {
-      const id = ev.scheduleId || '__none__';
-      if (!m.has(id)) m.set(id, ev.scheduleName || 'Hors planning');
+    const scheduleMap = new Map();
+    [...events, ...missing].forEach((event) => {
+      const id = event.scheduleId || '__none__';
+      if (!scheduleMap.has(id)) scheduleMap.set(id, event.scheduleName || 'Hors planning');
     });
-    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], 'fr'));
+    return [...scheduleMap.entries()].sort((first, second) => first[1].localeCompare(second[1], 'fr'));
   }, [events, missing]);
 
   const rows = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const normalizedSearch = search.trim().toLowerCase();
     return [...events, ...missing]
-      .filter((ev) => MARKS[ev.type])
-      .filter((ev) => !scheduleFilter || (ev.scheduleId || '__none__') === scheduleFilter)
-      .filter((ev) => !markFilter || ev.type === markFilter)
-      .filter((ev) => {
-        if (!q) return true;
-        return (ev.userName || '').toLowerCase().includes(q)
-          || (ev.reporterName || '').toLowerCase().includes(q)
-          || (ev.scheduleName || '').toLowerCase().includes(q)
-          || (ev.departmentName || '').toLowerCase().includes(q);
+      .filter((event) => MARKS[event.type])
+      .filter((event) => !scheduleFilter || (event.scheduleId || '__none__') === scheduleFilter)
+      .filter((event) => !markFilter || event.type === markFilter)
+      .filter((event) => {
+        if (!normalizedSearch) return true;
+        return (event.userName || '').toLowerCase().includes(normalizedSearch)
+          || (event.reporterName || '').toLowerCase().includes(normalizedSearch)
+          || (event.scheduleName || '').toLowerCase().includes(normalizedSearch)
+          || (event.departmentName || '').toLowerCase().includes(normalizedSearch);
       })
-      .map((ev) => ({
-        ...ev,
-        lateMinutes: ev.type === 'late' ? lateMinutesOf(ev) : null,
-        isJustified: ['late', 'absence'].includes(ev.type) ? justificationOf(ev) : null,
+      .map((event) => ({
+        ...event,
+        lateMinutes: event.type === 'late' ? lateMinutesOf(event) : null,
+        isJustified: ['late', 'absence'].includes(event.type) ? justificationOf(event) : null,
       }));
   }, [events, missing, scheduleFilter, markFilter, search]);
 
   const totals = useMemo(() => {
-    const t = { presence: 0, late: 0, absence: 0, pending: 0 };
-    rows.forEach((r) => { t[r.type] += 1; });
-    return t;
+    const values = { presence: 0, late: 0, absence: 0, pending: 0 };
+    rows.forEach((row) => { values[row.type] += 1; });
+    return values;
   }, [rows]);
 
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ['journal', 'appel-history'] });
-    qc.invalidateQueries({ queryKey: ['journal', 'appel-calls'] });
-    qc.invalidateQueries({ queryKey: ['journal-overview'] });
-    qc.invalidateQueries({ queryKey: ['journal-alerts'] });
-    qc.invalidateQueries({ queryKey: ['shift-absences'] });
+    queryClient.invalidateQueries({ queryKey: ['journal', 'appel-history'] });
+    queryClient.invalidateQueries({ queryKey: ['journal', 'appel-calls'] });
+    queryClient.invalidateQueries({ queryKey: ['journal-overview'] });
+    queryClient.invalidateQueries({ queryKey: ['journal-alerts'] });
+    queryClient.invalidateQueries({ queryKey: ['shift-absences'] });
   };
 
   const catchup = useMutation({
     mutationFn: async ({ call, mark, details = {} }) => {
       if (mark === 'presence') {
         return journalAPI.addEvent({
-          departmentId: call.departmentId, scheduleId: call.scheduleId,
-          eventType: 'presence', userId: call.userId, dutyDate: call.date,
-          severity: 'info', title: `Présence rattrapée — ${call.userName}`,
+          departmentId: call.departmentId,
+          scheduleId: call.scheduleId,
+          eventType: 'presence',
+          userId: call.userId,
+          dutyDate: call.date,
+          severity: 'info',
+          title: `Présence rattrapée — ${call.userName}`,
           description: `Déclaration tardive pour la garde du ${SHORT_DATE(call.date)}`,
         });
       }
       const type = mark === 'late' ? lateType : absentType;
       return absencesShiftAPI.report({
-        userId: call.userId, scheduleId: call.scheduleId, date: call.date,
-        absenceTypeId: type?.id, absenceKind: mark === 'late' ? 'late' : 'absence',
-        reason: details.reason || undefined, isJustified: details.isJustified,
+        userId: call.userId,
+        scheduleId: call.scheduleId,
+        date: call.date,
+        absenceTypeId: type?.id,
+        absenceKind: mark === 'late' ? 'late' : 'absence',
+        reason: details.reason || undefined,
+        isJustified: details.isJustified,
         severity: mark === 'late' ? 'info' : 'warning',
         lateMinutes: mark === 'late' && details.lateMinutes !== '' ? Number(details.lateMinutes) : undefined,
       });
     },
-    onSuccess: (_data, vars) => {
-      toast.success(`${MARKS[vars.mark].label} enregistré(e) pour le ${SHORT_DATE(vars.call.date)}`);
+    onSuccess: (_response, variables) => {
+      toast.success(`${MARKS[variables.mark].label} enregistré(e) pour le ${SHORT_DATE(variables.call.date)}`);
       setPendingAction(null);
       refresh();
     },
-    onError: (e) => toast.error(e?.response?.data?.message || 'Rattrapage impossible'),
+    onError: (mutationError) => toast.error(mutationError?.response?.data?.message || 'Rattrapage impossible'),
   });
 
   const startCatchup = (call, mark) => {
@@ -256,234 +288,310 @@ export default function AppelHistoryPanel() {
     }
   };
 
-  /** Regroupement demandé : par garde, ou par jour. */
   const groups = useMemo(() => {
-    const m = new Map();
-    rows.forEach((r) => {
-      const key = groupBy === 'day' ? (r.date || '—') : (r.scheduleId || '__none__');
-      if (!m.has(key)) {
-        m.set(key, {
+    const groupMap = new Map();
+    rows.forEach((row) => {
+      const key = groupBy === 'day' ? (row.date || '—') : (row.scheduleId || '__none__');
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
           key,
-          title: groupBy === 'day' ? LONG_DATE(r.date) : (r.scheduleName || 'Hors planning'),
-          subtitle: groupBy === 'day' ? null : (r.departmentName || null),
+          title: groupBy === 'day' ? LONG_DATE(row.date) : (row.scheduleName || 'Hors planning'),
+          subtitle: groupBy === 'day' ? null : (row.departmentName || null),
           items: [],
         });
       }
-      m.get(key).items.push(r);
+      groupMap.get(key).items.push(row);
     });
-    const list = [...m.values()];
-    // Par jour : du plus récent au plus ancien. Par garde : ordre alphabétique.
+    const values = [...groupMap.values()];
     return groupBy === 'day'
-      ? list.sort((a, b) => String(b.key).localeCompare(String(a.key)))
-      : list.sort((a, b) => a.title.localeCompare(b.title, 'fr'));
+      ? values.sort((first, second) => String(second.key).localeCompare(String(first.key)))
+      : values.sort((first, second) => first.title.localeCompare(second.title, 'fr'));
   }, [rows, groupBy]);
 
+  const filtersActive = Boolean(scheduleFilter || markFilter || search.trim());
+  const resetFilters = () => {
+    setScheduleFilter('');
+    setMarkFilter('');
+    setSearch('');
+  };
+
   return (
-    <div>
-      {/* ── Filtres ─────────────────────────────────────────── */}
-      <div style={{ ...card, padding: 14, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-            Période
-          </span>
-          {PRESETS.map((p) => (
-            <Chip key={p.key} active={preset === p.key} onClick={() => setPreset(p.key)}>
-              {p.label}
-            </Chip>
-          ))}
+    <div className="appel-history-panel">
+      <section className="appel-history-command" aria-labelledby="appel-history-controls-title">
+        <header className="appel-history-command-header">
+          <span className="appel-history-command-icon"><Filter size={18} aria-hidden="true" /></span>
+          <div>
+            <span>Exploration de l'historique</span>
+            <h3 id="appel-history-controls-title">Affiner les déclarations</h3>
+            <p>Choisissez une période, puis croisez garde, état et personnel.</p>
+          </div>
+          <span className="appel-history-range"><CalendarRange size={14} />{SHORT_DATE(from)}<ArrowRight size={12} />{SHORT_DATE(to)}</span>
+        </header>
+
+        <div className="appel-history-period-row">
+          <div className="appel-history-control-label">
+            <CalendarDays size={15} aria-hidden="true" />
+            <span>Période</span>
+          </div>
+          <div className="appel-history-presets" role="group" aria-label="Période de l'historique">
+            {PRESETS.map((item) => (
+              <PresetButton key={item.key} active={preset === item.key} onClick={() => setPreset(item.key)}>
+                {item.label}
+              </PresetButton>
+            ))}
+          </div>
           {preset === 'custom' && (
-            <>
-              <input
-                type="date" className="input" style={{ maxWidth: 160, fontSize: 12 }}
-                value={customFrom} max={customTo}
-                onChange={(e) => setCustomFrom(e.target.value)}
-              />
-              <span style={{ color: 'var(--text-muted)' }}>→</span>
-              <input
-                type="date" className="input" style={{ maxWidth: 160, fontSize: 12 }}
-                value={customTo} min={customFrom}
-                onChange={(e) => setCustomTo(e.target.value)}
-              />
-            </>
+            <div className="appel-history-custom-range">
+              <label>
+                <span>Du</span>
+                <input
+                  type="date"
+                  value={customFrom}
+                  max={customTo}
+                  onChange={(event) => setCustomFrom(event.target.value)}
+                />
+              </label>
+              <ArrowRight size={14} aria-hidden="true" />
+              <label>
+                <span>Au</span>
+                <input
+                  type="date"
+                  value={customTo}
+                  min={customFrom}
+                  onChange={(event) => setCustomTo(event.target.value)}
+                />
+              </label>
+            </div>
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-            Regrouper
-          </span>
-          <Chip active={groupBy === 'schedule'} onClick={() => setGroupBy('schedule')}>Par garde</Chip>
-          <Chip active={groupBy === 'day'}      onClick={() => setGroupBy('day')}>Par jour</Chip>
+        <div className="appel-history-filter-grid">
+          <label className="appel-history-field appel-history-search">
+            <span className="appel-history-visually-hidden">Rechercher dans l'historique</span>
+            <Search size={16} aria-hidden="true" />
+            <input
+              type="search"
+              placeholder="Agent, déclarant, service…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
 
-          <span style={{ width: 1, height: 22, background: 'var(--border-default)', margin: '0 4px' }} />
+          <label className="appel-history-field">
+            <span className="appel-history-visually-hidden">Filtrer par garde</span>
+            <ClipboardCheck size={16} aria-hidden="true" />
+            <select value={scheduleFilter} onChange={(event) => setScheduleFilter(event.target.value)}>
+              <option value="">Toutes les gardes</option>
+              {schedules.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>
 
-          <select
-            className="input" style={{ maxWidth: 260, fontSize: 12 }}
-            value={scheduleFilter}
-            onChange={(e) => setScheduleFilter(e.target.value)}
-          >
-            <option value="">Toutes les gardes</option>
-            {schedules.map(([id, name]) => (
-              <option key={id} value={id}>{name}</option>
-            ))}
-          </select>
+          <label className="appel-history-field">
+            <span className="appel-history-visually-hidden">Filtrer par état</span>
+            <Filter size={16} aria-hidden="true" />
+            <select value={markFilter} onChange={(event) => setMarkFilter(event.target.value)}>
+              <option value="">Tous les états</option>
+              {Object.entries(MARKS).map(([key, metadata]) => (
+                <option key={key} value={key}>{metadata.label}</option>
+              ))}
+            </select>
+          </label>
 
-          <select
-            className="input" style={{ maxWidth: 170, fontSize: 12 }}
-            value={markFilter}
-            onChange={(e) => setMarkFilter(e.target.value)}
-          >
-            <option value="">Tous les états</option>
-            {Object.entries(MARKS).map(([key, m]) => (
-              <option key={key} value={key}>{m.emoji} {m.label}</option>
-            ))}
-          </select>
-
-          <input
-            className="input" style={{ maxWidth: 220, fontSize: 12 }}
-            placeholder="Agent, déclarant, service…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          {filtersActive && (
+            <button type="button" className="appel-history-reset" onClick={resetFilters}>
+              <RotateCcw size={14} aria-hidden="true" />Réinitialiser
+            </button>
+          )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
-          <strong style={{ color: 'var(--text-secondary)' }}>{rows.length}</strong> ligne(s)
-          <Count mark="presence" n={totals.presence} />
-          <Count mark="late"     n={totals.late} />
-          <Count mark="absence"  n={totals.absence} />
-          <Count mark="pending"  n={totals.pending} />
-          <span>· {SHORT_DATE(from)} → {SHORT_DATE(to)}</span>
-          {scopeLabel && <span>· {scopeLabel}</span>}
+        <div className="appel-history-group-row">
+          <div className="appel-history-control-label">
+            <LayoutList size={15} aria-hidden="true" />
+            <span>Regrouper</span>
+          </div>
+          <div className="appel-history-segmented" role="group" aria-label="Regrouper les résultats">
+            <button
+              type="button"
+              className={groupBy === 'schedule' ? 'is-active' : ''}
+              aria-pressed={groupBy === 'schedule'}
+              onClick={() => setGroupBy('schedule')}
+            >
+              <ClipboardCheck size={14} />Par garde
+            </button>
+            <button
+              type="button"
+              className={groupBy === 'day' ? 'is-active' : ''}
+              aria-pressed={groupBy === 'day'}
+              onClick={() => setGroupBy('day')}
+            >
+              <CalendarDays size={14} />Par jour
+            </button>
+          </div>
+          <span className="appel-history-scope">
+            <Building2 size={13} aria-hidden="true" />{scopeLabel || 'Périmètre autorisé'}
+          </span>
+        </div>
+
+        <div className="appel-history-summary" aria-label="Synthèse des résultats filtrés">
+          <div className="appel-history-total">
+            <UsersRound size={17} aria-hidden="true" />
+            <div><strong>{rows.length}</strong><span>déclaration{rows.length > 1 ? 's' : ''} dans la vue</span></div>
+          </div>
+          <StatusCount mark="presence" count={totals.presence} />
+          <StatusCount mark="late" count={totals.late} />
+          <StatusCount mark="absence" count={totals.absence} />
+          <StatusCount mark="pending" count={totals.pending} />
         </div>
 
         {truncated && (
-          <p style={{
-            margin: 0, fontSize: 11, color: '#92400E', background: 'rgba(245, 158, 11, .10)',
-            border: '1px solid rgba(245, 158, 11, .35)', borderRadius: 8, padding: '6px 10px',
-          }}>
-            Affichage limité aux {MAX_EVENTS} déclarations les plus récentes de l'intervalle —
-            resserrez la période pour tout voir.
-          </p>
+          <div className="appel-history-limit-alert" role="status">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <p>Affichage limité aux {MAX_EVENTS} déclarations les plus récentes. Resserrez la période pour tout consulter.</p>
+          </div>
         )}
-      </div>
+      </section>
 
-      {/* ── Résultats ───────────────────────────────────────── */}
       {(isError || callsError) ? (
-        <div style={{ ...card, padding: 40, textAlign: 'center', color: 'var(--color-danger)' }}>
+        <ResultState
+          tone="danger"
+          icon={UserX}
+          title="Historique indisponible"
+          action={<button type="button" onClick={refresh}><RotateCcw size={14} />Réessayer</button>}
+        >
           {error?.response?.status === 403
             ? "Votre rôle ne donne pas accès à l'historique des appels."
             : "L'historique des appels n'a pas pu être chargé."}
-        </div>
+        </ResultState>
       ) : (isLoading || callsLoading) ? (
-        <div style={{ ...card, padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-          Chargement de l'historique…
+        <div className="appel-history-loading" role="status" aria-label="Chargement de l'historique">
+          {[1, 2, 3].map((item) => <span key={item} />)}
         </div>
       ) : !groups.length ? (
-        <div style={{ ...card, padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-          🗂️ Aucun appel sur cette période
-          <div style={{ fontSize: 12, marginTop: 8 }}>
-            Les pointages faits depuis l'onglet « Pointer aujourd'hui » apparaissent ici
-            immédiatement.
-          </div>
-        </div>
+        <ResultState
+          icon={SearchX}
+          title={filtersActive ? 'Aucun résultat pour ces filtres' : 'Aucun appel sur cette période'}
+          action={filtersActive ? <button type="button" onClick={resetFilters}><RotateCcw size={14} />Effacer les filtres</button> : null}
+        >
+          {filtersActive
+            ? 'Modifiez les critères pour retrouver une déclaration ou un jour à rattraper.'
+            : "Les pointages faits depuis l'onglet Appel d'aujourd'hui apparaissent ici immédiatement."}
+        </ResultState>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {groups.map((g) => {
-            const t = { presence: 0, late: 0, absence: 0, pending: 0 };
-            g.items.forEach((i) => { t[i.type] += 1; });
-            return (
-              <div key={g.key} style={{ ...card, overflow: 'hidden' }}>
-                <div style={{
-                  padding: '10px 14px', background: 'var(--bg-elevated)',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-                }}>
-                  <span style={{ fontSize: 14 }}>{groupBy === 'day' ? '📅' : '📋'}</span>
-                  <div style={{ flex: 1, minWidth: 160 }}>
-                    <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-primary)', fontSize: 'var(--font-sm)' }}>
-                      {g.title}
-                    </p>
-                    {g.subtitle && (
-                      <p style={{ margin: 0, fontSize: 10, color: 'var(--text-muted)' }}>{g.subtitle}</p>
-                    )}
-                  </div>
-                  <Count mark="presence" n={t.presence} />
-                  <Count mark="late"     n={t.late} />
-                  <Count mark="absence"  n={t.absence} />
-                  <Count mark="pending"  n={t.pending} />
-                </div>
+        <div className="appel-history-groups">
+          {groups.map((group, groupIndex) => {
+            const groupTotals = { presence: 0, late: 0, absence: 0, pending: 0 };
+            group.items.forEach((item) => { groupTotals[item.type] += 1; });
+            const GroupIcon = groupBy === 'day' ? CalendarDays : ClipboardCheck;
+            const titleId = `appel-history-group-${groupIndex}`;
 
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-sm)' }}>
+            return (
+              <section className="appel-history-group" key={group.key} aria-labelledby={titleId}>
+                <header className="appel-history-group-header">
+                  <span className="appel-history-group-icon"><GroupIcon size={17} aria-hidden="true" /></span>
+                  <div className="appel-history-group-copy">
+                    <h3 id={titleId}>{group.title}</h3>
+                    <p>{group.subtitle || `${group.items.length} entrée${group.items.length > 1 ? 's' : ''}`}</p>
+                  </div>
+                  <div className="appel-history-group-counts" aria-label="Répartition du groupe">
+                    <StatusCount mark="presence" count={groupTotals.presence} compact />
+                    <StatusCount mark="late" count={groupTotals.late} compact />
+                    <StatusCount mark="absence" count={groupTotals.absence} compact />
+                    <StatusCount mark="pending" count={groupTotals.pending} compact />
+                  </div>
+                </header>
+
+                <div className="appel-history-table-wrap">
+                  <table className="appel-history-table">
+                    <caption className="appel-history-visually-hidden">Déclarations pour {group.title}</caption>
                     <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        {['Personnel concerné', 'État déclaré', groupBy === 'day' ? 'Garde' : 'Date', 'Déclaré par', 'Horodatage / Action'].map((h) => (
-                          <th key={h} style={{
-                            textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)',
-                            fontWeight: 700, textTransform: 'uppercase', fontSize: 10,
-                            letterSpacing: '.04em', whiteSpace: 'nowrap',
-                          }}>
-                            {h}
-                          </th>
-                        ))}
+                      <tr>
+                        <th scope="col">Personnel concerné</th>
+                        <th scope="col">État déclaré</th>
+                        <th scope="col">{groupBy === 'day' ? 'Garde' : 'Date'}</th>
+                        <th scope="col">Déclaré par</th>
+                        <th scope="col">Horodatage / action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {g.items.map((ev) => {
-                        const m = MARKS[ev.type];
+                      {group.items.map((event) => {
+                        const markMetadata = MARKS[event.type];
                         return (
-                          <tr key={ev.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                            <td style={{ padding: '9px 12px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                              {ev.userName || '—'}
-                              {ev.departmentName && groupBy === 'day' && (
-                                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>
-                                  {ev.departmentName}
+                          <tr className={`is-${markMetadata.tone}`} key={event.id}>
+                            <td data-label="Personnel concerné">
+                              <div className="appel-history-person">
+                                <span><UserRound size={16} aria-hidden="true" /></span>
+                                <div>
+                                  <strong>{event.userName || '—'}</strong>
+                                  {event.departmentName && groupBy === 'day' && <small><Building2 size={11} />{event.departmentName}</small>}
                                 </div>
-                              )}
+                              </div>
                             </td>
-                            <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' }}>
-                              <span style={{ color: m.color, fontWeight: 700 }}>
-                                {m.emoji} {m.label}
+                            <td data-label="État déclaré">
+                              <div className="appel-history-status-stack">
+                                <div>
+                                  <StatusBadge mark={event.type} />
+                                  {event.type === 'late' && (
+                                    <span className="appel-history-duration"><Timer size={12} />{durationLabel(event.lateMinutes) || 'Durée non précisée'}</span>
+                                  )}
+                                  {['late', 'absence'].includes(event.type) && typeof event.isJustified === 'boolean' && (
+                                    <span className="appel-history-justification"><JustificationBadge value={event.isJustified} /></span>
+                                  )}
+                                </div>
+                                {event.type === 'pending' && <small className="appel-history-pending-copy">Aucune déclaration enregistrée</small>}
+                                {event.description && <p>{event.description}</p>}
+                              </div>
+                            </td>
+                            <td data-label={groupBy === 'day' ? 'Garde' : 'Date'}>
+                              <span className="appel-history-cell-detail">
+                                {groupBy === 'day' ? <ClipboardCheck size={14} /> : <CalendarDays size={14} />}
+                                {groupBy === 'day' ? (event.scheduleName || 'Hors planning') : SHORT_DATE(event.date)}
                               </span>
-                              {/* Durée du retard — la donnée neuve du point 1. */}
-                              {ev.type === 'late' && (
-                                <span style={{
-                                  marginLeft: 6, fontSize: 11, fontWeight: 700, color: '#92400E',
-                                  background: 'rgba(245, 158, 11, .14)', borderRadius: 6, padding: '1px 6px',
-                                }}>
-                                  {durationLabel(ev.lateMinutes) || 'durée non précisée'}
-                                </span>
-                              )}
-                              {['late', 'absence'].includes(ev.type) && typeof ev.isJustified === 'boolean' && (
-                                <span style={{ display: 'inline-block', marginLeft: 6 }}>
-                                  <JustificationBadge value={ev.isJustified} />
-                                </span>
-                              )}
-                              {ev.type === 'pending' && (
-                                <div style={{ fontSize: 10, color: '#92400E', marginTop: 2 }}>Aucune déclaration enregistrée</div>
-                              )}
-                              {ev.description && (
-                                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400, marginTop: 2, maxWidth: 260 }}>
-                                  {ev.description}
-                                </div>
-                              )}
                             </td>
-                            <td style={{ padding: '9px 12px', color: 'var(--text-secondary)', fontSize: 12 }}>
-                              {groupBy === 'day' ? (ev.scheduleName || 'Hors planning') : SHORT_DATE(ev.date)}
+                            <td data-label="Déclaré par">
+                              <span className="appel-history-cell-detail">
+                                <UserRound size={14} />
+                                {event.reporterName || (event.type === 'pending' ? 'À rattraper' : '—')}
+                              </span>
                             </td>
-                            <td style={{ padding: '9px 12px', color: 'var(--text-secondary)', fontSize: 12 }}>
-                              {ev.reporterName || (ev.type === 'pending' ? 'À rattraper' : '—')}
-                            </td>
-                            <td style={{ padding: '9px 12px', color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
-                              {ev.type === 'pending' ? (
-                                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                                  <button className="btn btn-sm" disabled={catchup.isPending} onClick={() => startCatchup(ev, 'presence')}>✅ Présent</button>
-                                  <button className="btn btn-sm" disabled={catchup.isPending} onClick={() => startCatchup(ev, 'late')}>⏰ Retard</button>
-                                  <button className="btn btn-sm" disabled={catchup.isPending} onClick={() => startCatchup(ev, 'absence')}>⛔ Absent</button>
+                            <td data-label="Horodatage / action">
+                              {event.type === 'pending' ? (
+                                <div className="appel-history-catchup-actions">
+                                  <button
+                                    type="button"
+                                    className="is-success"
+                                    disabled={catchup.isPending}
+                                    onClick={() => startCatchup(event, 'presence')}
+                                    aria-label={`Rattraper la présence de ${event.userName} le ${SHORT_DATE(event.date)}`}
+                                  >
+                                    <CheckCircle2 size={14} />Présent
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="is-warning"
+                                    disabled={catchup.isPending}
+                                    onClick={() => startCatchup(event, 'late')}
+                                    aria-label={`Rattraper le retard de ${event.userName} le ${SHORT_DATE(event.date)}`}
+                                  >
+                                    <Clock3 size={14} />Retard
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="is-danger"
+                                    disabled={catchup.isPending}
+                                    onClick={() => startCatchup(event, 'absence')}
+                                    aria-label={`Rattraper l'absence de ${event.userName} le ${SHORT_DATE(event.date)}`}
+                                  >
+                                    <UserX size={14} />Absent
+                                  </button>
                                 </div>
                               ) : (
-                                <>{ev.declaredDate && ev.declaredDate !== ev.date ? `Garde ${SHORT_DATE(ev.date)} · saisi ${SHORT_DATE(ev.declaredDate)}` : SHORT_DATE(ev.date)}{ev.hour ? ` · ${ev.hour}` : ''}</>
+                                <span className="appel-history-timestamp">
+                                  <History size={13} />
+                                  {event.declaredDate && event.declaredDate !== event.date
+                                    ? `Garde ${SHORT_DATE(event.date)} · saisi ${SHORT_DATE(event.declaredDate)}`
+                                    : SHORT_DATE(event.date)}
+                                  {event.hour ? ` · ${event.hour}` : ''}
+                                </span>
                               )}
                             </td>
                           </tr>
@@ -492,20 +600,22 @@ export default function AppelHistoryPanel() {
                     </tbody>
                   </table>
                 </div>
-              </div>
+              </section>
             );
           })}
         </div>
       )}
 
-      <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.6 }}>
-        Les déclarations existantes restent en lecture seule. Seules les gardes passées sans aucun
-        pointage peuvent recevoir leur première déclaration depuis cet historique.
-      </p>
+      <div className="appel-history-footnote">
+        <History size={15} aria-hidden="true" />
+        <p>Les déclarations existantes restent en lecture seule. Seules les gardes passées sans pointage peuvent recevoir leur première déclaration depuis cet historique.</p>
+      </div>
 
       {pendingAction && (
         <HistoryCatchupModal
-          call={pendingAction.call} mark={pendingAction.mark} busy={catchup.isPending}
+          call={pendingAction.call}
+          mark={pendingAction.mark}
+          busy={catchup.isPending}
           onClose={() => !catchup.isPending && setPendingAction(null)}
           onConfirm={(details) => catchup.mutate({ ...pendingAction, details })}
         />

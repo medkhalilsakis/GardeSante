@@ -96,6 +96,8 @@ export const useRealtime = () => {
     // Absences
     const handleAbsence = (payload) => {
       queryClient.invalidateQueries({ queryKey: ['absences'] });
+      queryClient.invalidateQueries({ queryKey: ['journal'] });
+      queryClient.invalidateQueries({ queryKey: ['journal-overview'] });
       if (payload?.scheduleId) {
         queryClient.invalidateQueries({ queryKey: ['schedules', payload.scheduleId] });
       }
@@ -161,6 +163,7 @@ export const useRealtime = () => {
     // (`journal:event`, `alert:updated`). Les clés react-query du Lot 4 sont
     // `journal-events`, `journal-alerts` et `journal-overview`.
     const handleJournal = () => {
+      queryClient.invalidateQueries({ queryKey: ['journal'] });
       queryClient.invalidateQueries({ queryKey: ['journal-events'] });
       queryClient.invalidateQueries({ queryKey: ['journal-overview'] });
     };

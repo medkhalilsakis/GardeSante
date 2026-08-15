@@ -8,6 +8,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { BellRing, CheckCircle2, Eye, GitCompareArrows, RefreshCw, ShieldAlert, Siren, UserPlus, UserX } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { journalAPI } from '../../../api';
 
@@ -29,13 +30,22 @@ const SEVERITY_META = {
   info:     { label: 'Info',     color: '#6366F1', bg: 'rgba(99, 102, 241, .08)' },
 };
 
+const WORKSPACE_TYPE_ICONS = {
+  staff_absent: UserX,
+  shift_uncovered: ShieldAlert,
+  replacement_pending: RefreshCw,
+  insufficient_staff: UserPlus,
+  urgent_notification: Siren,
+  conflict_detected: GitCompareArrows,
+};
+
 const VIEWS = [
   { value: 'open',  label: 'Ouvertes',  resolved: 'false' },
   { value: 'done',  label: 'Résolues',  resolved: 'true' },
   { value: 'all',   label: 'Toutes',    resolved: 'all' },
 ];
 
-export default function ServiceAlertsPanel({ departmentId, canAct = false, title = 'Alertes de service' }) {
+export default function ServiceAlertsPanel({ departmentId, canAct = false, title = 'Alertes de service', variant = 'default' }) {
   const qc = useQueryClient();
   const [view, setView] = useState('open');
 
@@ -66,17 +76,19 @@ export default function ServiceAlertsPanel({ departmentId, canAct = false, title
 
   const critical = alerts.filter((a) => ['critical', 'urgent'].includes(a.severity)).length;
 
+  const isWorkspace = variant === 'workspace';
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 200 }}>
+    <div className={`service-alerts-panel${isWorkspace ? ' service-alerts-panel-workspace' : ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="service-alerts-panel-heading" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div className="service-alerts-panel-title-block" style={{ flex: 1, minWidth: 200 }}>
           <h3 style={{ fontSize: 'var(--font-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</h3>
           <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
             {payload?.scopeLabel || 'Portée déduite de votre rôle'}
             {critical > 0 ? ` · ${critical} critique(s)` : ''}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div className="service-alerts-panel-tabs" style={{ display: 'flex', gap: 6 }}>
           {VIEWS.map((v) => (
             <button
               key={v.value}
@@ -109,23 +121,25 @@ export default function ServiceAlertsPanel({ departmentId, canAct = false, title
           padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)',
           background: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: 'var(--border-radius-lg)',
         }}>
-          {view === 'open' ? '✅ Aucune alerte ouverte' : 'Aucune alerte'}
+          {view === 'open' ? (isWorkspace ? 'Aucune alerte ouverte' : '✅ Aucune alerte ouverte') : 'Aucune alerte'}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="service-alerts-panel-list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {alerts.map((a) => {
             const meta = TYPE_META[a.type] || { label: a.type, emoji: '🔔' };
             const sev = SEVERITY_META[a.severity] || SEVERITY_META.info;
+            const TypeIcon = WORKSPACE_TYPE_ICONS[a.type] || BellRing;
             return (
-              <div key={a.id} style={{
+              <div key={a.id} className="service-alerts-panel-item" style={{
                 display: 'flex', gap: 12, alignItems: 'flex-start',
                 background: a.resolvedAt ? 'var(--bg-card)' : sev.bg,
                 border: '1px solid var(--border-subtle)',
-                borderLeft: `3px solid ${a.resolvedAt ? 'var(--border-default)' : sev.color}`,
+                borderLeft: isWorkspace ? undefined : `3px solid ${a.resolvedAt ? 'var(--border-default)' : sev.color}`,
+                borderInlineStart: isWorkspace ? `3px solid ${a.resolvedAt ? 'var(--border-default)' : sev.color}` : undefined,
                 borderRadius: 'var(--border-radius-sm)', padding: '12px 14px',
                 opacity: a.resolvedAt ? 0.75 : 1,
               }}>
-                <span style={{ fontSize: 18, lineHeight: 1.1 }}>{meta.emoji}</span>
+                {isWorkspace ? <span className="service-alerts-panel-type-icon" style={{ '--alert-tone': sev.color, '--alert-tone-bg': sev.bg }}><TypeIcon size={15} /></span> : <span style={{ fontSize: 18, lineHeight: 1.1 }}>{meta.emoji}</span>}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -153,13 +167,14 @@ export default function ServiceAlertsPanel({ departmentId, canAct = false, title
                   </p>
                 </div>
                 {canAct && !a.resolvedAt && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <div className="service-alerts-panel-actions" style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                     {!a.acknowledgedAt && (
                       <button
                         className="btn btn-secondary btn-sm"
                         disabled={act.isPending}
                         onClick={() => act.mutate({ id: a.id, action: 'acknowledge' })}
                       >
+                        {isWorkspace && <Eye size={13} />}
                         Prendre en compte
                       </button>
                     )}
@@ -168,6 +183,7 @@ export default function ServiceAlertsPanel({ departmentId, canAct = false, title
                       disabled={act.isPending}
                       onClick={() => act.mutate({ id: a.id, action: 'resolve' })}
                     >
+                      {isWorkspace && <CheckCircle2 size={13} />}
                       Résoudre
                     </button>
                   </div>
