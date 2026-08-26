@@ -1,0 +1,144 @@
+' ============================================================================
+' GardeSanté — Diagramme d'activités : Autre Personnel
+'
+' Rôle créé pour figurer au registre du personnel sans ouvrir l'application :
+' zéro permission, volontairement. La figure a donc deux lectures. Ce qu'elle
+' montre à gauche est l'intention : un compte qui n'ouvre rien. Ce qu'elle
+' montre à droite est le constat : la connexion réussit, et un routeur entier
+' du logiciel ne demande rien d'autre que d'être connecté.
+'
+' Sources vérifiées :
+'   backend/src/db/migrations/012_role_autre.sql
+'     rôle 'autre', niveau 8, « Autre Personnel » / « موظف اخر »
+'     « AUTRE : aucune permission (profil seul, sans acces plateforme) »
+'     « Pas d'INSERT role_permissions pour 'autre' — aucun acces »
+'     Vérifié : la table role_permissions ne contient AUCUNE ligne pour ce rôle.
+'   backend/src/modules/auth/auth.controller.js
+'     la connexion ne consulte pas les permissions : aucun rôle n'est refusé à
+'     l'authentification. Le jeton est délivré normalement.
+'   backend/src/middleware/auth.js
+'     requirePermission renvoie 403 dès que la permission manque : toute route
+'     gardée lui est donc fermée, une par une, sans exception.
+'   Routes atteignables sans aucune permission :
+'     profile/profile.routes.js:7      authenticate + injectEstablishment
+'     notifications/notifications.routes.js:6  authenticate seul
+'     history/history.routes.js:7,9    /mine sans permission
+'   ÉCART GRAVE :
+'     schedules/schedule-builder.routes.js:16  router.use(authenticate) SEUL —
+'       aucun requirePermission sur les vingt-quatre routes du routeur
+'     schedule-builder.controller.js:424-500  saveDraft — sur un planning au
+'       statut 'draft', AUCUN contrôle de rôle n'est effectué : seule la borne
+'       d'établissement et, pour le Tableur fixe, le rôle de chef sont vérifiés
+'     schedule-builder.controller.js:1313-1320  la soumission ne vérifie que
+'       l'établissement et le statut : aucun contrôle de rôle non plus
+'     schedule-builder.controller.js  getWizardContext sert sans permission le
+'       registre du personnel, les types de garde, les règles de garde ET les
+'       périodes d'absence de l'établissement
+' ============================================================================
+@startuml 48-activite-autre-personnel
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontColor #0F172A
+  DiamondBackgroundColor #EEF2FF
+  DiamondBorderColor #1B4FCA
+  DiamondFontColor #1B4FCA
+  StartColor #0F766E
+  EndColor #B91C1C
+  BarColor #7A3E9D
+}
+skinparam partition {
+  BackgroundColor #F8FAFC
+  BorderColor #94A3B8
+  FontColor #475569
+  FontStyle bold
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Activités — Autre Personnel : zéro permission, et pourtant un compte qui s'ouvre
+
+start
+
+:s'authentifier;
+note right
+  La connexion ne consulte pas les permissions.
+  Le rôle a été conçu « sans acces plateforme »,
+  mais rien ne le refuse à l'entrée : le jeton
+  est délivré comme pour n'importe qui.
+end note
+
+partition "Ce que son compte lui donne" {
+  fork
+    :consulter et modifier\nsa fiche de profil;
+  fork again
+    :changer ses identifiants,\nses préférences;
+  fork again
+    :demander une correction\nde ses données;
+    #F3E8FF:la demande attend\nun administrateur;
+  fork again
+    :consulter ses notifications;
+  fork again
+    :lire son propre historique;
+  end fork
+}
+
+partition "Ce que le modèle de permissions lui refuse" {
+  :ouvrir n'importe quel écran métier;
+  #FEE2E2:403 — plannings, gardes, absences,\nremplacements, statistiques, annuaire,\nnotes, journal de service, prêts;
+  note right
+    Le contrôle des permissions est appliqué route
+    par route. Comme aucune permission n'est
+    associée à ce rôle, chaque route gardée répond
+    par un refus, sans exception.
+  end note
+}
+
+partition "Ce que le logiciel laisse malgré tout passer" {
+  fork
+    #FEF3C7:obtenir le registre du personnel,\nles types de garde, les règles\net les périodes d'absence;
+  fork again
+    #FEF3C7:écrire la grille d'un\nplanning au brouillon;
+  fork again
+    #FEF3C7:mettre ce planning\nen vigueur;
+  end fork
+}
+
+stop
+
+floating note left
+  **Un routeur entier ne demande que d'être connecté.** Le module qui porte le
+  tableur de garde n'installe qu'un contrôle d'authentification : aucune de ses
+  routes ne vérifie de permission. L'autorisation y est écrite à la main, dans
+  chaque fonction — et deux fonctions décisives ne la vérifient pas. La
+  sauvegarde d'un brouillon ne contrôle que l'établissement, plus le rôle de chef
+  dans le seul cas du Tableur fixe. La mise en vigueur ne contrôle que
+  l'établissement et le statut. Aucune des deux ne regarde qui appelle.
+  ====
+  **La borne qui subsiste n'est pas une autorisation.** Ce routeur n'expose
+  aucune route de liste : pour agir, il faut déjà connaître l'identifiant d'un
+  planning, que les routes de liste gardées ne livrent pas. Mais le contexte de
+  l'assistant, lui, se sert sans permission : l'annuaire complet de
+  l'établissement, les règles de garde et les périodes d'absence du personnel
+  partent à qui les demande, connecté. C'est une borne de fait, pas de droit.
+  ====
+  **Pourquoi cette figure est utile au rapport.** Un rôle vide est le meilleur
+  révélateur d'un modèle d'autorisation : tout ce qu'il atteint est, par
+  construction, ce qui n'est gardé par rien. Le contraste entre les deux dernières
+  bandes mesure exactement l'écart entre le modèle de permissions déclaré en base
+  et l'autorisation réellement appliquée dans le code.
+end note
+
+legend right
+  Fond teinté violet : écriture en base. Fond teinté rouge : refus opposé par le logiciel.
+  Fond ambre : atteignable dans le logiciel livré alors que le rôle ne détient aucune permission.
+  Le détail du modèle de permissions par rôle fait l'objet des figures 01 à 08.
+endlegend
+
+@enduml

@@ -1,323 +1,220 @@
-import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { departmentsAPI, usersAPI } from '../../api';
-import { useAuthStore } from '../../store';
-import { useTranslation, getInitials } from '../../utils/helpers';
+import React, { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Building2, Check, Plus, Power, UserMinus, UserPlus, UsersRound, X } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { departmentsAPI, usersAPI } from '../../api';
+import Avatar from '../../components/common/Avatar';
+import { GsBadge, GsEmpty, GsPageHeader, GsPanel, GsSkeleton } from '../../components/gs';
+import { useAuthStore } from '../../store';
+import { useTranslation } from '../../utils/helpers';
+import './departments.css';
+
+const DEPARTMENT_TYPES = [
+  { value: 'emergency', label: 'Urgences' },
+  { value: 'surgery', label: 'Chirurgie' },
+  { value: 'icu', label: 'Soins intensifs' },
+  { value: 'internal', label: 'Médecine interne' },
+  { value: 'pediatrics', label: 'Pédiatrie' },
+  { value: 'radiology', label: 'Radiologie' },
+  { value: 'other', label: 'Autre' },
+];
+
+const typeLabel = (code) => DEPARTMENT_TYPES.find((type) => type.value === code)?.label || code || 'Non renseigné';
+const memberName = (member) => `${member?.first_name || ''} ${member?.last_name || ''}`.trim();
 
 export default function DepartmentsPage() {
-  const { user, hasPermission } = useAuthStore();
+  const { hasPermission } = useAuthStore();
   const { t } = useTranslation();
-  const qc = useQueryClient();
-  const [selected, setSelected] = useState(null);
+  const queryClient = useQueryClient();
+  const [selectedId, setSelectedId] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [migrationSource, setMigrationSource] = useState(null);
 
   const { data: departments = [], isLoading } = useQuery({
     queryKey: ['departments-full'],
-    queryFn: () => departmentsAPI.getAll().then(r => r.data.data),
+    queryFn: () => departmentsAPI.getAll().then((response) => response.data.data || []),
   });
-
+  const selected = departments.find((department) => department.id === selectedId) || null;
   const canCreate = hasPermission('departments.create');
   const canUpdate = hasPermission('departments.update');
 
-  // Département sélectionné → charger ses membres
-  const { data: deptDetail, isLoading: loadingDetail } = useQuery({
-    queryKey: ['department', selected?.id],
-    queryFn: () => departmentsAPI.getOne(selected.id).then(r => r.data.data),
-    enabled: !!selected?.id,
+  const { data: departmentDetail, isLoading: detailLoading } = useQuery({
+    queryKey: ['department', selectedId],
+    queryFn: () => departmentsAPI.getOne(selectedId).then((response) => response.data.data),
+    enabled: Boolean(selectedId),
   });
 
-  const removeMemberMutation = useMutation({
-    mutationFn: ({ deptId, userId }) => departmentsAPI.removeMember(deptId, userId),
-    onSuccess: () => { toast.success('Membre retiré'); qc.invalidateQueries(['department', selected?.id]); },
-  });
-
-  const typeColors = {
-    emergency: '#EF4444',
-    surgery: '#6366F1',
-    icu: '#F59E0B',
-    internal: '#10B981',
-    pediatrics: '#0EA5E9',
-    radiology: '#8B5CF6',
-    other: '#64748B',
+  const refreshDepartments = () => {
+    queryClient.invalidateQueries({ queryKey: ['departments-full'] });
+    queryClient.invalidateQueries({ queryKey: ['departments'] });
   };
 
+  const removeMember = useMutation({
+    mutationFn: ({ departmentId, userId }) => departmentsAPI.removeMember(departmentId, userId),
+    onSuccess: () => {
+      toast.success('Membre retiré du service');
+      queryClient.invalidateQueries({ queryKey: ['department', selectedId] });
+      refreshDepartments();
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Retrait impossible'),
+  });
+
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">{t('nav.departments')}</h1>
-          <p className="page-subtitle">{departments.length} service(s) configuré(s)</p>
-        </div>
-        {canCreate && (
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-            + Nouveau service
-          </button>
-        )}
-      </div>
+    <div className="gsdept-wrap">
+      <GsPageHeader
+        eyebrow="Organisation hospitalière"
+        title={t('nav.departments') || 'Gestion des services'}
+        subtitle="Consultez l’effectif, les responsables et les paramètres de chaque service. Toute fermeture migre d’abord le personnel."
+        meta={[
+          { label: 'Services actifs', value: departments.length },
+          { label: 'Personnel rattaché', value: departments.reduce((total, department) => total + Number(department.member_count || 0), 0) },
+        ]}
+        actions={canCreate ? <button type="button" className="gs-btn is-primary" onClick={() => setShowCreate(true)}><Plus size={15} /> Nouveau service</button> : null}
+      />
 
-      <div style={{ display: 'grid', gridTemplateColumns: selected ? '320px 1fr' : 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--space-4)' }}>
-        {/* Liste des services */}
-        <div style={selected ? { display: 'flex', flexDirection: 'column', gap: 8 } : { display: 'contents' }}>
-          {isLoading ? (
-            Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="skeleton" style={{ height: selected ? 72 : 130, borderRadius: 12 }} />
-            ))
-          ) : (
-            departments.map(dept => {
-              const color = typeColors[dept.department_type] || typeColors.other;
-              const isSelected = selected?.id === dept.id;
-              return (
-                <div
-                  key={dept.id}
-                  className="card"
-                  onClick={() => setSelected(isSelected ? null : dept)}
-                  style={{
-                    cursor: 'pointer',
-                    borderColor: isSelected ? 'var(--color-primary)' : 'var(--border-subtle)',
-                    background: isSelected ? 'var(--color-primary-10)' : 'var(--bg-card)',
-                    transition: 'all var(--transition-fast)',
-                  }}
-                >
-                  <div style={{ padding: selected ? '12px 16px' : '16px 20px' }}>
-                    {!selected && (
-                      <div style={{ height: 4, background: color, borderRadius: 2, marginBottom: 14, marginLeft: -20, marginRight: -20, marginTop: -16 }} />
-                    )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{
-                        width: selected ? 32 : 42, height: selected ? 32 : 42,
-                        borderRadius: 10, background: `${color}20`, color,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontWeight: 800, fontSize: selected ? 14 : 18, flexShrink: 0,
-                      }}>
-                        {dept.code?.substring(0, 2)}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: selected ? 'var(--font-sm)' : 'var(--font-md)', marginBottom: 2 }}>
-                          {dept.name}
-                        </p>
-                        {dept.name_ar && (
-                          <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', direction: 'rtl', textAlign: 'right' }}>{dept.name_ar}</p>
-                        )}
-                        {!selected && (
-                          <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>
-                            {dept.head_count || 0} médecin(s) · {dept.code}
-                          </p>
-                        )}
-                      </div>
-                      {dept.is_active ? (
-                        <span className="badge badge-active" style={{ fontSize: 9 }}>Actif</span>
-                      ) : (
-                        <span className="badge badge-cancelled" style={{ fontSize: 9 }}>Inactif</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
+      <div className={`gsdept-layout${selected ? '' : ' is-empty'}`}>
+        <div className="gsdept-list" aria-label="Liste des services">
+          {isLoading ? <GsSkeleton variant="block" count={6} /> : departments.map((department) => (
+            <button
+              key={department.id}
+              type="button"
+              className="gsdept-item"
+              aria-current={selected?.id === department.id}
+              onClick={() => setSelectedId(selected?.id === department.id ? null : department.id)}
+            >
+              <span className="gsdept-item-top">
+                <span className="gsdept-code">{String(department.code || 'SV').slice(0, 3)}</span>
+                <span className="gsdept-copy">
+                  <strong>{department.name}</strong>
+                  <small>{typeLabel(department.department_type)} · {Number(department.member_count || 0)} membre(s)</small>
+                </span>
+                <GsBadge tone="duty" dot>Actif</GsBadge>
+              </span>
+              <span className="gsdept-copy">
+                <small>{department.head_first_name ? `Chef : ${department.head_first_name} ${department.head_last_name || ''}` : 'Chef non désigné'}</small>
+                <small>{Number(department.supervisor_count || 0)} surveillant(s) de service</small>
+              </span>
+            </button>
+          ))}
+          {!isLoading && departments.length === 0 ? <GsEmpty icon={<Building2 size={27} />} title="Aucun service actif" hint="Créez le premier service de l’établissement pour organiser le personnel." /> : null}
         </div>
 
-        {/* Détail du département sélectionné */}
-        {selected && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            {/* Infos */}
-            <div className="card" style={{ padding: '20px 24px' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
-                <div>
-                  <h2 style={{ fontSize: 'var(--font-2xl)', fontWeight: 800, color: 'var(--text-primary)' }}>{selected.name}</h2>
-                  {selected.name_ar && <p style={{ color: 'var(--text-muted)', direction: 'rtl' }}>{selected.name_ar}</p>}
-                </div>
-                <button className="btn btn-ghost btn-icon" onClick={() => setSelected(null)}>✕</button>
+        {selected ? (
+          <GsPanel className="gsdept-detail" flush>
+            <div className="gsdept-detail-head">
+              <div className="gsdept-detail-title">
+                <span className="gs-eyebrow">{selected.code || 'Service'}</span>
+                <h2>{selected.name}</h2>
+                <p>{selected.name_ar || typeLabel(selected.department_type)}</p>
               </div>
-              <div className="form-row">
-                {[
-                  { label: 'Code', value: selected.code },
-                  { label: 'Type', value: selected.department_type },
-                  { label: 'Étage', value: selected.floor || '—' },
-                  { label: 'Aile', value: selected.wing || '—' },
-                  { label: 'Capacité lits', value: selected.bed_count ?? '—' },
-                  { label: 'Garde minimale', value: selected.min_guard_count ? `${selected.min_guard_count} médecin(s)` : '—' },
-                ].map(({ label, value }) => (
-                  <div key={label} style={{ padding: '10px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                    <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>{label}</p>
-                    <p style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 'var(--font-sm)' }}>{value ?? '—'}</p>
-                  </div>
-                ))}
+              <div className="gsdept-member-actions">
+                {canUpdate ? <button type="button" className="gs-btn is-alert" onClick={() => setMigrationSource(selected)}><Power size={14} /> Désactiver</button> : null}
+                <button type="button" className="gsdept-close" onClick={() => setSelectedId(null)} aria-label="Fermer le détail"><X size={15} /></button>
               </div>
             </div>
 
-            {/* Membres */}
-            <div className="card">
-              <div className="card-header">
-                <h3 className="card-title">Membres du service</h3>
-                {canUpdate && (
-                  <AddMemberButton deptId={selected.id} onSuccess={() => qc.invalidateQueries(['department', selected.id])} />
-                )}
-              </div>
-              {loadingDetail ? (
-                <div style={{ padding: 20 }}>
-                  {Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
-                      <div className="skeleton" style={{ width: 36, height: 36, borderRadius: '50%' }} />
-                      <div className="skeleton" style={{ height: 14, flex: 1 }} />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div>
-                  {(deptDetail?.members || []).map(member => (
-                    <div key={member.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px',
-                      borderBottom: '1px solid var(--border-subtle)',
-                    }}>
-                      <div className="avatar avatar-sm" style={{ background: 'var(--color-primary-10)', color: 'var(--color-primary-light)' }}>
-                        {getInitials(member.first_name, member.last_name)}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <p style={{ fontWeight: 600, fontSize: 'var(--font-sm)', color: 'var(--text-primary)' }}>
-                          Dr. {member.first_name} {member.last_name}
-                        </p>
-                        <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>
-                          {member.grade} {member.speciality ? `· ${member.speciality}` : ''}
-                          {member.is_head && <span style={{ color: 'var(--color-warning)', marginLeft: 6, fontWeight: 700 }}>★ Chef</span>}
-                        </p>
-                      </div>
-                      {canUpdate && !member.is_head && (
-                        <button
-                          className="btn btn-ghost btn-icon btn-sm"
-                          onClick={() => removeMemberMutation.mutate({ deptId: selected.id, userId: member.id })}
-                          title="Retirer du service"
-                          style={{ color: 'var(--color-danger)' }}
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {(!deptDetail?.members?.length) && (
-                    <p style={{ padding: '24px 20px', color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>
-                      Aucun membre dans ce service
-                    </p>
-                  )}
-                </div>
-              )}
+            <div className="gsdept-facts">
+              {[
+                ['Type', typeLabel(selected.department_type)],
+                ['Étage', selected.floor || 'Non renseigné'],
+                ['Aile', selected.wing || 'Non renseignée'],
+                ['Capacité', selected.bed_count != null ? `${selected.bed_count} lit(s)` : 'Non renseignée'],
+                ['Garde minimale', selected.min_guard_count != null ? `${selected.min_guard_count} personne(s)` : 'Non renseignée'],
+                ['Téléphone', selected.phone || 'Non renseigné'],
+              ].map(([label, value]) => <div className="gsdept-fact" key={label}><span>{label}</span><strong>{value}</strong></div>)}
             </div>
-          </div>
-        )}
+
+            <div className="gsdept-members">
+              <div className="gsdept-detail-head">
+                <div className="gsdept-detail-title"><h2>Membres du service</h2><p>{Number(departmentDetail?.member_count || 0)} personnel(s) actif(s)</p></div>
+                {canUpdate ? <AddMemberControl departmentId={selected.id} members={departmentDetail?.members || []} onSuccess={() => { queryClient.invalidateQueries({ queryKey: ['department', selected.id] }); refreshDepartments(); }} /> : null}
+              </div>
+              {detailLoading ? <div className="gsdept-empty"><GsSkeleton variant="rows" count={4} /></div> : (departmentDetail?.members || []).map((member) => (
+                <div className="gsdept-member" key={member.id}>
+                  <Avatar avatarUrl={member.avatar_url} firstName={member.first_name} lastName={member.last_name} size="sm" />
+                  <div className="gsdept-member-copy">
+                    <strong>{memberName(member) || 'Personnel sans nom'}</strong>
+                    <small>{[member.role_name, member.grade, member.speciality].filter(Boolean).join(' · ') || 'Fonction non renseignée'}</small>
+                  </div>
+                  {member.is_head ? <GsBadge tone="seal" dot>Chef de service</GsBadge> : null}
+                  {canUpdate && !member.is_head ? <button type="button" className="gsdept-close" title="Retirer du service" aria-label={`Retirer ${memberName(member)}`} disabled={removeMember.isPending} onClick={() => removeMember.mutate({ departmentId: selected.id, userId: member.id })}><UserMinus size={14} /></button> : null}
+                </div>
+              ))}
+              {!detailLoading && !(departmentDetail?.members || []).length ? <div className="gsdept-empty"><GsEmpty bare icon={<UsersRound size={25} />} title="Aucun membre dans ce service" hint="Ajoutez un personnel existant ou créez son compte depuis la gestion du personnel." /></div> : null}
+            </div>
+          </GsPanel>
+        ) : null}
       </div>
 
-      {showCreate && (
-        <CreateDepartmentModal
-          onClose={() => setShowCreate(false)}
-          onSuccess={() => { setShowCreate(false); qc.invalidateQueries(['departments-full']); qc.invalidateQueries(['departments']); }}
-        />
-      )}
+      {showCreate ? <CreateDepartmentModal onClose={() => setShowCreate(false)} onSuccess={() => { setShowCreate(false); refreshDepartments(); }} /> : null}
+      {migrationSource ? <MigrateDepartmentModal source={migrationSource} departments={departments} onClose={() => setMigrationSource(null)} onSuccess={() => { setMigrationSource(null); setSelectedId(null); refreshDepartments(); }} /> : null}
     </div>
   );
 }
 
-function AddMemberButton({ deptId, onSuccess }) {
-  const [show, setShow] = useState(false);
+function AddMemberControl({ departmentId, members, onSuccess }) {
+  const [expanded, setExpanded] = useState(false);
   const [userId, setUserId] = useState('');
-  const { data: allUsers = [] } = useQuery({
+  const memberIds = useMemo(() => new Set(members.map((member) => member.id)), [members]);
+  const { data: users = [], isLoading } = useQuery({
     queryKey: ['all-users-flat'],
-    queryFn: () => usersAPI.getAll({ limit: 200 }).then(r => r.data.data),
-    enabled: show,
+    queryFn: () => usersAPI.getAll({ limit: 200, isActive: 'true' }).then((response) => response.data.data || []),
+    enabled: expanded,
+  });
+  const candidates = users.filter((user) => user.role_code !== 'general_supervisor' && !memberIds.has(user.id));
+  const addMember = useMutation({
+    mutationFn: () => departmentsAPI.addMember(departmentId, { userId }),
+    onSuccess: () => {
+      toast.success('Membre ajouté au service');
+      setUserId('');
+      setExpanded(false);
+      onSuccess();
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Ajout impossible'),
   });
 
-  const addMutation = useMutation({
-    mutationFn: () => departmentsAPI.addMember(deptId, { userId }),
-    onSuccess: () => { toast.success('Membre ajouté'); setShow(false); setUserId(''); onSuccess(); },
-    onError: (err) => toast.error(err.response?.data?.message || 'Erreur'),
-  });
-
-  if (!show) return (
-    <button className="btn btn-primary btn-sm" onClick={() => setShow(true)}>+ Ajouter</button>
-  );
-
+  if (!expanded) return <button type="button" className="gs-btn is-primary" onClick={() => setExpanded(true)}><UserPlus size={14} /> Ajouter</button>;
   return (
-    <div style={{ display: 'flex', gap: 8 }}>
-      <select className="form-control" style={{ fontSize: 'var(--font-xs)', width: 220 }} value={userId} onChange={e => setUserId(e.target.value)}>
-        <option value="">Choisir un médecin</option>
-        {/* Le surveillant général couvre tout l'hôpital : il n'appartient à
-            aucun service. Le serveur refuse ce rattachement en 400, on évite
-            simplement de le proposer. */}
-        {allUsers.filter(u => u.role_code !== 'general_supervisor').map(u => <option key={u.id} value={u.id}>Dr. {u.first_name} {u.last_name}</option>)}
+    <div className="gsdept-add">
+      <select className="form-control" value={userId} onChange={(event) => setUserId(event.target.value)} disabled={isLoading}>
+        <option value="">{isLoading ? 'Chargement…' : 'Choisir un personnel'}</option>
+        {candidates.map((user) => <option key={user.id} value={user.id}>{memberName(user)} · {user.job_title || user.role_name || user.role_code}</option>)}
       </select>
-      <button className="btn btn-success btn-sm" onClick={() => addMutation.mutate()} disabled={!userId || addMutation.isPending}>✓</button>
-      <button className="btn btn-ghost btn-sm" onClick={() => setShow(false)}>✕</button>
+      <button type="button" className="gsdept-close" aria-label="Confirmer l’ajout" disabled={!userId || addMember.isPending} onClick={() => addMember.mutate()}><Check size={15} /></button>
+      <button type="button" className="gsdept-close" aria-label="Annuler l’ajout" onClick={() => { setExpanded(false); setUserId(''); }}><X size={15} /></button>
     </div>
   );
 }
 
 function CreateDepartmentModal({ onClose, onSuccess }) {
   const { user } = useAuthStore();
-  const [form, setForm] = useState({ name: '', nameAr: '', code: '', departmentType: 'other', floor: '', bedCount: '' });
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await departmentsAPI.create({ ...form, establishmentId: user.establishmentId });
-      toast.success('Service créé');
-      onSuccess();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Erreur');
-    } finally { setLoading(false); }
+  const [form, setForm] = useState({ name: '', nameAr: '', code: '', departmentType: 'other', floor: '', wing: '', phone: '', bedCount: '', minGuardCount: '1' });
+  const createDepartment = useMutation({
+    mutationFn: (payload) => departmentsAPI.create(payload),
+    onSuccess: () => { toast.success('Service créé'); onSuccess(); },
+    onError: (error) => toast.error(error.response?.data?.message || 'Création impossible'),
+  });
+  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const submit = (event) => {
+    event.preventDefault();
+    createDepartment.mutate({
+      ...form,
+      establishmentId: user?.establishmentId,
+      bedCount: form.bedCount === '' ? null : Number(form.bedCount),
+      minGuardCount: form.minGuardCount === '' ? null : Number(form.minGuardCount),
+    });
   };
+  return <div className="modal-overlay" onMouseDown={(event) => event.target === event.currentTarget && !createDepartment.isPending && onClose()}><div className="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="gsdept-create-title"><div className="modal-header"><div><span className="gs-eyebrow">Organisation hospitalière</span><h2 className="modal-title" id="gsdept-create-title">Nouveau service</h2></div><button type="button" className="gsdept-close" onClick={onClose} disabled={createDepartment.isPending} aria-label="Fermer"><X size={16} /></button></div><form onSubmit={submit}><div className="modal-body gsdept-modal-body"><div className="gsdept-modal-grid"><label className="gsdept-field"><span>Nom en français *</span><input className="form-control" value={form.name} onChange={(event) => set('name', event.target.value)} required /></label><label className="gsdept-field"><span>Nom en arabe</span><input className="form-control" dir="rtl" value={form.nameAr} onChange={(event) => set('nameAr', event.target.value)} /></label><label className="gsdept-field"><span>Code *</span><input className="form-control" maxLength={10} value={form.code} onChange={(event) => set('code', event.target.value.toUpperCase())} required /></label><label className="gsdept-field"><span>Type</span><select className="form-control" value={form.departmentType} onChange={(event) => set('departmentType', event.target.value)}>{DEPARTMENT_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label><label className="gsdept-field"><span>Étage</span><input className="form-control" value={form.floor} onChange={(event) => set('floor', event.target.value)} /></label><label className="gsdept-field"><span>Aile</span><input className="form-control" value={form.wing} onChange={(event) => set('wing', event.target.value)} /></label><label className="gsdept-field"><span>Téléphone</span><input className="form-control" value={form.phone} onChange={(event) => set('phone', event.target.value)} /></label><label className="gsdept-field"><span>Nombre de lits</span><input type="number" min="0" className="form-control" value={form.bedCount} onChange={(event) => set('bedCount', event.target.value)} /></label><label className="gsdept-field"><span>Effectif minimal de garde</span><input type="number" min="1" className="form-control" value={form.minGuardCount} onChange={(event) => set('minGuardCount', event.target.value)} /></label></div></div><div className="modal-footer"><button type="button" className="gs-btn" onClick={onClose} disabled={createDepartment.isPending}>Annuler</button><button type="submit" className="gs-btn is-primary" disabled={createDepartment.isPending}>{createDepartment.isPending ? 'Création…' : 'Créer le service'}</button></div></form></div></div>;
+}
 
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <div className="modal-header">
-          <h2 className="modal-title">Nouveau service hospitalier</h2>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}>✕</button>
-        </div>
-        <form onSubmit={handleSubmit}>
-          <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Nom (FR) *</label>
-                <input className="form-control" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
-              </div>
-              <div className="form-group">
-                <label className="form-label">الاسم (AR)</label>
-                <input className="form-control" value={form.nameAr} onChange={e => setForm(f => ({ ...f, nameAr: e.target.value }))} dir="rtl" />
-              </div>
-            </div>
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Code *</label>
-                <input className="form-control" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} maxLength={10} required />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Type</label>
-                <select className="form-control" value={form.departmentType} onChange={e => setForm(f => ({ ...f, departmentType: e.target.value }))}>
-                  {['emergency','surgery','icu','internal','pediatrics','radiology','other'].map(t => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Étage</label>
-                <input className="form-control" value={form.floor} onChange={e => setForm(f => ({ ...f, floor: e.target.value }))} placeholder="Ex: 2ème" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Nb. lits</label>
-                <input type="number" className="form-control" value={form.bedCount} onChange={e => setForm(f => ({ ...f, bedCount: e.target.value }))} min={0} />
-              </div>
-            </div>
-          </div>
-          <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Annuler</button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? 'Création...' : 'Créer le service'}</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
+function MigrateDepartmentModal({ source, departments, onClose, onSuccess }) {
+  const [targetDepartmentId, setTargetDepartmentId] = useState('');
+  const targets = departments.filter((department) => department.id !== source.id && department.is_active !== false);
+  const migrate = useMutation({
+    mutationFn: () => departmentsAPI.migrateAndDeactivate(source.id, targetDepartmentId),
+    onSuccess: (response) => { toast.success(response.data.message || 'Personnel migré et service désactivé'); onSuccess(); },
+    onError: (error) => toast.error(error.response?.data?.message || 'Migration impossible'),
+  });
+  const submit = (event) => { event.preventDefault(); migrate.mutate(); };
+  return <div className="modal-overlay" onMouseDown={(event) => event.target === event.currentTarget && !migrate.isPending && onClose()}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="gsdept-migrate-title"><div className="modal-header"><div><span className="gs-eyebrow">Fermeture contrôlée</span><h2 className="modal-title" id="gsdept-migrate-title">Désactiver {source.name}</h2></div><button type="button" className="gsdept-close" onClick={onClose} disabled={migrate.isPending} aria-label="Fermer"><X size={16} /></button></div><form onSubmit={submit}><div className="modal-body gsdept-modal-body"><div className="gsdept-migrate"><strong>Le service ne sera désactivé qu’après la migration de tout son personnel.</strong><span>Le statut de chef n’est pas transféré automatiquement. Les membres rejoignent le service de destination, puis le service source devient inactif.</span></div><label className="gsdept-field"><span>Service de destination *</span><select className="form-control" value={targetDepartmentId} onChange={(event) => setTargetDepartmentId(event.target.value)} required><option value="">Choisir un autre service</option>{targets.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>{targets.length === 0 ? <div className="gsdept-migrate"><strong>Aucun service de destination disponible.</strong><span>Créez ou activez un autre service avant de fermer celui-ci.</span></div> : null}</div><div className="modal-footer"><button type="button" className="gs-btn" onClick={onClose} disabled={migrate.isPending}>Annuler</button><button type="submit" className="gs-btn is-alert" disabled={!targetDepartmentId || migrate.isPending}>{migrate.isPending ? 'Migration…' : 'Migrer et désactiver'}</button></div></form></div></div>;
 }

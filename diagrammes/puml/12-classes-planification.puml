@@ -1,0 +1,266 @@
+' ============================================================================
+' GardeSanté — Diagramme de classes : noyau de la planification
+'
+' Sources vérifiées (information_schema + pg_constraint) :
+'   schedules(12), schedule_versions(0), schedule_snapshots(0),
+'   schedule_workflow_history(8), schedule_change_proposals(0), shifts(6),
+'   shift_types(16), schedule_staff_assignments(30),
+'   schedule_staff_periods(30), schedule_cycles(0).
+'
+' Contraintes CHECK relevées :
+'   chk_schedule_status  : draft | submitted | under_review | approved
+'                          | rejected | active | archived
+'   chk_shift_status     : planned | confirmed | absent | replaced
+'                          | cancelled | completed
+'   schedule_versions_status_check       : final | pending_chef | accepted
+'                                          | rejected | available_to_general
+'   schedule_versions_review_stage_check : service_supervisor
+'                                          | general_supervisor
+'   schedule_change_proposals_status_check : pending | accepted | rejected
+' ============================================================================
+@startuml 12-classes-planification
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam classAttributeIconSize 0
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  HeaderBackgroundColor #EEF2FF
+  FontStyle bold
+  AttributeFontSize 10
+  AttributeFontColor #334155
+  BackgroundColor<<référentiel>> #FFFFFF
+  BorderColor<<référentiel>> #0F766E
+  HeaderBackgroundColor<<référentiel>> #E6F4F1
+  BackgroundColor<<autre paquet>> #F8FAFC
+  BorderColor<<autre paquet>> #94A3B8
+  HeaderBackgroundColor<<autre paquet>> #F1F5F9
+  FontColor<<autre paquet>> #475569
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+hide circle
+hide methods
+
+title Diagramme de classes — Noyau de la planification
+
+class Planning {
+  + id : UUID
+  --
+  nom : VARCHAR(200)
+  dateDébut : DATE
+  dateFin : DATE
+  état : VARCHAR(30) = 'draft'
+  --
+  typePériode : VARCHAR(30) = 'monthly'
+  modeCréation : VARCHAR(30) = 'manual'
+  type : VARCHAR(30) = 'normal'
+  typePlanning : VARCHAR(50) = 'normal'
+  --
+  étapeWorkflowCourante : INT = 0
+  partagé : BOOL = false
+  partagéAvec : UUID[]
+  métadonnées : JSONB
+  notes : TEXT
+  motifRejet : TEXT
+  publiéLe : TIMESTAMPTZ
+  crééLe : TIMESTAMPTZ
+  modifiéLe : TIMESTAMPTZ
+  --
+  «CHECK» dateFin >= dateDébut
+}
+
+class VersionPlanning {
+  + id : UUID
+  --
+  numéroVersion : INT
+  rôleAuteur : VARCHAR(40)
+  étapeRevue : VARCHAR(30)
+  état : VARCHAR(30) = 'pending_chef'
+  instantané : JSONB
+  commentaire : TEXT
+  commentaireDécision : TEXT
+  décidéeLe : TIMESTAMPTZ
+  finale : BOOL = false
+}
+
+class InstantanéPlanning {
+  + id : UUID
+  --
+  instantané : JSONB
+  version : INT = 1
+  crééLe : TIMESTAMPTZ
+}
+
+class ÉtapeWorkflow {
+  + id : UUID
+  --
+  ordre : INT
+  action : VARCHAR(30)
+  commentaire : TEXT
+  crééLe : TIMESTAMPTZ
+}
+
+class PropositionModification {
+  + id : UUID
+  --
+  proposition : JSONB
+  commentaire : TEXT
+  état : VARCHAR(20) = 'pending'
+  commentaireDécision : TEXT
+  décidéeLe : TIMESTAMPTZ
+}
+
+class LigneDeTableur {
+  + id : UUID
+  --
+  débutPériode : DATE
+  finPériode : DATE
+  position : INT = 0
+  --
+  «CHECK» finPériode >= débutPériode
+}
+
+class PériodeAgent {
+  + id : UUID
+  --
+  débutPériode : DATE
+  finPériode : DATE
+  position : INT = 0
+}
+
+class CyclePlanning {
+  + id : UUID
+  --
+  libellé : VARCHAR(20)
+  couleur : VARCHAR(7)
+  dateDébut : DATE
+  dateFin : DATE
+  équipes : UUID[]
+  motifDeGarde : JSONB
+  notes : TEXT
+}
+
+class Garde {
+  + id : UUID
+  --
+  dateDeGarde : DATE
+  débutRéel : TIMESTAMPTZ
+  finRéelle : TIMESTAMPTZ
+  état : VARCHAR(30) = 'planned'
+  renfort : BOOL = false
+  notes : TEXT
+}
+
+class TypeDeGarde <<référentiel>> {
+  + id : UUID
+  --
+  code : VARCHAR(30)
+  nom : VARCHAR(100)
+  nomAr : VARCHAR(100)
+  heureDébut : TIME
+  heureFin : TIME
+  duréeHeures : NUMERIC
+  chevaucheMinuit : BOOL = false
+  couleur : VARCHAR(7)
+  actif : BOOL = true
+}
+
+class Utilisateur <<autre paquet>> {
+  + id : UUID
+}
+
+class Service <<autre paquet>> {
+  + id : UUID
+}
+
+class ModèleDePlanning <<autre paquet>> {
+  + id : UUID
+}
+
+Planning "0..*" --> "1" Service : couvre
+Planning "0..*" --> "1" Utilisateur : élaboré par
+Planning "0..*" --> "0..1" ModèleDePlanning : instancie
+
+Planning "1" *-- "0..*" VersionPlanning : versionne
+Planning "0..1" --> "0..1" VersionPlanning : version finale
+VersionPlanning "0..1" o-- "0..*" VersionPlanning : version parente
+
+Planning "1" *-- "0..*" InstantanéPlanning : archive
+Planning "1" *-- "0..*" ÉtapeWorkflow : historise
+Planning "1" *-- "0..*" PropositionModification : reçoit
+Planning "1" *-- "0..*" LigneDeTableur : compose
+Planning "1" *-- "0..*" PériodeAgent : découpe
+Planning "1" *-- "0..*" CyclePlanning : cadence
+Planning "1" *-- "0..*" Garde : planifie
+
+LigneDeTableur "0..*" --> "1" Utilisateur : agent de la ligne
+PériodeAgent "0..*" --> "1" Utilisateur : agent
+Garde "0..*" --> "1" Utilisateur : agent de garde
+Garde "0..*" --> "1" TypeDeGarde : typée par
+PropositionModification "0..*" --> "1" Utilisateur : proposée par
+PropositionModification "0..*" --> "0..1" Utilisateur : arbitrée par
+ÉtapeWorkflow "0..*" --> "1" Utilisateur : acteur
+VersionPlanning "0..*" --> "1" Utilisateur : auteur
+
+note as N1
+  **Sept états, une seule transition irréversible.**
+  `draft` → `submitted` → `under_review` →
+  `approved` | `rejected` → `active` → `archived`.
+  Le passage à `active` fait basculer le planning du
+  régime « brouillon modifiable » au régime « en
+  vigueur » : à partir de là, la grille n'est plus
+  réécrite. Le détail figure au diagramme d'états.
+end note
+
+note as N2
+  **Le tableur validé n'est jamais réécrit.**
+  Une fois le planning en vigueur, toute évolution
+  passe par une surcouche : `PropositionModification`
+  pour un changement soumis à arbitrage, et l'entité
+  `Remplacement` du paquet voisin pour une substitution
+  d'agent. La grille d'origine reste consultable telle
+  qu'elle a été validée, ce qui préserve la valeur
+  juridique du document signé.
+end note
+
+note as N3
+  **La grille exploitée est `LigneDeTableur`.**
+  `Garde` est très peu alimentée : 30 lignes de tableur
+  pour 6 gardes en base. La saisie se fait par ligne
+  d'agent et par période, et les cellules sont
+  conservées dans `Planning.métadonnées`. Le moteur de
+  règles ne lit donc pas `Garde` : il reconstruit les
+  affectations depuis le tableur, ligne par ligne, pour
+  contrôler le repos, les doubles affectations et les
+  gardes tombant pendant un congé approuvé.
+end note
+
+note as N4
+  `VersionPlanning` chaîne les révisions par
+  `version parente` et distingue deux étapes de revue
+  (`service_supervisor`, `general_supervisor`) de
+  l'état de la version (`pending_chef`, `accepted`,
+  `rejected`, `available_to_general`, `final`).
+  `Planning.version finale` désigne la révision
+  retenue.
+end note
+
+N1 .. Planning
+N2 .. PropositionModification
+N3 .. LigneDeTableur
+N4 .. VersionPlanning
+
+legend right
+  Bleu : entités du paquet Planification.
+  Vert : référentiel de paramétrage.
+  Gris : entité d'un autre paquet, citée pour l'association.
+  Losange plein : composition (ON DELETE CASCADE).
+  Losange creux : agrégation (ON DELETE SET NULL).
+endlegend
+
+@enduml

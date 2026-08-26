@@ -18,11 +18,21 @@ import {
 } from 'recharts';
 import { staffLoansAPI } from '../../api';
 
+/* Les quatre issues d'une demande de prêt, dites avec les tons de la plateforme.
+   Deux portent leur sens : le service pour ce qui est accordé, le degré haut de
+   l'alerte pour ce qui est refusé. L'accord automatique prend le cachet — c'est
+   le système qui a tranché, pas un chef — et l'attente prend le degré bas de
+   l'alerte : elle prévient sans rien reprocher.
+
+   `var()` se résout dans un attribut de présentation SVG : recharts pose
+   `stroke` et `fill` tels quels, et les axes de ce fichier lisent déjà les
+   jetons. Les courbes suivent donc le thème au lieu de rester claires sur fond
+   sombre. */
 const STATUS_META = {
-  approved:      { label: 'Acceptés',       color: '#10B981' },
-  auto_approved: { label: 'Auto-approuvés', color: '#0EA5E9' },
-  rejected:      { label: 'Refusés',        color: '#EF4444' },
-  pending:       { label: 'En attente',     color: '#F59E0B' },
+  approved:      { label: 'Acceptés',       color: 'var(--gs-duty)' },
+  auto_approved: { label: 'Auto-approuvés', color: 'var(--gs-seal)' },
+  rejected:      { label: 'Refusés',        color: 'var(--gs-alert-strong)' },
+  pending:       { label: 'En attente',     color: 'var(--gs-alert)' },
 };
 const STATUS_ORDER = ['approved', 'auto_approved', 'rejected', 'pending'];
 
@@ -63,10 +73,10 @@ const ChartTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: 'var(--bg-card)', border: '1px solid var(--border-default)',
+      background: 'var(--gs-paper)', border: '1px solid var(--gs-rule)',
       borderRadius: 8, padding: '10px 14px', fontSize: 12,
     }}>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 600 }}>{label}</p>
+      <p style={{ color: 'var(--gs-ink-soft)', marginBottom: 6, fontWeight: 600 }}>{label}</p>
       {payload.map((p) => (
         <p key={p.name} style={{ color: p.color, fontWeight: 600 }}>{p.name}: {p.value}</p>
       ))}
@@ -76,22 +86,22 @@ const ChartTooltip = ({ active, payload, label }) => {
 
 const Kpi = ({ label, value, hint, accent }) => (
   <div style={{
-    background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+    background: 'var(--gs-paper)', border: '1px solid var(--gs-rule)',
     borderRadius: 'var(--border-radius-sm)', padding: '12px 14px',
   }}>
-    <p style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</p>
-    <p style={{ fontSize: 'var(--font-xl)', fontWeight: 800, color: accent || 'var(--text-primary)', lineHeight: 1.2 }}>{value}</p>
-    {hint && <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{hint}</p>}
+    <p style={{ fontSize: 10, color: 'var(--gs-ink-faint)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</p>
+    <p style={{ fontSize: 'var(--font-xl)', fontWeight: 800, color: accent || 'var(--gs-ink)', lineHeight: 1.2 }}>{value}</p>
+    {hint && <p style={{ fontSize: 10, color: 'var(--gs-ink-faint)', marginTop: 2 }}>{hint}</p>}
   </div>
 );
 
 const Card = ({ title, subtitle, children }) => (
   <div style={{
-    background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+    background: 'var(--gs-paper)', border: '1px solid var(--gs-rule)',
     borderRadius: 'var(--border-radius-lg)', padding: 16,
   }}>
-    <h4 style={{ fontSize: 'var(--font-sm)', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</h4>
-    {subtitle && <p style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 10 }}>{subtitle}</p>}
+    <h4 style={{ fontSize: 'var(--font-sm)', fontWeight: 700, color: 'var(--gs-ink)' }}>{title}</h4>
+    {subtitle && <p style={{ fontSize: 10, color: 'var(--gs-ink-faint)', marginBottom: 10 }}>{subtitle}</p>}
     <div style={{ marginTop: subtitle ? 0 : 10 }}>{children}</div>
   </div>
 );
@@ -107,10 +117,10 @@ const RankTable = ({ rows, firstColumn }) => (
   <div style={{ overflowX: 'auto' }}>
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-xs)' }}>
       <thead>
-        <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
+        <tr style={{ borderBottom: '1px solid var(--gs-rule)' }}>
           {[firstColumn, 'Total', 'Acceptés', 'Refusés', 'En attente', 'Taux'].map((h) => (
             <th key={h} style={{
-              textAlign: 'left', padding: '8px 10px', color: 'var(--text-muted)',
+              textAlign: 'left', padding: '8px 10px', color: 'var(--gs-ink-faint)',
               fontWeight: 700, textTransform: 'uppercase', fontSize: 10, letterSpacing: '.04em',
             }}>
               {h}
@@ -120,15 +130,15 @@ const RankTable = ({ rows, firstColumn }) => (
       </thead>
       <tbody>
         {rows.map((d) => (
-          <tr key={d.departmentId || d.departmentName} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-            <td style={{ padding: '8px 10px', color: 'var(--text-primary)', fontWeight: 600 }}>{d.departmentName}</td>
-            <td style={{ padding: '8px 10px', color: 'var(--text-primary)', fontWeight: 700 }}>{d.total}</td>
-            <td style={{ padding: '8px 10px', color: '#10B981', fontWeight: 600 }}>
+          <tr key={d.departmentId || d.departmentName} style={{ borderBottom: '1px solid var(--gs-rule)' }}>
+            <td style={{ padding: '8px 10px', color: 'var(--gs-ink)', fontWeight: 600 }}>{d.departmentName}</td>
+            <td style={{ padding: '8px 10px', color: 'var(--gs-ink)', fontWeight: 700 }}>{d.total}</td>
+            <td style={{ padding: '8px 10px', color: 'var(--gs-duty)', fontWeight: 600 }}>
               {d.approved + d.auto_approved}
             </td>
-            <td style={{ padding: '8px 10px', color: '#EF4444', fontWeight: 600 }}>{d.rejected}</td>
-            <td style={{ padding: '8px 10px', color: 'var(--text-secondary)' }}>{d.pending}</td>
-            <td style={{ padding: '8px 10px', color: 'var(--text-secondary)' }}>
+            <td style={{ padding: '8px 10px', color: 'var(--gs-alert-strong)', fontWeight: 600 }}>{d.rejected}</td>
+            <td style={{ padding: '8px 10px', color: 'var(--gs-ink-soft)' }}>{d.pending}</td>
+            <td style={{ padding: '8px 10px', color: 'var(--gs-ink-soft)' }}>
               {d.acceptanceRate === null ? '—' : `${d.acceptanceRate} %`}
             </td>
           </tr>
@@ -193,9 +203,9 @@ export default function StaffLoanStatsPanel({ establishmentId, title = 'Statisti
 
   const rateAccent = summary.acceptanceRate === null
     ? undefined
-    : summary.acceptanceRate >= 70 ? 'var(--color-success)'
-    : summary.acceptanceRate >= 40 ? 'var(--color-warning)'
-    : 'var(--color-danger)';
+    : summary.acceptanceRate >= 70 ? 'var(--gs-duty)'
+    : summary.acceptanceRate >= 40 ? 'var(--gs-alert)'
+    : 'var(--gs-alert-strong)';
 
   const isForbidden = error?.response?.status === 403;
 
@@ -203,8 +213,8 @@ export default function StaffLoanStatsPanel({ establishmentId, title = 'Statisti
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 220 }}>
-          <h3 style={{ fontSize: 'var(--font-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</h3>
-          <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+          <h3 style={{ fontSize: 'var(--font-lg)', fontWeight: 700, color: 'var(--gs-ink)' }}>{title}</h3>
+          <p style={{ fontSize: 'var(--font-xs)', color: 'var(--gs-ink-faint)', marginTop: 2 }}>
             {payload?.scopeLabel
               ? `Portée : ${payload.scopeLabel} — ${SCOPE_HINTS[payload.scope] || ''}`
               : 'Portée déterminée par votre rôle'}
@@ -224,33 +234,33 @@ export default function StaffLoanStatsPanel({ establishmentId, title = 'Statisti
       </div>
 
       {payload?.period && (
-        <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -8 }}>
+        <p style={{ fontSize: 10, color: 'var(--gs-ink-faint)', marginTop: -8 }}>
           Période analysée : {payload.period.from} → {payload.period.to} (date de la demande)
         </p>
       )}
 
       {isForbidden ? (
         <div style={{
-          padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)',
-          background: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: 'var(--border-radius-lg)',
+          padding: 32, textAlign: 'center', color: 'var(--gs-ink-faint)', fontSize: 'var(--font-sm)',
+          background: 'var(--gs-paper)', border: '1px dashed var(--gs-rule)', borderRadius: 'var(--border-radius-lg)',
         }}>
           Aucune statistique de prêt n'est disponible pour votre rôle.
         </div>
       ) : isError ? (
-        <div style={{ padding: 32, textAlign: 'center', color: 'var(--color-danger)', fontSize: 'var(--font-sm)' }}>
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--gs-alert-strong)', fontSize: 'var(--font-sm)' }}>
           Les statistiques n'ont pas pu être chargées.
         </div>
       ) : isLoading ? (
-        <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--gs-ink-faint)', fontSize: 'var(--font-sm)' }}>
           Calcul des statistiques…
         </div>
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
             <Kpi label="Demandes" value={summary.total ?? 0} hint={`${summary.staffCount ?? 0} agent(s) concerné(s)`} />
-            <Kpi label="Acceptés" value={(summary.approved ?? 0) + (summary.auto_approved ?? 0)} hint={`dont ${summary.auto_approved ?? 0} auto-approuvé(s)`} accent="var(--color-success)" />
-            <Kpi label="Refusés" value={summary.rejected ?? 0} accent={summary.rejected ? 'var(--color-danger)' : undefined} />
-            <Kpi label="En attente" value={summary.pending ?? 0} hint="Hors calcul du taux" accent={summary.pending ? 'var(--color-warning)' : undefined} />
+            <Kpi label="Acceptés" value={(summary.approved ?? 0) + (summary.auto_approved ?? 0)} hint={`dont ${summary.auto_approved ?? 0} auto-approuvé(s)`} accent="var(--gs-duty)" />
+            <Kpi label="Refusés" value={summary.rejected ?? 0} accent={summary.rejected ? 'var(--gs-alert-strong)' : undefined} />
+            <Kpi label="En attente" value={summary.pending ?? 0} hint="Hors calcul du taux" accent={summary.pending ? 'var(--gs-alert)' : undefined} />
             <Kpi
               label="Taux d'acceptation"
               value={summary.acceptanceRate === null || summary.acceptanceRate === undefined ? '—' : `${summary.acceptanceRate} %`}
@@ -266,8 +276,8 @@ export default function StaffLoanStatsPanel({ establishmentId, title = 'Statisti
 
           {(summary.total ?? 0) === 0 ? (
             <div style={{
-              padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)',
-              background: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: 'var(--border-radius-lg)',
+              padding: 40, textAlign: 'center', color: 'var(--gs-ink-faint)', fontSize: 'var(--font-sm)',
+              background: 'var(--gs-paper)', border: '1px dashed var(--gs-rule)', borderRadius: 'var(--border-radius-lg)',
             }}>
               🤝 Aucun prêt de personnel sur cette période
             </div>
@@ -278,18 +288,18 @@ export default function StaffLoanStatsPanel({ establishmentId, title = 'Statisti
                   <AreaChart data={timelineChart}>
                     <defs>
                       <linearGradient id="loanAccepted" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.5} />
-                        <stop offset="95%" stopColor="#10B981" stopOpacity={0.05} />
+                        <stop offset="5%" stopColor="var(--gs-duty)" stopOpacity={0.5} />
+                        <stop offset="95%" stopColor="var(--gs-duty)" stopOpacity={0.05} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
-                    <XAxis dataKey="semaine" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--gs-rule)" />
+                    <XAxis dataKey="semaine" tick={{ fontSize: 10, fill: 'var(--gs-ink-faint)' }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: 'var(--gs-ink-faint)' }} />
                     <Tooltip content={<ChartTooltip />} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Area type="monotone" dataKey="Acceptés" stroke="#10B981" fill="url(#loanAccepted)" strokeWidth={2} />
-                    <Area type="monotone" dataKey="Refusés" stroke="#EF4444" fill="#EF444422" strokeWidth={2} />
-                    <Area type="monotone" dataKey="En attente" stroke="#F59E0B" fill="#F59E0B22" strokeWidth={2} />
+                    <Area type="monotone" dataKey="Acceptés" stroke="var(--gs-duty)" fill="url(#loanAccepted)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="Refusés" stroke="var(--gs-alert-strong)" fill="color-mix(in srgb, var(--gs-alert-strong) 13%, transparent)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="En attente" stroke="var(--gs-alert)" fill="color-mix(in srgb, var(--gs-alert) 13%, transparent)" strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </Card>
@@ -298,13 +308,13 @@ export default function StaffLoanStatsPanel({ establishmentId, title = 'Statisti
                 <Card title="Services prêteurs" subtitle="8 services les plus sollicités pour prêter du personnel">
                   <ResponsiveContainer width="100%" height={240}>
                     <BarChart data={lenderChart} layout="vertical" margin={{ left: 10 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
-                      <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
-                      <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--gs-rule)" />
+                      <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: 'var(--gs-ink-faint)' }} />
+                      <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10, fill: 'var(--gs-ink-faint)' }} />
                       <Tooltip content={<ChartTooltip />} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="Prêtés" fill="#10B981" radius={[0, 4, 4, 0]} />
-                      <Bar dataKey="Refusés" fill="#EF4444" radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="Prêtés" fill="var(--gs-duty)" radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="Refusés" fill="var(--gs-alert-strong)" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </Card>
@@ -346,10 +356,10 @@ export default function StaffLoanStatsPanel({ establishmentId, title = 'Statisti
                   <div style={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-xs)' }}>
                       <thead>
-                        <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
+                        <tr style={{ borderBottom: '1px solid var(--gs-rule)' }}>
                           {['#', 'Agent', 'Service d\'origine', 'Demandes', 'Acceptées', 'Refusées'].map((h) => (
                             <th key={h} style={{
-                              textAlign: 'left', padding: '8px 10px', color: 'var(--text-muted)',
+                              textAlign: 'left', padding: '8px 10px', color: 'var(--gs-ink-faint)',
                               fontWeight: 700, textTransform: 'uppercase', fontSize: 10, letterSpacing: '.04em',
                             }}>
                               {h}
@@ -359,18 +369,18 @@ export default function StaffLoanStatsPanel({ establishmentId, title = 'Statisti
                       </thead>
                       <tbody>
                         {topStaff.map((s, i) => (
-                          <tr key={s.userId || s.name} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                            <td style={{ padding: '8px 10px', color: 'var(--text-muted)', fontWeight: 700 }}>{i + 1}</td>
-                            <td style={{ padding: '8px 10px', color: 'var(--text-primary)', fontWeight: 600 }}>
+                          <tr key={s.userId || s.name} style={{ borderBottom: '1px solid var(--gs-rule)' }}>
+                            <td style={{ padding: '8px 10px', color: 'var(--gs-ink-faint)', fontWeight: 700 }}>{i + 1}</td>
+                            <td style={{ padding: '8px 10px', color: 'var(--gs-ink)', fontWeight: 600 }}>
                               {s.name}
                               {s.roleName && (
-                                <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> · {s.roleName}</span>
+                                <span style={{ color: 'var(--gs-ink-faint)', fontWeight: 400 }}> · {s.roleName}</span>
                               )}
                             </td>
-                            <td style={{ padding: '8px 10px', color: 'var(--text-secondary)' }}>{s.departmentName || '—'}</td>
-                            <td style={{ padding: '8px 10px', color: 'var(--text-primary)', fontWeight: 700 }}>{s.total}</td>
-                            <td style={{ padding: '8px 10px', color: '#10B981', fontWeight: 600 }}>{s.approved + s.auto_approved}</td>
-                            <td style={{ padding: '8px 10px', color: '#EF4444', fontWeight: 600 }}>{s.rejected}</td>
+                            <td style={{ padding: '8px 10px', color: 'var(--gs-ink-soft)' }}>{s.departmentName || '—'}</td>
+                            <td style={{ padding: '8px 10px', color: 'var(--gs-ink)', fontWeight: 700 }}>{s.total}</td>
+                            <td style={{ padding: '8px 10px', color: 'var(--gs-duty)', fontWeight: 600 }}>{s.approved + s.auto_approved}</td>
+                            <td style={{ padding: '8px 10px', color: 'var(--gs-alert-strong)', fontWeight: 600 }}>{s.rejected}</td>
                           </tr>
                         ))}
                       </tbody>

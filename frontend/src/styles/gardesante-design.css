@@ -1,0 +1,321 @@
+/**
+ * GardeSante — couche de conception « Registre de garde »
+ * ═══════════════════════════════════════════════════════
+ *
+ * Fichier neuf, chargé après `index.css`. Il n'annule aucun jeton existant :
+ * il en dérive un vocabulaire commun (`--gs-*`) pour la refonte progressive de
+ * l'interface, écran par écran, et pose le socle de qualité qui manquait
+ * (focus visible, mouvement réduit).
+ *
+ * D'où vient la direction : le tableau de garde d'un service hospitalier est
+ * d'abord un document administratif — un registre réglé, des matricules, des
+ * jours en colonnes, un cachet de service. On en garde la grammaire : une
+ * encre, un papier, une seule épaisseur de filet, des chiffres tabulaires, et
+ * la couleur réservée à ce qui engage (l'état, la garde, l'alerte).
+ *
+ * Règle d'usage pour les écrans repris ensuite :
+ *   • `--gs-seal`  = autorité et action principale — une seule par écran ;
+ *   • `--gs-duty`  = « de service » — jamais pour une sélection d'interface ;
+ *   • `--gs-alert` = ce qui bloque ou découvre une journée — rien d'autre.
+ */
+
+/* Deux rôles typographiques s'ajoutent à Inter, qui reste la voix de tout le
+   texte courant : Archivo (grotesque de formulaire et de signalétique) pour
+   les titres et les surtitres, IBM Plex Mono pour les données de registre —
+   matricules, dates, quantités, numéros de jour. */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ── Encre et papier ─────────────────────────────────────────────── */
+  --gs-ink: #101A2E;
+  --gs-ink-soft: #3D4C68;
+  --gs-ink-faint: #7C8AA5;
+  --gs-paper: #FBFCFE;
+  --gs-paper-alt: #F3F6FC;
+  --gs-rule: rgba(16, 26, 46, .10);
+  --gs-rule-strong: rgba(16, 26, 46, .18);
+
+  /* ── Les trois couleurs qui engagent ─────────────────────────────── */
+  --gs-seal: #1B4FCA;          /* = --color-primary, l'autorité */
+  --gs-seal-wash: rgba(27, 79, 202, .08);
+  --gs-duty: #0F766E;          /* de service */
+  --gs-duty-wash: rgba(15, 118, 110, .10);
+  --gs-alert: #B4530A;         /* découvert, bloquant */
+  --gs-alert-wash: rgba(180, 83, 10, .10);
+
+  /* Le degré au-dessus de l'alerte, pour les écrans qui distinguent un
+     avertissement d'une erreur. Il n'introduit pas de quatrième couleur : il
+     mêle de l'encre à l'alerte, donc il fonce en thème clair et s'éclaircit en
+     thème sombre, et reste dans les deux cas plus marqué que l'alerte simple.
+     Défini par référence, il suit l'inversion du thème sans être redéclaré. */
+  --gs-alert-strong: color-mix(in srgb, var(--gs-alert) 76%, var(--gs-ink));
+
+  /* Le texte posé sur un aplat de teinte — un bouton principal, une pastille
+     de compteur, un numéro d'étape.
+
+     C'était du blanc partout, ce qui n'est juste qu'en thème clair : là, les
+     trois teintes sont sombres. En thème sombre elles sont remontées en clarté
+     pour tenir sur un papier sombre, si bien qu'elles deviennent des tons
+     clairs — et du blanc dessus tombe autour de deux pour un, très en dessous
+     du seuil de lecture. Le papier est l'inverse de l'encre par construction,
+     et les teintes sont accordées à l'encre : il reste donc lisible dans les
+     deux thèmes, avec un contraste qui ne descend jamais sous cinq pour un. */
+  --gs-on-tone: var(--gs-paper);
+
+  /* ── Typographie ─────────────────────────────────────────────────── */
+  --gs-display: 'Archivo', 'Inter', system-ui, sans-serif;
+  --gs-body: 'Inter', system-ui, sans-serif;
+  --gs-data: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  --gs-shadow-card: 0 1px 2px rgba(16, 26, 46, .05), 0 8px 24px -16px rgba(16, 26, 46, .35);
+  --gs-shadow-lift: 0 2px 6px rgba(16, 26, 46, .07), 0 18px 40px -24px rgba(16, 26, 46, .45);
+
+  /* ── Couleurs d'identité ─────────────────────────────────────────────
+     Les trois couleurs ci-dessus disent un état ; celles-ci ne disent rien —
+     elles distinguent. Sur un calendrier de service, une teinte stable par
+     agent est la seule façon de suivre une personne d'une ligne à l'autre,
+     et aucun système à trois tons ne peut la remplacer. Le registre reste
+     donc lisible : dix teintes de clarté voisine, chroma modéré, écartées en
+     teinte pour que deux index successifs ne se confondent pas — dont le
+     sceau, le service et l'alerte, qui appartiennent déjà à la plateforme.
+     À n'employer que pour de l'identité (un agent, un groupe de semaines),
+     jamais pour un état. */
+  --gs-id-1: #1B4FCA;
+  --gs-id-2: #0F766E;
+  --gs-id-3: #7A3E9D;
+  --gs-id-4: #B4530A;
+  --gs-id-5: #2F6F4E;
+  --gs-id-6: #1D6E8C;
+  --gs-id-7: #8C3B52;
+  --gs-id-8: #4A5A8F;
+  --gs-id-9: #6B6A2E;
+  --gs-id-10: #96541F;
+}
+
+[data-theme='dark'] {
+  --gs-ink: #E8EDF8;
+  --gs-ink-soft: #A9B6CD;
+  --gs-ink-faint: #77859E;
+  --gs-paper: #131A28;
+  --gs-paper-alt: #1B2436;
+  --gs-rule: rgba(232, 237, 248, .12);
+  --gs-rule-strong: rgba(232, 237, 248, .22);
+  --gs-seal: #6C97FF;
+  --gs-seal-wash: rgba(108, 151, 255, .14);
+  --gs-duty: #4BC0B4;
+  --gs-duty-wash: rgba(75, 192, 180, .14);
+  --gs-alert: #E8974A;
+  --gs-alert-wash: rgba(232, 151, 74, .14);
+  --gs-shadow-card: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .7);
+  --gs-shadow-lift: 0 2px 6px rgba(0, 0, 0, .45), 0 18px 40px -24px rgba(0, 0, 0, .8);
+  /* Mêmes teintes, remontées en clarté pour tenir sur le papier sombre. */
+  --gs-id-1: #7FA5FF;
+  --gs-id-2: #4BC0B4;
+  --gs-id-3: #C093E0;
+  --gs-id-4: #E8974A;
+  --gs-id-5: #74C494;
+  --gs-id-6: #6FB9D6;
+  --gs-id-7: #E091A4;
+  --gs-id-8: #9EAEE0;
+  --gs-id-9: #C4C27A;
+  --gs-id-10: #D9A06B;
+}
+
+/* ── Socle de qualité ─────────────────────────────────────────────────
+   Deux manques du projet, comblés une fois pour toutes : au clavier on ne
+   voyait pas où l'on était, et aucune animation ne se taisait pour qui
+   demande moins de mouvement. */
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--gs-seal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Primitives partagées ─────────────────────────────────────────────
+   Volontairement peu nombreuses : un surtitre, un chiffre de registre, un
+   filet, une carte, un bouton à trois niveaux, une rangée d'onglets. Tout le
+   reste appartient à l'écran qui l'emploie. */
+
+.gs-eyebrow {
+  font-family: var(--gs-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gs-title {
+  font-family: var(--gs-display);
+  font-weight: 700;
+  letter-spacing: -.015em;
+  color: var(--gs-ink);
+  margin: 0;
+}
+
+.gs-num {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+.gs-card {
+  background: var(--bg-card);
+  border: 1px solid var(--gs-rule);
+  border-radius: var(--border-radius-lg, 16px);
+  box-shadow: var(--gs-shadow-card);
+}
+
+/* Empêche une grille large (le tableur) de pousser la coquille de page :
+   `minmax(0, 1fr)` ramène la largeur minimale du contenu à zéro, ce qui rend
+   le défilement au tableau au lieu de le donner à la fenêtre. */
+.gs-clamp {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+/* ── Boutons ──────────────────────────────────────────────────────────
+   Trois niveaux, pas plus : l'action principale de l'écran (`is-primary`,
+   au cachet), les actions courantes (le neutre par défaut), et ce qui se
+   contente d'un mot (`is-quiet`). `is-danger` n'est pas une quatrième
+   apparence : c'est le neutre dont l'encre passe à l'ambre, parce qu'une
+   annulation ne doit jamais peser plus lourd qu'une validation.
+
+   Aucun dégradé, aucune lueur portée : le relief vient du filet et du
+   remplissage, comme sur le reste du registre. */
+
+.gs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 7px 14px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition-fast, .15s), border-color var(--transition-fast, .15s),
+              color var(--transition-fast, .15s);
+}
+
+.gs-btn:hover:not(:disabled) {
+  color: var(--gs-seal);
+  border-color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+}
+
+.gs-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.gs-btn.is-primary {
+  color: var(--gs-on-tone);
+  background: var(--gs-seal);
+  border-color: var(--gs-seal);
+}
+
+.gs-btn.is-primary:hover:not(:disabled) {
+  color: var(--gs-on-tone);
+  background: color-mix(in srgb, var(--gs-seal) 86%, #000);
+  border-color: color-mix(in srgb, var(--gs-seal) 86%, #000);
+}
+
+.gs-btn.is-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--gs-ink-faint);
+}
+
+.gs-btn.is-quiet:hover:not(:disabled) {
+  color: var(--gs-seal);
+  border-color: transparent;
+  background: var(--gs-seal-wash);
+}
+
+.gs-btn.is-danger { color: var(--gs-alert); }
+
+.gs-btn.is-danger:hover:not(:disabled) {
+  color: var(--gs-alert);
+  border-color: var(--gs-alert);
+  background: var(--gs-alert-wash);
+}
+
+/* ── Onglets ──────────────────────────────────────────────────────────
+   Un onglet actif se souligne, il ne se remplit pas : la pastille pleine
+   employait le bleu d'autorité pour une simple navigation, alors qu'il est
+   réservé à ce qui engage. Le filet du bas est la ligne de séparation de la
+   zone ; l'onglet courant y pose son marque-page.
+
+   Le compteur (`.gs-tab-count`) ne s'affiche que lorsqu'il y a quelque chose à
+   traiter : c'est un chiffre, pas une décoration, donc au registre et à
+   l'ambre. */
+
+.gs-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--gs-rule);
+  scrollbar-width: thin;
+}
+
+.gs-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--transition-fast, .15s), border-color var(--transition-fast, .15s);
+}
+
+.gs-tab:hover { color: var(--gs-ink); }
+
+.gs-tab[aria-current='page'] {
+  color: var(--gs-seal);
+  border-bottom-color: var(--gs-seal);
+}
+
+.gs-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--gs-alert-wash);
+  color: var(--gs-alert);
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}

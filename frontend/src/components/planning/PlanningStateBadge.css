@@ -1,0 +1,76 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   État d'un planning — le vocabulaire, défini une fois
+   ──────────────────────────────────────────────────────────────────────────
+   Ce badge apparaît sur dix-sept écrans : c'est le mot que la plateforme
+   emploie pour dire où en est un tableur de garde. Il portait quatre teintes
+   inventées (violet, bleu clair, vert menthe, gris) recopiées à la main dans
+   le calendrier de l'hôpital et dans les compteurs du Super Admin — trois
+   copies d'une même règle, donc trois occasions de la voir dériver.
+
+   Le cycle de vie n'est pas une taxonomie, c'est une suite : rien n'est
+   arrêté → l'acte est posé → c'est en service → c'est clos. Les trois tons de
+   la plateforme suffisent, à condition de laisser la *forme* dire ce que la
+   teinte ne peut pas dire :
+
+     brouillon  — filet en pointillé, aucun aplat : rien n'est arrêté, le chef
+                  peut encore tout reprendre ;
+     en vigueur — le sceau : le planning est envoyé, il engage, il n'attend
+                  plus d'approbation ;
+     en cours   — le service : la période court, des agents sont de garde
+                  aujourd'hui ;
+     terminé    — aplat neutre plein : l'affaire est classée. Même absence de
+                  couleur que le brouillon, mais l'inverse en poids — le
+                  pointillé ouvre, l'aplat ferme.
+
+   Aucune teinte propre : un état de planning n'est ni une alerte ni une
+   identité, et l'ambre reste réservé à ce qui attend un arbitrage.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.gspb {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  font-family: var(--gs-body);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Les trois tailles reprennent les hauteurs déjà en place : le badge est posé
+   dans des titres, des cellules et des listes calées au pixel. */
+.gspb.is-sm { height: 20px; padding: 2px 8px; font-size: 11px; }
+.gspb.is-md { height: 24px; padding: 4px 10px; font-size: 12px; }
+.gspb.is-lg { height: 28px; padding: 6px 12px; font-size: 12.5px; }
+
+.gspb.is-brouillon {
+  border-style: dashed;
+  border-color: var(--gs-rule-strong);
+  color: var(--gs-ink-faint);
+}
+
+.gspb.is-soumis {
+  border-color: color-mix(in srgb, var(--gs-seal) 34%, transparent);
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+}
+
+.gspb.is-en_cours {
+  border-color: color-mix(in srgb, var(--gs-duty) 34%, transparent);
+  background: var(--gs-duty-wash);
+  color: var(--gs-duty);
+}
+
+.gspb.is-termine {
+  border-color: var(--gs-rule);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-faint);
+}
+
+/* Cinquième cas, connu du seul calendrier de l'hôpital : un planning suspendu
+   attend une décision — c'est la définition de l'ambre. */
+.gspb.is-suspendu {
+  border-color: color-mix(in srgb, var(--gs-alert) 34%, transparent);
+  background: var(--gs-alert-wash);
+  color: var(--gs-alert);
+}

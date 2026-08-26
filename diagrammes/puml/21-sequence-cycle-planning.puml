@@ -1,0 +1,207 @@
+' ============================================================================
+' GardeSanté — Diagramme de séquence : cycle de vie d'un planning de garde
+'
+' Sources vérifiées :
+'   backend/src/modules/schedules/schedule-builder.routes.js
+'     PUT  /:scheduleId/draft              -> saveDraft
+'     POST /:scheduleId/submit             -> submitSchedule
+'     POST /:scheduleId/cancel-submission  -> cancelScheduleSubmission
+'     POST /:scheduleId/change-proposals   -> createChangeProposal
+'     POST /:scheduleId/change-proposals/:proposalId/decision
+'   backend/src/modules/schedules/schedule-builder.controller.js
+'     :571-601   saveDraft, RÈGLE I  (findLeaveViolations -> 400 LEAVE_CONFLICT)
+'     :604-613   saveDraft, RÈGLE II (syncExternalStaffLoans, non bloquante)
+'     :873-878   canProposeScheduleChange (exclut department_head)
+'     :1298-1330 submitSchedule (garde-fou, puis active | submitted)
+'     cancelScheduleSubmission (statut 'submitted' exclusivement)
+'   backend/src/modules/schedules/rules-engine.js:360 evaluateRules
+'   backend/src/modules/schedules/spreadsheet-reader.js  arbitrage cases/période
+'   backend/src/jobs/schedule-activation.js  balayage toutes les 30 minutes
+'   backend/src/config/constants.js  SCHEDULE_IN_FORCE = submitted | active
+' ============================================================================
+@startuml 21-sequence-cycle-planning
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 260
+skinparam ParticipantPadding 12
+skinparam BoxPadding 14
+skinparam actor {
+  BackgroundColor #E6F4F1
+  BorderColor #0F766E
+}
+skinparam participant {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontStyle bold
+}
+skinparam database {
+  BackgroundColor #F3E8FF
+  BorderColor #7A3E9D
+}
+skinparam sequence {
+  LifeLineBorderColor #94A3B8
+  LifeLineBackgroundColor #F8FAFC
+  GroupBackgroundColor #EEF2FF
+  GroupBorderColor #1B4FCA
+  GroupHeaderFontColor #1B4FCA
+  DividerBackgroundColor #E6F4F1
+  DividerBorderColor #0F766E
+  DividerFontColor #0F766E
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Séquence — Cycle de vie d'un planning de garde, du brouillon à la mise en vigueur
+
+actor "Chef de service" as CS
+actor "Surveillant\n(service ou général)" as SS
+participant "Tableur\n(SmartSpreadsheet)" as TAB
+participant "API\nschedule-builder" as API
+participant "Moteur\nde règles" as RE
+database "PostgreSQL" as DB
+participant "Tâche planifiée\n(toutes les 30 min)" as JOB
+participant "socket.io" as WS
+
+== Saisie du brouillon ==
+
+CS -> TAB : ouvre le tableur du mois
+TAB -> API : GET /schedule-builder/:id/detail
+API -> DB : SELECT planning + lignes + périodes
+DB --> TAB : grille, agents, congés approuvés
+
+loop à chaque modification de la grille
+  CS -> TAB : coche une case, ou fixe la période d'un agent
+  TAB -> API : PUT /schedule-builder/:id/draft
+  API -> API : RÈGLE I — findLeaveViolations\nsur les jours de service déduits
+
+  alt un agent est en congé approuvé sur un jour de service
+    API --> TAB : 400 code LEAVE_CONFLICT\n+ liste des jours en conflit
+    TAB --> CS : la case refusée est signalée, rien n'est enregistré
+    note right of API
+      Refus **avant** écriture : le brouillon
+      ne peut pas contenir un agent en congé.
+      C'est la seule règle métier qui bloque
+      l'enregistrement lui-même.
+    end note
+  else grille recevable
+    API -> DB : UPDATE schedules SET metadata.spreadsheet
+    API -> DB : réécriture de schedule_staff_assignments\net schedule_staff_periods
+    API -> API : RÈGLE II — syncExternalStaffLoans
+    note right of API
+      Un agent d'un autre service déclenche
+      une demande de prêt, **sans bloquer**
+      l'enregistrement. Un refus ultérieur
+      ne retire que la ligne concernée.
+    end note
+    API -> DB : INSERT staff_loan_requests (si agent externe)
+    API --> TAB : 200 grille enregistrée
+  end
+end
+
+note over TAB, DB
+  Le brouillon reste modifiable sans limite : aucune trace de version
+  n'est produite à ce stade. Les cellules vivent dans
+  `schedules.metadata.spreadsheet`, jamais dans la table `shifts`.
+end note
+
+== Contrôle avant envoi ==
+
+CS -> TAB : « Envoyer le planning »
+TAB -> API : POST /schedule-builder/:id/submit
+API -> DB : SELECT statut du planning
+
+alt le planning n'est plus un brouillon
+  API --> TAB : 400 « Ce planning est déjà <statut> »
+else brouillon
+  API -> RE : evaluateRules(planning, établissement)
+  RE -> DB : SELECT establishment_rules actives
+  RE -> DB : SELECT metadata.spreadsheet du planning
+  RE -> RE : reconstruit les affectations\nligne par ligne, jour par jour
+  note right of RE
+    Deux lectures selon la ligne : une **période**
+    de service continue compte pour une seule
+    affectation, des **cases cochées** pour autant
+    de gardes distinctes. Sans cette distinction,
+    la règle de repos verrait 0 h entre deux jours
+    qui se suivent et refuserait tout planning
+    saisi par périodes.
+  end note
+  RE -> RE : repos minimum, double affectation,\ngarde pendant un congé approuvé
+  RE -> RE : plafond mensuel, équité de répartition
+  RE -> DB : INSERT rule_evaluations (violations)
+  RE --> API : { isValid, erreurs[], avertissements[] }
+
+  alt au moins une règle bloquante violée
+    API --> TAB : 400 « Corrigez les erreurs bloquantes »\n+ détail des violations
+    TAB --> CS : les cellules fautives sont mises en évidence
+    note right of API
+      Garde-fou strict : les erreurs bloquent,
+      les avertissements laissent passer.
+    end note
+  else aucune erreur bloquante
+    API -> DB : UPDATE schedules SET statut =\n'active' si la période a commencé, sinon 'submitted'
+    note right of API
+      **Il n'y a ni approbation ni refus.**
+      Le planning est en vigueur dès l'envoi.
+      Les valeurs `under_review`, `approved` et
+      `rejected` du schéma ne sont produites par
+      aucun chemin applicatif.
+    end note
+    API -> DB : INSERT schedule_workflow_history\n(action 'submitted')
+    API -> DB : INSERT activity_logs (auteur, IP, agent)
+    API -> DB : INSERT notifications\n(surveillants du service et surveillant général)
+    API -> WS : emit schedule:submitted\nsalons establishment: et department:
+    WS --> SS : le planning apparaît sans rechargement
+    API --> TAB : 200 planning envoyé
+    TAB --> CS : bandeau « en vigueur »,\nla grille passe en lecture seule
+  end
+end
+
+== Annulation de l'envoi ==
+
+CS -> TAB : « Annuler l'envoi » + motif obligatoire
+TAB -> API : POST /schedule-builder/:id/cancel-submission
+
+alt le planning est déjà en cours
+  API --> TAB : 400 refus
+  note right of API
+    L'annulation n'est ouverte que tant que le
+    statut vaut `submitted` : une fois la période
+    commencée, le planning fait foi et ne peut
+    plus redevenir un brouillon. La correction
+    passe alors par une proposition de
+    modification, ou par un remplacement.
+  end note
+else statut 'submitted'
+  API -> DB : UPDATE schedules SET statut = 'draft'
+  API -> DB : INSERT schedule_workflow_history\n(action 'submission_cancelled', motif)
+  API -> DB : INSERT activity_logs
+  API -> WS : emit vers l'établissement et le service
+  API --> TAB : 200 le planning redevient modifiable
+end
+
+== Mise en vigueur automatique ==
+
+JOB -> DB : UPDATE schedules SET statut = 'active'\nWHERE statut = 'submitted' AND début <= aujourd'hui
+DB --> JOB : plannings basculés
+JOB -> DB : INSERT activity_logs\n(imputé au créateur, métadonnée automatique)
+JOB -> WS : emit schedule:activated
+note over JOB, WS
+  Aucun acteur n'intervient : un planning envoyé à l'avance
+  entre en vigueur de lui-même le jour de son début. Le journal
+  impute l'action au créateur du planning, la colonne auteur
+  n'acceptant pas de valeur nulle.
+end note
+
+legend right
+  Trait plein : appel. Trait pointillé : réponse.
+  Le contrôle des règles est bloquant : une erreur refuse l'envoi, un avertissement le laisse passer.
+  Suite du cycle : figure 22, propositions de modification après mise en vigueur.
+endlegend
+
+@enduml

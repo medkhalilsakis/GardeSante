@@ -1,11 +1,103 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { scheduleBuilderAPI } from '../../../api';
+import { X } from 'lucide-react';
 import toast from 'react-hot-toast';
-const status={pending:['En attente','#FEF3C7','#92400E'],accepted:['Acceptée','#D1FAE5','#047857'],rejected:['Refusée','#FEE2E2','#B91C1C']};
-export default function ScheduleChangeProposals({scheduleId,onClose}) {
- const qc=useQueryClient(),[comments,setComments]=useState({}),[busy,setBusy]=useState(null);
- const {data,isLoading}=useQuery({queryKey:['schedule-change-proposals',scheduleId],queryFn:()=>scheduleBuilderAPI.getChangeProposals(scheduleId),enabled:!!scheduleId}); const proposals=data?.data?.data||data?.data||[];
- const decide=async(p,decision)=>{const comment=(comments[p.id]||'').trim();if(decision==='rejected'&&!comment)return toast.error('Le motif du refus est obligatoire.');setBusy(p.id);try{await scheduleBuilderAPI.decideProposal(scheduleId,p.id,{decision,comment});toast.success(decision==='accepted'?'Proposition acceptée et appliquée.':'Refus envoyé au surveillant.');qc.invalidateQueries({queryKey:['schedule-change-proposals',scheduleId]});qc.invalidateQueries({queryKey:['schedule-detail',scheduleId]});}catch(e){toast.error(e.response?.data?.message||'Impossible de traiter la proposition.');}finally{setBusy(null)}};
- return <div onClick={onClose} style={{position:'fixed',inset:0,zIndex:7000,background:'rgba(15,23,42,.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}><div onClick={e=>e.stopPropagation()} style={{width:'min(760px,100%)',maxHeight:'86vh',overflowY:'auto',padding:24,borderRadius:16,background:'var(--bg-card)'}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'start',gap:12,marginBottom:18}}><div><h2 style={{margin:0,fontSize:19}}>Propositions de modification</h2><p style={{margin:'4px 0 0',fontSize:13,color:'var(--text-muted)'}}>Consultez les changements proposés et répondez au surveillant.</p></div><button onClick={onClose} style={{border:0,background:'none',fontSize:24,cursor:'pointer'}}>×</button></div>{isLoading?<p>Chargement…</p>:!proposals.length?<p style={{padding:30,textAlign:'center',color:'var(--text-muted)'}}>Aucune proposition pour ce planning.</p>:proposals.map(p=>{const s=status[p.status]||status.pending,rows=p.proposal?.rows||[];return <article key={p.id} style={{border:'1px solid var(--border-subtle)',borderRadius:12,padding:16,marginBottom:12}}><div style={{display:'flex',justifyContent:'space-between',gap:10}}><div><strong>{p.first_name} {p.last_name}</strong><div style={{fontSize:12,color:'var(--text-muted)',marginTop:3}}>{new Date(p.created_at).toLocaleString('fr-FR')}</div></div><span style={{padding:'4px 9px',borderRadius:14,fontSize:11,fontWeight:700,background:s[1],color:s[2]}}>{s[0]}</span></div>{p.comment&&<p style={{fontSize:13}}><strong>Message du surveillant :</strong> {p.comment}</p>}<details style={{fontSize:13}}><summary style={{cursor:'pointer',fontWeight:600}}>Voir les modifications proposées ({rows.length} ligne{rows.length>1?'s':''})</summary><div style={{display:'grid',gap:5,marginTop:8}}>{rows.filter(r=>r.userId).map((r,i)=><div key={r.userId||i} style={{padding:'7px 9px',background:'var(--bg-elevated)',borderRadius:7}}>{r.lastName} {r.firstName} — {Object.entries(r.shifts||{}).map(([d,t])=>`${d}: ${t}`).join(', ')||'aucune garde'}</div>)}</div></details>{p.status==='pending'?<div style={{marginTop:14}}><textarea value={comments[p.id]||''} onChange={e=>setComments(v=>({...v,[p.id]:e.target.value}))} placeholder="Message au surveillant — motif obligatoire en cas de refus" rows="2" style={{width:'100%',boxSizing:'border-box',padding:9,borderRadius:8,border:'1px solid var(--border-subtle)',background:'var(--bg-base)',color:'var(--text-primary)'}}/><div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:8}}><button disabled={busy===p.id} onClick={()=>decide(p,'rejected')}>Refuser</button><button disabled={busy===p.id} onClick={()=>decide(p,'accepted')}>Accepter</button></div></div>:p.decision_comment&&<p style={{fontSize:13}}><strong>Réponse :</strong> {p.decision_comment}</p>}</article>})}</div></div>;
+import { scheduleBuilderAPI } from '../../../api';
+import { shortFrenchDate } from '../../../utils/frenchDates';
+import './ScheduleChangeProposals.css';
+
+const markedDays = (shifts) => Object.entries(shifts || {})
+  .filter(([, value]) => value === true || (String(value ?? '').trim() && String(value).trim().charAt(0).toUpperCase() !== 'R'))
+  .map(([date]) => date)
+  .sort();
+
+const STATUS_LABELS = { pending: 'En attente', accepted: 'Acceptée', rejected: 'Refusée' };
+const statusTone = (status) => (status === 'accepted' ? 'duty' : 'alert');
+const formatProposalDate = (value) => {
+  const key = String(value || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) ? shortFrenchDate(key, true) : key;
+};
+
+export default function ScheduleChangeProposals({ scheduleId, onClose }) {
+  const qc = useQueryClient();
+  const [comments, setComments] = useState({});
+  const [busy, setBusy] = useState(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ['schedule-change-proposals', scheduleId],
+    queryFn: () => scheduleBuilderAPI.getChangeProposals(scheduleId),
+    enabled: !!scheduleId,
+  });
+  const proposals = data?.data?.data || data?.data || [];
+
+  const decide = async (proposal, decision) => {
+    const comment = (comments[proposal.id] || '').trim();
+    if (decision === 'rejected' && !comment) {
+      toast.error('Le motif du refus est obligatoire.');
+      return;
+    }
+    setBusy(proposal.id);
+    try {
+      await scheduleBuilderAPI.decideProposal(scheduleId, proposal.id, { decision, comment });
+      toast.success(decision === 'accepted' ? 'Proposition acceptée et appliquée.' : 'Refus envoyé au surveillant.');
+      qc.invalidateQueries({ queryKey: ['schedule-change-proposals', scheduleId] });
+      qc.invalidateQueries({ queryKey: ['schedule-detail', scheduleId] });
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Impossible de traiter la proposition.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="gscp-backdrop" role="presentation" onClick={onClose}>
+      <div className="gscp-dialog" role="dialog" aria-modal="true" aria-label="Propositions de modification" onClick={(event) => event.stopPropagation()}>
+        <header className="gscp-header">
+          <div>
+            <h2>Propositions de modification</h2>
+            <p>Consultez les changements proposés et répondez au surveillant.</p>
+          </div>
+          <button type="button" className="gscp-close gs-btn is-quiet" onClick={onClose} aria-label="Fermer"><X size={16} /></button>
+        </header>
+        {isLoading ? <p className="gscp-state">Chargement…</p> : null}
+        {!isLoading && !proposals.length ? <p className="gscp-state">Aucune proposition pour ce planning.</p> : null}
+        {!isLoading && proposals.length ? (
+          <div className="gscp-list">
+            {proposals.map((proposal) => {
+              const status = proposal.status || 'pending';
+              const rows = proposal.proposal?.rows || [];
+              const daysByRow = rows.filter((row) => row.userId).map((row) => ({
+                id: row.userId,
+                name: `${row.lastName || ''} ${row.firstName || ''}`.trim(),
+                days: markedDays(row.shifts).map(formatProposalDate),
+              }));
+              return (
+                <article className="gscp-proposal" key={proposal.id}>
+                  <div className="gscp-proposal-head">
+                    <div><strong>{proposal.first_name} {proposal.last_name}</strong><time dateTime={proposal.created_at}>{formatProposalDate(proposal.created_at)}</time></div>
+                    <span className={`gscp-status is-${statusTone(status)}`}>{STATUS_LABELS[status] || status}</span>
+                  </div>
+                  {proposal.comment ? <p className="gscp-comment"><b>Message du surveillant :</b> {proposal.comment}</p> : null}
+                  <details className="gscp-details">
+                    <summary>Voir les modifications proposées ({rows.length} ligne{rows.length > 1 ? 's' : ''})</summary>
+                    <div className="gscp-days">
+                      {daysByRow.map((row, index) => <div className="gscp-day-row" key={row.id || index}><b>{row.name || 'Personnel'}</b><span>{row.days.join(', ') || 'aucun jour sélectionné'}</span></div>)}
+                    </div>
+                  </details>
+                  {status === 'pending' ? (
+                    <div className="gscp-decision">
+                      <textarea value={comments[proposal.id] || ''} onChange={(event) => setComments((current) => ({ ...current, [proposal.id]: event.target.value }))} placeholder="Message au surveillant — motif obligatoire en cas de refus" rows="2" />
+                      <div className="gscp-actions">
+                        <button type="button" className="gs-btn is-danger" disabled={busy === proposal.id} onClick={() => decide(proposal, 'rejected')}>Refuser</button>
+                        <button type="button" className="gs-btn is-primary" disabled={busy === proposal.id} onClick={() => decide(proposal, 'accepted')}>Accepter</button>
+                      </div>
+                    </div>
+                  ) : proposal.decision_comment ? <p className="gscp-comment"><b>Réponse :</b> {proposal.decision_comment}</p> : null}
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }

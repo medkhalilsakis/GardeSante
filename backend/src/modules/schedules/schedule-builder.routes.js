@@ -31,6 +31,7 @@ router.post('/import/confirm',             importCtrl.importConfirm);
 
 // ── Par planning ──────────────────────────────────────────────
 router.get('/:scheduleId/detail',          ctrl.getScheduleDetail);
+router.get('/:scheduleId/history',         ctrl.getScheduleHistory);
 router.get('/:scheduleId/change-proposals', ctrl.listChangeProposals);
 router.post('/:scheduleId/change-proposals', ctrl.createChangeProposal);
 router.post('/:scheduleId/change-proposals/decide-all', ctrl.decideAllChangeProposals);

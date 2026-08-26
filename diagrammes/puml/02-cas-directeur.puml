@@ -1,0 +1,141 @@
+' ============================================================================
+' GardeSanté — Cas d'utilisation : Directeur (niveau 2, 36 permissions)
+'
+' Sources vérifiées :
+'   - role_permissions de `director` : l'ensemble du Super Administrateur
+'     MOINS establishments.create, establishments.delete et
+'     establishments.update. Il conserve establishments.config et
+'     establishments.read : il configure son hôpital sans pouvoir en créer
+'     ni en supprimer.
+'   - Double héritage : le Directeur réunit les ensembles du Chef de Service
+'     et du Surveillant Général — c'est le premier rôle qui puisse à la fois
+'     élaborer et valider.
+'   - Appel du jour : EVENT_WRITE_ROLES inclut le directeur, mais
+'     journal.controller.js ne lui laisse que les événements de type
+'     « présence ».
+'   - Publication de note : `resolveScope` lui attribue la portée
+'     'establishment_staff'.
+'   - Prêts de personnel : WATCHER_ROLES lui ouvre le suivi, pas la demande.
+' ============================================================================
+@startuml 02-cas-directeur
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ActorBorderColor #0F766E
+skinparam ActorBackgroundColor #E6F4F1
+skinparam ActorFontStyle bold
+skinparam UsecaseBorderColor #1B4FCA
+skinparam UsecaseBackgroundColor #EEF2FF
+skinparam usecase {
+BackgroundColor<<hérité>> #F1F5F9
+BorderColor<<hérité>> #94A3B8
+FontColor<<hérité>> #475569
+}
+skinparam PackageBorderColor #94A3B8
+skinparam PackageBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Cas d'utilisation — Directeur\nniveau 2 · 36 permissions · périmètre : son établissement
+
+left to right direction
+
+actor "Chef de\nService" as CS
+actor "Surveillant\nGénéral" as SG
+actor "Directeur" as DIR
+CS <|-- DIR
+SG <|-- DIR
+
+package "Hérité du Chef de Service" as P0 {
+  usecase "Élaborer, générer et\nsoumettre un planning" as UC_PLAN <<hérité>>
+  usecase "Gérer les remplacements" as UC_REMP <<hérité>>
+  usecase "Publier une note" as UC_NOTE <<hérité>>
+}
+
+package "Hérité du Surveillant Général" as P0B {
+  usecase "Valider ou rejeter\nun planning soumis" as UC_VALID <<hérité>>
+  usecase "Superviser tous\nles services" as UC_SUPERV <<hérité>>
+  usecase "Exporter les statistiques" as UC_STAT_EXP <<hérité>>
+}
+
+package "Administration de l'établissement" as P1 {
+  usecase "Configurer l'établissement" as UC_ETAB_CONF
+  usecase "Définir les règles\nde garde de l'hôpital" as UC_REGLES
+  usecase "Créer un service" as UC_DEPT_CREER
+  usecase "Modifier un service" as UC_DEPT_MAJ
+  usecase "Supprimer un service" as UC_DEPT_SUPPR
+  usecase "Nommer un chef\nde service" as UC_CHEF
+}
+
+package "Gestion du personnel" as P2 {
+  usecase "Créer un compte\nutilisateur" as UC_USER_CREER
+  usecase "Modifier un compte" as UC_USER_MAJ
+  usecase "Archiver un compte" as UC_USER_ARCH
+  usecase "Attribuer un rôle\net un grade" as UC_ROLE
+  usecase "Mettre à jour une absence" as UC_ABS_MAJ
+}
+
+package "Pilotage et contrôle" as P3 {
+  usecase "Consulter le tableau de bord\ndirection" as UC_DASH
+  usecase "Consulter le journal\nd'audit" as UC_AUDIT
+  usecase "Consulter l'historique\nde tous les acteurs" as UC_HIST_ALL
+  usecase "Supprimer un planning" as UC_PLAN_SUPPR
+  usecase "Suivre les prêts\nde personnel" as UC_PRET_SUIVI
+  usecase "Saisir la présence lors\nde l'appel du jour" as UC_PRESENCE
+  usecase "Relancer les lecteurs\nd'une note" as UC_NOTE_REL
+}
+
+note as N1
+Le Directeur est le premier rôle à réunir les deux
+branches : il peut à la fois élaborer et valider un
+planning. Ce cumul est assumé — il assure la
+continuité du circuit quand le Surveillant Général
+est indisponible.
+end note
+note as N2
+Le Directeur consulte l'historique mais ne le modifie
+jamais : `activity_logs` et `audit_logs` n'exposent
+aucune route d'écriture ni de suppression. La
+traçabilité est immuable pour tous les acteurs, y
+compris le Directeur.
+end note
+N1 .. UC_VALID
+N2 .. UC_DASH
+
+CS --> UC_PLAN
+CS --> UC_REMP
+CS --> UC_NOTE
+SG --> UC_VALID
+SG --> UC_SUPERV
+SG --> UC_STAT_EXP
+
+DIR --> UC_ETAB_CONF
+DIR --> UC_DEPT_CREER
+DIR --> UC_DEPT_MAJ
+DIR --> UC_DEPT_SUPPR
+DIR --> UC_CHEF
+DIR --> UC_USER_CREER
+DIR --> UC_USER_MAJ
+DIR --> UC_USER_ARCH
+DIR --> UC_ABS_MAJ
+DIR --> UC_DASH
+DIR --> UC_AUDIT
+DIR --> UC_HIST_ALL
+DIR --> UC_PLAN_SUPPR
+DIR --> UC_PRET_SUIVI
+DIR --> UC_PRESENCE
+DIR --> UC_NOTE_REL
+
+UC_ETAB_CONF ..> UC_REGLES : <<include>>
+UC_USER_CREER ..> UC_ROLE : <<include>>
+UC_NOTE <.. UC_NOTE_REL : <<extend>>
+
+legend right
+Bleu : cas propres à ce rôle.
+Gris : capacités héritées des deux rôles parents.
+endlegend
+
+@enduml

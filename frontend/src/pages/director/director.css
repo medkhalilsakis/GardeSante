@@ -1,0 +1,417 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Direction — `/director` et ses sept sections
+   ───────────────────────────────────────────────────────────────────────────
+   Préfixe unique `gsd-`, jetons `--gs-*` seulement, aucune valeur
+   hexadécimale. L'écran n'avait aucun fichier CSS : 1 198 lignes de styles en
+   ligne, quatre cartes de KPI à filet coloré arbitraire, huit pastilles
+   d'onglets à émoji, sept couleurs de rôle et trois couleurs de catégorie de
+   personnel codées en dur, un dégradé de titre bleu vers indigo et cinq
+   modales réécrites à la main.
+
+   Ce que l'écran doit répondre en premier : **qui encadre quoi**. C'est la
+   seule chose que le directeur, et lui seul, peut réparer — un service sans
+   chef ne peut pas produire de planning. La couverture de la garde, elle, se
+   lit à la supervision ; ici on administre l'organisation.
+
+   D'où deux choix de fond :
+     • les listes deviennent des registres (`GsTable`) : un service et un agent
+       se lisent en comparant des colonnes, pas en parcourant des cartes ;
+     • les taxonomies perdent leurs pastilles colorées. Un rôle, une catégorie
+       de personnel, un type de service ne sont pas des états : ce sont des
+       valeurs de colonne, et l'en-tête de colonne les nomme déjà. Les trois
+       `tone` du kit restent réservés à ce qui a un sens — `duty` en service ou
+       actif, `alert` ce qui manque, `seal` ce qui engage.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gsd-wrap {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.gsd-tab-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Les onglets qui délèguent à un composant déjà habillé (calendrier,
+   statistiques, prêts) reçoivent une phrase de portée sans carte : emboîter
+   une carte dans une carte ajouterait un filet sans rien dire. */
+.gsd-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* D'où vient la donnée, et ce que l'écran ne fait pas. Une phrase, au ton du
+   registre. */
+.gsd-note {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-faint);
+}
+
+/* Le panneau d'un registre est `flush` : l'attente et l'erreur ont donc
+   besoin de leur propre marge, sinon elles collent au filet. */
+.gsd-load { padding: 14px 16px; min-width: 0; }
+
+/* ── Bandeau de filtres d'un registre ──────────────────────────────────────
+   Six sélecteurs ne sont pas des pastilles de filtre : ils ne tiennent pas
+   dans `GsFilterBar`. Ils forment une grille qui se replie d'elle-même, posée
+   sous l'en-tête du panneau pour partager son filet. */
+
+.gsd-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 9px 10px;
+  align-items: end;
+  padding: 11px 16px 13px;
+  /* L'en-tête du panneau porte déjà son filet du bas : la grille ferme le sien
+     en bas, sinon deux réglures se suivent à un pixel d'écart. */
+  border-bottom: 1px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
+  min-width: 0;
+}
+
+.gsd-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gsd-field > span {
+  font-family: var(--gs-body);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+/* Le champ global de la plateforme fait 42 px : c'est trop haut pour une
+   rangée de six. On le rabaisse ici seulement, sans toucher `.form-control`. */
+.gsd-field > .form-control {
+  height: 34px;
+  padding: 0 10px;
+  font-family: var(--gs-body);
+  font-size: 12px;
+  background: var(--gs-paper);
+  border-color: var(--gs-rule-strong);
+  border-radius: 7px;
+}
+
+.gsd-field > select.form-control { padding-right: 26px; }
+
+/* La règle qui accompagne un champ : sous le champ, pas dans son libellé. */
+.gsd-hint {
+  font-family: var(--gs-body);
+  font-size: 10px;
+  font-weight: 500;
+  font-style: normal;
+  line-height: 1.45;
+  color: var(--gs-ink-faint);
+}
+
+.gsd-hint.is-alert { color: var(--gs-alert); font-weight: 600; }
+
+
+.gsd-field > .form-control:focus {
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
+}
+
+/* La remise à zéro se range en bout de grille, alignée sur les champs. */
+.gsd-filters-reset {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+/* ── Cellules de registre ──────────────────────────────────────────────────
+   Un nom porte l'identité, sa ligne de dessous situe. Même mécanique pour un
+   service et pour un agent : ce sont les deux seules colonnes à deux étages,
+   toutes les autres portent une valeur unique. */
+
+.gsd-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gsd-name > b {
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gsd-name > span {
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--gs-ink-faint);
+}
+
+/* Le nom arabe se lit de droite à gauche, sans quitter sa cellule. */
+.gsd-name > span[dir='rtl'] { direction: rtl; text-align: right; }
+
+/* Un code de service est un identifiant : il passe au registre, comme un
+   matricule. Pas de pastille — la colonne le nomme. */
+.gsd-code {
+  font-family: var(--gs-data);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--gs-ink-soft);
+  white-space: nowrap;
+}
+
+/* Une valeur de taxonomie : un mot, dans la voix courante. */
+.gsd-word {
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  color: var(--gs-ink-soft);
+}
+
+.gsd-word.is-void { color: var(--gs-ink-faint); }
+
+/* Le rôle métier cumulé et le titre de poste tiennent sous le rôle d'accès :
+   trois informations, un seul empilement, pas trois pastilles. */
+.gsd-sub {
+  font-family: var(--gs-body);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--gs-ink-faint);
+}
+
+.gsd-sub.is-seal { color: var(--gs-seal); font-weight: 600; }
+
+/* ── Jetons de service ─────────────────────────────────────────────────────
+   Les affectations d'un agent et les surveillants d'un service : plusieurs
+   valeurs dans une cellule. Le jeton du service dont l'agent est chef porte
+   le cachet — c'est un fait d'autorité, pas une décoration. */
+
+.gsd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+
+.gsd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 999px;
+  background: var(--gs-paper-alt);
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--gs-ink-soft);
+  white-space: nowrap;
+}
+
+.gsd-chip[data-head] {
+  border-color: color-mix(in srgb, var(--gs-seal) 30%, transparent);
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+}
+
+.gsd-chip > i {
+  font-style: normal;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  opacity: 0.78;
+}
+
+/* Retirer un surveillant : une croix qui est un vrai bouton, donc atteignable
+   au clavier. L'ancien `<span onClick>` ne l'était pas. */
+.gsd-chip-off {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-right: -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.gsd-chip-off:hover { opacity: 1; background: var(--gs-alert-wash); color: var(--gs-alert); }
+.gsd-chip-off:focus-visible { outline: 2px solid var(--gs-seal); outline-offset: 1px; opacity: 1; }
+
+/* Le bouton qui manque : « désigner » n'est pas une valeur de la ligne, c'est
+   ce qu'il faut faire parce que la valeur est absente. Filet interrompu. */
+.gsd-fill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border: 1px dashed var(--gs-rule-strong);
+  border-radius: 999px;
+  background: transparent;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--gs-ink-faint);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.gsd-fill:hover { border-color: var(--gs-seal); color: var(--gs-seal); background: var(--gs-seal-wash); }
+.gsd-fill:focus-visible { outline: 2px solid var(--gs-seal); outline-offset: 1px; }
+
+/* Le manque qui bloque : un service sans chef ne peut pas produire de
+   planning. Le bouton le dit à l'ambre, pas au bleu du cachet. */
+.gsd-fill.is-alert { border-color: color-mix(in srgb, var(--gs-alert) 44%, transparent); color: var(--gs-alert); }
+.gsd-fill.is-alert:hover { border-color: var(--gs-alert); background: var(--gs-alert-wash); color: var(--gs-alert); }
+
+/* ── Actions d'une ligne ───────────────────────────────────────────────────
+   Jamais coupées, jamais empilées : une ligne de registre se lit
+   horizontalement. */
+
+.gsd-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.gsd-acts > button { white-space: nowrap; }
+
+/* Une action d'icône seule : le titre porte le nom, la cible reste de 26 px. */
+.gsd-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 7px;
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+  cursor: pointer;
+}
+
+.gsd-icon-btn:hover { border-color: var(--gs-seal); color: var(--gs-seal); background: var(--gs-seal-wash); }
+.gsd-icon-btn:focus-visible { outline: 2px solid var(--gs-seal); outline-offset: 1px; }
+
+.gsd-icon-btn.is-danger:hover {
+  border-color: var(--gs-alert);
+  color: var(--gs-alert);
+  background: var(--gs-alert-wash);
+}
+
+/* Une ligne de registre sans chef est signalée par `flagged` du kit
+   (`--gs-alert-wash`) : c'est le seul manque qui empêche un service de produire
+   un planning. Un compte clôturé, lui, n'est pas une alerte — sa colonne
+   « Statut » le dit, et rien n'est atténué. */
+
+/* ── Modales ───────────────────────────────────────────────────────────────
+   La coque (`.modal-overlay`, `.modal`, `.modal-header`…) vient de
+   `index.css` : cinq modales réécrites à la main y reviennent. Ne restent ici
+   que la grille de champs et les encarts de règle. */
+
+.gsd-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 13px 14px;
+  min-width: 0;
+}
+
+.gsd-modal-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Un champ de modale garde la hauteur pleine de la plateforme (42 px) : on ne
+   remonte pas la densité là où l'on saisit. */
+.gsd-modal-grid .gsd-field > .form-control,
+.gsd-modal-body > .gsd-field > .form-control {
+  height: 40px;
+  font-size: 12.5px;
+}
+
+.gsd-modal-body > .gsd-field > textarea.form-control { height: auto; }
+
+.gsd-req { color: var(--gs-alert); margin-left: 3px; }
+
+/* Une règle du métier, pas une décoration : filet à gauche, icône au ton, une
+   phrase. Remplace les encarts ambre et bleus à hexadécimales. */
+.gsd-rule {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--gs-rule);
+  border-left: 3px solid var(--gs-rule-strong);
+  border-radius: 8px;
+  background: var(--gs-paper-alt);
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--gs-ink-soft);
+}
+
+.gsd-rule > svg { color: var(--gs-ink-faint); margin-top: 1px; }
+.gsd-rule strong { font-weight: 700; color: var(--gs-ink); }
+.gsd-rule p { margin: 0; }
+.gsd-rule p + p { margin-top: 5px; }
+
+.gsd-rule.is-seal { border-left-color: var(--gs-seal); background: var(--gs-seal-wash); }
+.gsd-rule.is-seal > svg { color: var(--gs-seal); }
+
+.gsd-rule.is-alert { border-left-color: var(--gs-alert); background: var(--gs-alert-wash); }
+.gsd-rule.is-alert > svg { color: var(--gs-alert); }
+
+/* Le rôle secondaire vit dans la règle qui l'explique : le sélecteur suit la
+   phrase au lieu d'ouvrir un second encart. */
+.gsd-rule-field { display: grid; gap: 5px; margin-top: 8px; }
+
+.gsd-rule-field > .form-control {
+  height: 36px;
+  font-family: var(--gs-body);
+  font-size: 12px;
+  background: var(--gs-paper);
+}
+
+/* Les surveillants déjà en place, avant d'en ajouter un : un rappel de
+   l'existant, pas une liste à modifier (le retrait se fait au registre). */
+.gsd-standing {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gsd-standing > span {
+  font-family: var(--gs-body);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Repli ─────────────────────────────────────────────────────────────────
+   Le registre défile déjà dans son enveloppe (`.gsk-table-wrap`). Ce qui doit
+   céder sous 700 px, c'est la grille des filtres et celle des modales. */
+
+@media (max-width: 700px) {
+  .gsd-filters { grid-template-columns: 1fr; padding: 10px 13px 12px; }
+  .gsd-modal-grid { grid-template-columns: 1fr; }
+}

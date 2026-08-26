@@ -1,0 +1,649 @@
+/**
+ * Kit partagé — habillage
+ * ═══════════════════════
+ * Feuille unique du jeu de primitives de `components/gs/`. Préfixe `.gsk-`,
+ * pour ne croiser aucun sélecteur d'écran existant.
+ *
+ * Elle ne redéfinit rien de `styles/gardesante-design.css` : les boutons
+ * (`.gs-btn`), les onglets (`.gs-tabs` / `.gs-tab`), le surtitre
+ * (`.gs-eyebrow`), le titre (`.gs-title`) et les chiffres tabulaires
+ * (`.gs-num`) viennent de là et sont employés tels quels. Ce fichier ajoute
+ * les six assemblages que chaque écran redessinait à la main : l'en-tête de
+ * page, le panneau, le filet de mesure, le tableau, la barre de filtres, le
+ * vide et l'attente.
+ *
+ * Deux règles tenues partout :
+ *   • aucune valeur hexadécimale — uniquement les jetons `--gs-*` et les
+ *     variables de thème (`--bg-card`, `--bg-input`…), donc le sombre suit ;
+ *   • `min-width: 0` sur chaque conteneur de grille, pour que le défilement
+ *     d'un tableau large revienne au tableau et non à la fenêtre.
+ */
+
+/* ═══ 1. En-tête de page ═══════════════════════════════════════════════
+   Le surtitre situe (« Chef de service · Urgences »), le titre nomme, la
+   ligne de faits chiffre, les actions se rangent à droite. Le pied de
+   l'en-tête accueille la rangée d'onglets ou la barre de filtres : elles
+   partagent alors le filet de séparation au lieu d'en ajouter un second. */
+
+.gsk-head {
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px 0;
+  background: var(--gs-paper);
+  border-bottom: 1px solid var(--gs-rule);
+  min-width: 0;
+}
+
+.gsk-head.is-plain {
+  background: transparent;
+  border-bottom: 0;
+  padding: 0;
+}
+
+.gsk-head-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.gsk-head-titles {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gsk-head-titles .gs-title {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.gsk-head-sub {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+  max-width: 62ch;
+}
+
+.gsk-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  /* `flex-shrink: 0` protège les boutons de l'écrasement, mais sans borne la
+     boîte garde la largeur de ses enfants mis bout à bout : deux actions et un
+     sélecteur débordaient la page sur un téléphone. La borne rend le retour à
+     la ligne effectif. */
+  max-width: 100%;
+}
+
+/* Faits secondaires : période, effectif, dernière mise à jour. Séparés par
+   un point médian tracé en CSS, jamais saisi dans le texte. */
+.gsk-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+}
+
+.gsk-head-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.gsk-head-meta > span + span::before {
+  content: '·';
+  color: var(--gs-rule-strong);
+  margin-right: 4px;
+}
+
+.gsk-head-meta .gs-num { font-size: 11px; color: var(--gs-ink-soft); }
+
+.gsk-head-foot { min-width: 0; }
+
+/* ═══ 2. Panneau ═══════════════════════════════════════════════════════
+   Une zone de contenu nommée. Le titre est un `h3` de signalétique, le
+   sous-titre dit à quoi sert la zone quand ce n'est pas évident, les outils
+   de la zone se posent à droite du titre — pas dans le corps. */
+
+.gsk-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--gs-shadow-card);
+}
+
+.gsk-panel.is-flat { box-shadow: none; }
+
+.gsk-panel.is-alert { border-color: color-mix(in srgb, var(--gs-alert) 34%, transparent); }
+.gsk-panel.is-duty  { border-color: color-mix(in srgb, var(--gs-duty) 30%, transparent); }
+
+.gsk-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--gs-rule);
+  min-width: 0;
+}
+
+.gsk-panel-head.is-bare { border-bottom: 0; padding-bottom: 4px; }
+
+.gsk-panel-titles { display: grid; gap: 2px; min-width: 0; }
+
+.gsk-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--gs-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+  color: var(--gs-ink);
+  min-width: 0;
+}
+
+.gsk-panel-title > svg { color: var(--gs-ink-faint); flex-shrink: 0; }
+
+.gsk-panel-sub {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--gs-ink-faint);
+  max-width: 70ch;
+}
+
+.gsk-panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.gsk-panel-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.gsk-panel-body.is-flush { padding: 0; gap: 0; }
+.gsk-panel-body.is-tight { padding: 10px 12px; }
+
+/* Le corps qui défile garde son filet arrondi en bas de panneau. */
+.gsk-panel-body.is-scroll {
+  overflow: auto;
+  max-height: var(--gsk-panel-max, 420px);
+  scrollbar-width: thin;
+}
+
+/* ═══ 3. Filet de mesure ═══════════════════════════════════════════════
+   L'élément signature, hérité de `.gs-hero-quant` : la valeur, son unité et
+   son libellé posés sur une réglure verticale. Il remplace les grilles de
+   cartes à icône colorée — une mesure n'a pas de couleur parce qu'elle est
+   la quatrième de la rangée. Seules `is-duty` et `is-alert` en prennent une,
+   et elles veulent dire quelque chose. */
+
+.gsk-rail {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.gsk-stat {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 0 18px 14px 0;
+  margin-right: 18px;
+  border-right: 1px solid var(--gs-rule);
+  min-width: 0;
+  text-align: left;
+}
+
+.gsk-stat:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+
+.gsk-stat > dt {
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+  white-space: nowrap;
+}
+
+.gsk-stat > dd {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0;
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.05;
+  color: var(--gs-ink);
+}
+
+.gsk-stat-unit {
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--gs-ink-faint);
+}
+
+.gsk-stat-hint {
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--gs-ink-faint);
+  max-width: 22ch;
+}
+
+.gsk-stat.is-duty  > dd { color: var(--gs-duty); }
+.gsk-stat.is-alert > dd { color: var(--gs-alert); }
+.gsk-stat.is-seal  > dd { color: var(--gs-seal); }
+
+/* Une mesure qui ouvre un écran : le libellé porte le bouton, et son `::after`
+   couvre la mesure entière. La souris et le clavier visent donc la même cible —
+   c'est le lien étiré déjà employé par le registre des plannings, pas un
+   `<div onClick>`. Le `<dl>` reste valide : aucun bouton n'y est enfant direct. */
+
+.gsk-stat-open {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gsk-stat-open::after {
+  content: '';
+  position: absolute;
+  inset: -6px 10px -6px -6px;
+  border-radius: 8px;
+}
+
+.gsk-stat:last-child .gsk-stat-open::after { right: -6px; }
+
+.gsk-stat-open:focus-visible { outline: 0; }
+
+.gsk-stat-open:focus-visible::after {
+  outline: 2px solid var(--gs-seal);
+  outline-offset: 0;
+}
+
+.gsk-stat-open:hover {
+  color: var(--gs-seal);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gsk-stat.is-link:hover > dd { color: var(--gs-seal); }
+
+/* Rangée compacte, pour un pied de panneau plutôt qu'un en-tête de page. */
+.gsk-rail.is-compact .gsk-stat { padding-bottom: 0; padding-right: 14px; margin-right: 14px; }
+.gsk-rail.is-compact .gsk-stat > dd { font-size: 16px; }
+
+/* ═══ 4. Tableau ═══════════════════════════════════════════════════════
+   Un registre : en-tête en surtitre, filets horizontaux seuls, chiffres
+   tabulaires alignés à droite. L'enveloppe porte le défilement horizontal —
+   c'est ce qui empêche une colonne de trop de pousser la page entière. */
+
+.gsk-table-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.gsk-table {
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+  font-family: var(--gs-body);
+  font-size: 12px;
+}
+
+.gsk-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 12px;
+  background: var(--gs-paper-alt);
+  border-bottom: 1px solid var(--gs-rule-strong);
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.gsk-table tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--gs-rule);
+  color: var(--gs-ink-soft);
+  vertical-align: middle;
+}
+
+.gsk-table tbody tr:last-child td { border-bottom: 0; }
+
+.gsk-table tbody tr:hover td { background: var(--gs-paper-alt); }
+
+.gsk-table tbody tr.is-flagged td { background: var(--gs-alert-wash); }
+
+.gsk-table .is-num {
+  text-align: right;
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  color: var(--gs-ink);
+}
+
+.gsk-table .is-strong { color: var(--gs-ink); font-weight: 600; }
+
+.gsk-table caption {
+  caption-side: bottom;
+  padding: 8px 12px;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+  text-align: left;
+}
+
+/* En-tête triable : le sens du tri se lit sur le glyphe, l'état sur aria-sort. */
+.gsk-table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.gsk-table-sort:hover { color: var(--gs-ink); }
+
+.gsk-table th[aria-sort] .gsk-table-sort { color: var(--gs-seal); }
+
+.gsk-table-sort > span {
+  font-family: var(--gs-data);
+  font-size: 9px;
+  opacity: .55;
+}
+
+.gsk-table th[aria-sort] .gsk-table-sort > span { opacity: 1; }
+
+/* ═══ 5. Badge ═════════════════════════════════════════════════════════
+   Un état, pas une décoration. Le point coloré porte l'information, le mot
+   la nomme ; le fond reste un lavis pour ne pas concurrencer le cachet. */
+
+.gsk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.gsk-badge > svg { flex-shrink: 0; }
+
+.gsk-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.gsk-badge.is-seal  { background: var(--gs-seal-wash);  color: var(--gs-seal);  border-color: color-mix(in srgb, var(--gs-seal) 26%, transparent); }
+.gsk-badge.is-duty  { background: var(--gs-duty-wash);  color: var(--gs-duty);  border-color: color-mix(in srgb, var(--gs-duty) 26%, transparent); }
+.gsk-badge.is-alert { background: var(--gs-alert-wash); color: var(--gs-alert); border-color: color-mix(in srgb, var(--gs-alert) 26%, transparent); }
+.gsk-badge.is-quiet { background: transparent; color: var(--gs-ink-faint); border-color: var(--gs-rule); }
+
+.gsk-badge .gs-num { font-size: 10.5px; }
+
+/* ═══ 6. Barre de filtres ══════════════════════════════════════════════
+   Des filtres pressés, pas des onglets : `aria-pressed` et non
+   `aria-current`, parce qu'ils restreignent une liste au lieu de changer de
+   vue. Le compteur de chaque filtre est un chiffre du registre. */
+
+.gsk-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 10px 0;
+}
+
+.gsk-filters.is-inset { padding: 10px 16px; border-bottom: 1px solid var(--gs-rule); }
+
+.gsk-filter-set { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+
+.gsk-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+              background var(--transition-fast);
+}
+
+.gsk-filter:hover { color: var(--gs-ink); border-color: var(--gs-rule-strong); }
+
+.gsk-filter[aria-pressed='true'] {
+  color: var(--gs-seal);
+  border-color: color-mix(in srgb, var(--gs-seal) 40%, transparent);
+  background: var(--gs-seal-wash);
+}
+
+.gsk-filter > b {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 600;
+  opacity: .75;
+}
+
+.gsk-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 180px;
+  min-width: 0;
+  max-width: 320px;
+  padding: 0 10px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  background: var(--gs-paper-alt);
+}
+
+.gsk-search:focus-within {
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
+}
+
+.gsk-search > svg { color: var(--gs-ink-faint); flex-shrink: 0; }
+
+.gsk-search > input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 7px 0;
+  background: transparent;
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+  font-size: 12px;
+}
+
+.gsk-search > input::placeholder { color: var(--gs-ink-faint); }
+
+.gsk-search > button {
+  border: 0;
+  padding: 2px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.gsk-search > button:hover { color: var(--gs-alert); }
+
+.gsk-filters-end { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+
+/* ═══ 7. Le vide ═══════════════════════════════════════════════════════
+   Une instruction, pas un constat. Il dit ce qui manque, pourquoi, et
+   propose l'action qui le remplirait. Les quatorze blocs « Aucun… »
+   identiques de la plateforme convergent ici. */
+
+.gsk-empty {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 30px 20px;
+  border: 1px dashed var(--gs-rule-strong);
+  border-radius: var(--border-radius);
+  background: var(--gs-paper-alt);
+  text-align: center;
+  min-width: 0;
+}
+
+.gsk-empty.is-bare { border: 0; background: transparent; padding: 24px 16px; }
+
+.gsk-empty > svg { color: var(--gs-ink-faint); opacity: .7; }
+
+.gsk-empty-title {
+  font-family: var(--gs-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gsk-empty-hint {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--gs-ink-faint);
+  max-width: 46ch;
+}
+
+.gsk-empty-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 3px; }
+
+/* ═══ 8. L'attente ═════════════════════════════════════════════════════
+   Des filets à la place du contenu, à sa géométrie. Le balayage se tait
+   pour qui demande moins de mouvement — la règle globale du socle
+   neutralise la durée, on retire aussi le dégradé pour ne pas laisser un
+   reflet figé. */
+
+.gsk-skel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.gsk-skel-bar {
+  height: 11px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--gs-paper-alt) 25%, var(--gs-rule) 50%, var(--gs-paper-alt) 75%);
+  background-size: 260% 100%;
+  animation: gsk-sweep 1.3s ease-in-out infinite;
+}
+
+.gsk-skel-bar.is-tall { height: 26px; border-radius: 8px; }
+.gsk-skel-bar.is-block { height: 64px; border-radius: var(--border-radius); }
+
+.gsk-skel-rail { display: flex; gap: 18px; flex-wrap: wrap; }
+.gsk-skel-rail > div { display: grid; gap: 6px; min-width: 90px; }
+
+@keyframes gsk-sweep {
+  from { background-position: 130% 0; }
+  to   { background-position: -30% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gsk-skel-bar { background: var(--gs-paper-alt); }
+}
+
+/* ═══ 9. Étroit ════════════════════════════════════════════════════════
+   Sous 720 px le filet vertical du rail perd son sens (les mesures passent
+   à la ligne) : il devient un filet horizontal, et les libellés d'en-tête
+   de tableau se resserrent. */
+
+@media (max-width: 720px) {
+  .gsk-head { padding: 14px 14px 0; }
+  .gsk-head-titles .gs-title { font-size: 17px; }
+
+  .gsk-stat {
+    flex: 1 1 44%;
+    padding: 0 0 10px;
+    margin: 0 0 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--gs-rule);
+  }
+
+  .gsk-stat.is-link { border-right: 0; border-bottom: 1px solid var(--gs-rule); }
+  .gsk-stat > dd { font-size: 20px; }
+  .gsk-rail { gap: 0 16px; }
+
+  .gsk-panel-head { flex-direction: column; gap: 8px; }
+  .gsk-panel-tools { width: 100%; }
+  .gsk-panel-body { padding: 12px; }
+  .gsk-table thead th, .gsk-table tbody td { padding: 8px 9px; }
+}

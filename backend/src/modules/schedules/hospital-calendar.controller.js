@@ -11,6 +11,17 @@ const { query } = require('../../config/database');
 const { ROLES } = require('../../config/constants');
 const { rosterOnDate, datesBetween, dateKey, planningState } = require('./spreadsheet-reader');
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const isValidDateQuery = (value) => {
+  if (value === undefined || value === null || value === '') return true;
+  if (typeof value !== 'string' || !DATE_RE.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1];
+};
+
 /** Services dont l'utilisateur est membre (chef ou surveillant). */
 const getUserDepartmentIds = async (userId) => {
   const { rows } = await query(
@@ -35,8 +46,17 @@ const getHospitalCalendar = async (req, res) => {
   }
 
   const today = dateKey(new Date());
-  const from = dateKey(req.query.from) || today;
-  const to = dateKey(req.query.to) || from;
+  const rawFrom = req.query.from;
+  const rawTo = req.query.to;
+  if ((rawFrom !== undefined && !isValidDateQuery(rawFrom))
+    || (rawTo !== undefined && !isValidDateQuery(rawTo))) {
+    return res.status(400).json({
+      success: false,
+      message: 'Les paramètres from et to doivent être des dates valides au format YYYY-MM-DD',
+    });
+  }
+  const from = rawFrom || today;
+  const to = rawTo || from;
   if (to < from) {
     return res.status(400).json({ success: false, message: 'La date de fin précède la date de début' });
   }
@@ -114,34 +134,23 @@ const getHospitalCalendar = async (req, res) => {
       }
       perSchedule.set(schedule.id, 0);
 
-      // Le code journalier du tableur est FACULTATIF : un planning validé peut ne
-      // porter que la période de participation de chaque agent (« Période début /
-      // fin »), sans aucune lettre dans les cases. C'est le cas de tous les
-      // plannings réels de cette base — `row.shifts` y est vide. `guardEntries()`,
-      // qui ne lit QUE ces codes, renvoyait donc une liste vide et le calendrier
-      // restait blanc alors que des gardes étaient bien en vigueur.
-      //
-      // On parcourt donc les jours de la fenêtre et on interroge `rosterOnDate()`,
-      // la lecture partagée qui applique les deux niveaux de saisie dans l'ordre
-      // (code du jour d'abord, période de la ligne ensuite) et qui alimente déjà
-      // correctement l'appel du jour et le journal de service.
+      // Une ligne de tableur exprime son service par ses cases cochées ou par sa
+      // période de participation (« Période début / fin ») — c'est le cas de tous
+      // les plannings réels de cette base, dont `row.shifts` est vide. On parcourt
+      // donc les jours de la fenêtre et on interroge `rosterOnDate()`, la lecture
+      // partagée qui applique la règle d'arbitrage de la ligne et qui alimente
+      // déjà l'appel du jour et le journal de service.
       const windowStart = schedule.start_date && schedule.start_date > from ? schedule.start_date : from;
       const windowEnd   = schedule.end_date   && schedule.end_date   < to   ? schedule.end_date   : to;
       if (windowEnd < windowStart) continue;
 
       for (const dayKey of datesBetween(windowStart, windowEnd)) {
         for (const entry of rosterOnDate(schedule, dayKey)) {
-          if (!entry.isGuard) continue;
-
           if (!byDate.has(entry.date)) {
-            byDate.set(entry.date, { date: entry.date, total: 0, byCode: {}, guards: [] });
+            byDate.set(entry.date, { date: entry.date, total: 0, guards: [] });
           }
           const day = byDate.get(entry.date);
           day.total += 1;
-          // Une garde déduite de la période n'a pas de code : elle est comptée
-          // sous « DS » (De service) plutôt que sous une clé vide.
-          const bucket = entry.code || 'DS';
-          day.byCode[bucket] = (day.byCode[bucket] || 0) + 1;
           day.guards.push({
             scheduleId: schedule.id,
             scheduleName: schedule.name,
@@ -151,7 +160,6 @@ const getHospitalCalendar = async (req, res) => {
             userId: entry.userId,
             name: `${entry.firstName} ${entry.lastName}`.trim() || 'Agent',
             roleName: entry.roleName,
-            code: entry.code,
             label: entry.label,
             shiftStart: entry.shiftStart,
             shiftEnd: entry.shiftEnd,

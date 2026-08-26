@@ -1,9 +1,34 @@
-/** Congés du personnel — création, recherche et consultation par la direction. */
+/**
+ * Congés du personnel — poser, chercher, consulter
+ * ═══════════════════════════════════════════════
+ * Le directeur ne regarde pas un congé, il en compare plusieurs : qui est
+ * absent, sur quelle période, et le motif est-il justifié. Les cartes — une par
+ * congé, filet coloré en haut — interdisaient exactement cela : deux périodes
+ * ne s'alignent pas d'une carte à l'autre. Le registre les aligne.
+ *
+ * Ce qui change, et pourquoi :
+ *   • les trois tuiles de mesure disparaissent : « Résultats », « En cours » et
+ *     « À venir » sont désormais les compteurs des filtres, au chiffre près ;
+ *   • le type de congé perd sa couleur (`type_color`) : c'est une taxonomie, pas
+ *     un état, et l'en-tête de colonne le nomme ;
+ *   • la position dans le temps garde trois états distincts sans couleur
+ *     inventée — « En cours » porte le point, « À venir » est neutre,
+ *     « Terminé » est atténué ;
+ *   • les dates sont écrites en français (« du 1er au 12 septembre 2026 ») au
+ *     lieu du format court abrégé, et la durée en jours est calculée.
+ *
+ * Rien ne change côté données : mêmes requêtes, mêmes clés de cache, même ordre
+ * de validation à la soumission, même plafond de 10 Mo sur le justificatif.
+ */
+
 import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, Clock3, Paperclip, Plus, Search, X } from 'lucide-react';
+import { CalendarDays, Check, Info, Paperclip, Plus, RotateCcw, X } from 'lucide-react';
 import { leavesAPI, usersAPI } from '../../../api';
+import { GsPanel, GsTable, GsBadge, GsFilterBar, GsEmpty, GsSkeleton } from '../../../components/gs';
+import { frenchRange, longFrenchDate } from '../../../utils/frenchDates';
 import toast from 'react-hot-toast';
+import './director-panels.css';
 
 const API_BASE = import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, '') || 'http://localhost:5000';
 const EMPTY_FORM = {
@@ -13,33 +38,51 @@ const EMPTY_FILTERS = {
   search: '', userId: '', absenceTypeId: '', from: '', to: '', reason: '', activeOnly: 'true',
 };
 
-const fmt = (iso) => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').slice(0, 10));
-  if (!m) return iso || '—';
-  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString('fr-FR', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  });
-};
+const fileUrl = (url) => (!url ? null : (url.startsWith('http') ? url : `${API_BASE}${url}`));
 
-const fileUrl = (url) => !url ? null : (url.startsWith('http') ? url : `${API_BASE}${url}`);
+const dayKey = (value) => String(value || '').slice(0, 10);
+
 const todayKey = () => {
   const today = new Date();
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
 };
-const leaveStatus = (leave) => {
+
+/**
+ * Position du congé dans le temps. Ce n'est pas une gravité : un congé normal
+ * n'est ni une alerte ni une garde. Les trois états se distinguent donc par le
+ * point et l'atténuation, pas par une couleur prêtée à un autre sens.
+ */
+const leaveStage = (leave) => {
   const today = todayKey();
-  if (leave.is_current || (String(leave.start_date).slice(0, 10) <= today && String(leave.end_date).slice(0, 10) >= today)) return { label: 'En cours', color: '#047857', bg: '#D1FAE5' };
-  if (String(leave.start_date).slice(0, 10) > today) return { label: 'À venir', color: '#1D4ED8', bg: '#DBEAFE' };
-  return { label: 'Terminé', color: '#64748B', bg: '#F1F5F9' };
+  const from = dayKey(leave.start_date);
+  const to = dayKey(leave.end_date);
+  if (leave.is_current || (from <= today && to >= today)) return 'current';
+  if (from > today) return 'upcoming';
+  return 'past';
 };
-const fieldStyle = { display: 'flex', flexDirection: 'column', gap: 4 };
-const labelStyle = { fontSize: 'var(--font-xs)', fontWeight: 700, color: 'var(--text-secondary)' };
+
+const STAGE_LABEL = { current: 'En cours', upcoming: 'À venir', past: 'Terminé' };
+
+/** Durée en jours, bornes incluses — un congé d'un seul jour compte pour 1. */
+const dayCount = (from, to) => {
+  const a = dayKey(from);
+  const b = dayKey(to);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null;
+  const [ay, am, ad] = a.split('-').map(Number);
+  const [by, bm, bd] = b.split('-').map(Number);
+  const diff = Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad);
+  return Math.round(diff / 86400000) + 1;
+};
 
 export default function LeavesPanel() {
   const qc = useQueryClient();
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [form, setForm] = useState(EMPTY_FORM);
   const [showForm, setShowForm] = useState(false);
+  // Restriction d'affichage, appliquée sur ce qui a été chargé — distincte de
+  // `activeOnly`, qui décide ce que le serveur envoie.
+  const [stage, setStage] = useState('all');
 
   const queryParams = useMemo(() => ({
     activeOnly: filters.activeOnly === 'true' ? 'true' : undefined,
@@ -72,9 +115,15 @@ export default function LeavesPanel() {
       .sort((a, b) => `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`, 'fr')),
     [staff]
   );
+
   const selectedType = types.find((type) => type.id === form.absenceTypeId);
-  const current = leaves.filter((leave) => leave.is_current).length;
-  const upcoming = leaves.filter((leave) => leaveStatus(leave).label === 'À venir').length;
+
+  const staged = useMemo(
+    () => leaves.map((leave) => ({ ...leave, stage: leaveStage(leave) })),
+    [leaves]
+  );
+  const shown = stage === 'all' ? staged : staged.filter((leave) => leave.stage === stage);
+
   const filtersActive = Object.entries(filters).some(([key, value]) => (
     key === 'activeOnly' ? value !== 'true' : Boolean(value)
   ));
@@ -129,237 +178,377 @@ export default function LeavesPanel() {
     createMut.mutate(data);
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 240 }}>
-          <h3 style={{ fontSize: 'var(--font-lg)', fontWeight: 800, color: 'var(--text-primary)' }}>
-            Congés du personnel
-          </h3>
-          <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 3 }}>
-            {leaves.length} résultat(s) · {current} en cours aujourd'hui
-          </p>
+  // Le compteur d'un filtre annonce ce qui restera après application : il se
+  // calcule donc sur l'ensemble déjà chargé et cherché, pas sur la base entière.
+  const stageFilters = [
+    { id: 'all',      label: 'Tous',     count: staged.length },
+    { id: 'current',  label: 'En cours', count: staged.filter((l) => l.stage === 'current').length },
+    { id: 'upcoming', label: 'À venir',  count: staged.filter((l) => l.stage === 'upcoming').length },
+    // Sans « Tous les congés » côté serveur, aucun congé terminé n'est chargé :
+    // le filtre reste visible mais son compteur dit franchement zéro.
+    { id: 'past',     label: 'Terminés', count: staged.filter((l) => l.stage === 'past').length },
+  ];
+
+  const columns = [
+    {
+      key: 'agent', label: 'Agent',
+      render: (leave) => (
+        <div className="gsdp-name">
+          <b>{leave.first_name} {leave.last_name}</b>
+          <span>{leave.department_name || 'Service non renseigné'}</span>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowForm((value) => !value)}>
-          {showForm ? <><X size={14} /> Fermer</> : <><Plus size={14} /> Poser un congé</>}
-        </button>
-      </div>
+      ),
+    },
+    {
+      key: 'type', label: 'Type de congé',
+      render: (leave) => <span className="gsdp-word">{leave.type_name || '—'}</span>,
+    },
+    {
+      key: 'span', label: 'Période',
+      render: (leave) => {
+        const days = dayCount(leave.start_date, leave.end_date);
+        const range = frenchRange(dayKey(leave.start_date), dayKey(leave.end_date));
+        return (
+          <div className="gsdp-span">
+            <b>{range || longFrenchDate(dayKey(leave.start_date))}</b>
+            {days ? <span>{days} jour{days > 1 ? 's' : ''}</span> : null}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'reason', label: 'Motif',
+      render: (leave) => (leave.reason
+        ? <span className="gsdp-reason">{leave.reason}</span>
+        : <span className="gsdp-reason is-void">Non renseigné</span>),
+    },
+    {
+      key: 'clip', label: 'Justificatif',
+      render: (leave) => (leave.justification_url ? (
+        <a className="gsdp-clip" href={fileUrl(leave.justification_url)} target="_blank" rel="noreferrer">
+          <Paperclip size={12} strokeWidth={2.2} /> Ouvrir
+        </a>
+      ) : (
+        <span className="gsdp-word is-void">Aucun</span>
+      )),
+    },
+    {
+      key: 'stage', label: 'Statut',
+      render: (leave) => (
+        <GsBadge
+          tone={leave.stage === 'past' ? 'quiet' : undefined}
+          dot={leave.stage === 'current'}
+          title={leave.stage === 'current' ? "L'agent est absent aujourd'hui" : undefined}
+        >
+          {STAGE_LABEL[leave.stage]}
+        </GsBadge>
+      ),
+    },
+    {
+      key: 'acts', label: '', align: 'right',
+      render: (leave) => (
+        <div className="gsdp-acts">
+          <button
+            type="button"
+            className="gs-btn is-quiet"
+            disabled={cancelMut.isPending}
+            onClick={() => {
+              if (window.confirm(`Annuler le congé de ${leave.first_name} ${leave.last_name} ?`)) {
+                cancelMut.mutate(leave.id);
+              }
+            }}
+          >
+            Annuler
+          </button>
+        </div>
+      ),
+    },
+  ];
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
-        {[
-          { label: 'Résultats affichés', value: leaves.length, icon: <CalendarDays size={17} />, color: 'var(--color-primary)' },
-          { label: 'En cours aujourd’hui', value: current, icon: <Clock3 size={17} />, color: '#047857' },
-          { label: 'À venir', value: upcoming, icon: <CalendarDays size={17} />, color: '#1D4ED8' },
-        ].map(item => <div key={item.label} style={{ padding: '13px 15px', border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', gap: 11 }}><span style={{ width: 34, height: 34, borderRadius: 7, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: `${item.color}14`, color: item.color }}>{item.icon}</span><div><div style={{ fontSize: 20, lineHeight: 1, fontWeight: 800, color: 'var(--text-primary)' }}>{item.value}</div><div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>{item.label}</div></div></div>)}
-      </div>
-
+  return (
+    <div className="gsdp-stack">
+      {/* ══ POSER UN CONGÉ ══ */}
       {showForm && (
-        <form onSubmit={submit} className="card" style={{ display: 'grid', gap: 14, padding: 18 }}>
-          <div>
-            <h4 style={{ margin: 0, fontSize: 'var(--font-md)', color: 'var(--text-primary)' }}>Nouveau congé</h4>
-            <p style={{ margin: '3px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-              Les justificatifs acceptés sont les images et les PDF, jusqu'à 10 Mo.
-            </p>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 12 }}>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Personnel *</span>
-              <select className="input" value={form.userId}
-                onChange={(event) => setForm((value) => ({ ...value, userId: event.target.value }))}>
-                <option value="">Sélectionner…</option>
-                {activeStaff.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.first_name} {member.last_name}{member.role_name ? ` · ${member.role_name}` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Type de congé *</span>
-              <select className="input" value={form.absenceTypeId}
-                onChange={(event) => setForm((value) => ({ ...value, absenceTypeId: event.target.value }))}>
-                <option value="">Sélectionner…</option>
-                {types.map((type) => (
-                  <option key={type.id} value={type.id}>
-                    {type.name}{type.requires_justification ? ' · justificatif requis' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Date de début *</span>
-              <input className="input" type="date" value={form.startDate}
-                onChange={(event) => setForm((value) => ({ ...value, startDate: event.target.value }))} />
-            </label>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Date de fin *</span>
-              <input className="input" type="date" value={form.endDate} min={form.startDate || undefined}
-                onChange={(event) => setForm((value) => ({ ...value, endDate: event.target.value }))} />
-            </label>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12 }}>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Motif</span>
-              <textarea className="input" rows={3} value={form.reason} maxLength={500}
-                placeholder="Précisez le motif du congé…"
-                onChange={(event) => setForm((value) => ({ ...value, reason: event.target.value }))} />
-            </label>
-            <label style={{ ...fieldStyle, justifyContent: 'flex-start', padding: 12, border: '1px dashed var(--border-default)', borderRadius: 8, background: 'var(--bg-elevated)' }}>
-              <span style={labelStyle}>
-                Pièce jointe {selectedType?.requires_justification ? '*' : '(optionnelle)'}
-              </span>
-              <input className="input" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
-                onChange={(event) => setForm((value) => ({ ...value, attachment: event.target.files?.[0] || null }))} />
-              {form.attachment && (
-                <span style={{ fontSize: 11, color: 'var(--color-success)', fontWeight: 600 }}>
-                  ✓ {form.attachment.name} · {(form.attachment.size / 1024 / 1024).toFixed(2)} Mo
-                </span>
-              )}
-            </label>
-          </div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowForm(false)}>Annuler</button>
-            <button type="submit" className="btn btn-primary btn-sm" disabled={createMut.isPending}>
-              {createMut.isPending ? 'Enregistrement…' : 'Enregistrer le congé'}
+        <GsPanel
+          title="Poser un congé"
+          sub="Le congé prend effet dès l'enregistrement : un agent en congé ne peut plus être affecté à une garde sur la période."
+          icon={<Plus size={14} strokeWidth={2.2} />}
+          tools={(
+            <button type="button" className="gs-btn is-quiet" onClick={() => setShowForm(false)}>
+              <X size={13} strokeWidth={2.2} /> Fermer
             </button>
-          </div>
-        </form>
+          )}
+        >
+          <form className="gsdp-form" onSubmit={submit}>
+            <div className="gsdp-form-grid">
+              <label className="gsdp-field">
+                <span>Personnel<b className="gsdp-req">*</b></span>
+                <select
+                  className="form-control"
+                  value={form.userId}
+                  onChange={(event) => setForm((value) => ({ ...value, userId: event.target.value }))}
+                >
+                  <option value="">Sélectionner…</option>
+                  {activeStaff.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.first_name} {member.last_name}{member.role_name ? ` · ${member.role_name}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="gsdp-field">
+                <span>Type de congé<b className="gsdp-req">*</b></span>
+                <select
+                  className="form-control"
+                  value={form.absenceTypeId}
+                  onChange={(event) => setForm((value) => ({ ...value, absenceTypeId: event.target.value }))}
+                >
+                  <option value="">Sélectionner…</option>
+                  {types.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.name}{type.requires_justification ? ' · justificatif requis' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="gsdp-field">
+                <span>Date de début<b className="gsdp-req">*</b></span>
+                <input
+                  className="form-control"
+                  type="date"
+                  value={form.startDate}
+                  onChange={(event) => setForm((value) => ({ ...value, startDate: event.target.value }))}
+                />
+              </label>
+              <label className="gsdp-field">
+                <span>Date de fin<b className="gsdp-req">*</b></span>
+                <input
+                  className="form-control"
+                  type="date"
+                  value={form.endDate}
+                  min={form.startDate || undefined}
+                  onChange={(event) => setForm((value) => ({ ...value, endDate: event.target.value }))}
+                />
+              </label>
+            </div>
+
+            {form.startDate && form.endDate && form.endDate >= form.startDate && (
+              <div className="gsdp-rule is-seal">
+                <Info size={14} strokeWidth={2} aria-hidden="true" />
+                <p>
+                  Absence de <strong>{dayCount(form.startDate, form.endDate)} jour(s)</strong> —{' '}
+                  {frenchRange(form.startDate, form.endDate)}.
+                </p>
+              </div>
+            )}
+
+            <div className="gsdp-form-wide">
+              <label className="gsdp-field">
+                <span>Motif</span>
+                <textarea
+                  className="form-control form-control-textarea"
+                  rows={3}
+                  maxLength={500}
+                  value={form.reason}
+                  placeholder="Précisez le motif du congé…"
+                  onChange={(event) => setForm((value) => ({ ...value, reason: event.target.value }))}
+                />
+              </label>
+              <label className="gsdp-drop">
+                <span>Pièce jointe{selectedType?.requires_justification ? <b className="gsdp-req">*</b> : null}</span>
+                <input
+                  type="file"
+                  accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
+                  onChange={(event) => setForm((value) => ({ ...value, attachment: event.target.files?.[0] || null }))}
+                />
+                {form.attachment ? (
+                  <span className="gsdp-drop-ok">
+                    <Check size={11} strokeWidth={3} aria-hidden="true" />
+                    {form.attachment.name} · {(form.attachment.size / 1024 / 1024).toFixed(2)} Mo
+                  </span>
+                ) : (
+                  <small className={selectedType?.requires_justification ? 'gsdp-hint is-alert' : 'gsdp-hint'}>
+                    {selectedType?.requires_justification
+                      ? 'Ce type de congé exige un justificatif.'
+                      : 'Image ou PDF, jusqu’à 10 Mo.'}
+                  </small>
+                )}
+              </label>
+            </div>
+
+            <div className="gsdp-form-acts">
+              <button type="button" className="gs-btn is-quiet" onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }}>
+                Annuler
+              </button>
+              <button type="submit" className="gs-btn is-primary" disabled={createMut.isPending}>
+                {createMut.isPending ? 'Enregistrement…' : 'Enregistrer le congé'}
+              </button>
+            </div>
+          </form>
+        </GsPanel>
       )}
 
-      <div className="card" style={{ padding: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-          <div>
-            <h4 style={{ margin: 0, fontSize: 'var(--font-md)', color: 'var(--text-primary)' }}>Rechercher un congé</h4>
-            <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-              Filtrez par personnel, période, type ou motif.
-            </p>
-          </div>
-          {filtersActive && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setFilters(EMPTY_FILTERS)}><X size={14} /> Réinitialiser</button>
-          )}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Recherche globale</span>
-            <div style={{ position: 'relative' }}><Search size={15} style={{ position: 'absolute', left: 11, top: 11, color: 'var(--text-muted)' }} /><input className="input" style={{ paddingLeft: 34 }} value={filters.search} placeholder="Nom, matricule, service…"
-              onChange={(event) => setFilters((value) => ({ ...value, search: event.target.value }))} />
-            </div>
+      {/* ══ REGISTRE ══ */}
+      <GsPanel
+        flush
+        icon={<CalendarDays size={14} strokeWidth={2} />}
+        title="Congés du personnel"
+        sub="Les critères décident de ce qui est chargé ; les filtres, de ce qui est affiché."
+        tools={!showForm ? (
+          <button type="button" className="gs-btn is-primary" onClick={() => setShowForm(true)}>
+            <Plus size={13} strokeWidth={2.4} /> Poser un congé
+          </button>
+        ) : null}
+      >
+        <div className="gsdp-filters">
+          <label className="gsdp-field">
+            <span>Recherche</span>
+            <input
+              type="search"
+              className="form-control"
+              value={filters.search}
+              placeholder="Nom, matricule, service…"
+              onChange={(event) => setFilters((value) => ({ ...value, search: event.target.value }))}
+            />
           </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Personnel</span>
-            <select className="input" value={filters.userId}
-              onChange={(event) => setFilters((value) => ({ ...value, userId: event.target.value }))}>
+          <label className="gsdp-field">
+            <span>Personnel</span>
+            <select
+              className="form-control"
+              value={filters.userId}
+              onChange={(event) => setFilters((value) => ({ ...value, userId: event.target.value }))}
+            >
               <option value="">Tous les personnels</option>
               {activeStaff.map((member) => (
                 <option key={member.id} value={member.id}>{member.first_name} {member.last_name}</option>
               ))}
             </select>
           </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Type</span>
-            <select className="input" value={filters.absenceTypeId}
-              onChange={(event) => setFilters((value) => ({ ...value, absenceTypeId: event.target.value }))}>
+          <label className="gsdp-field">
+            <span>Type</span>
+            <select
+              className="form-control"
+              value={filters.absenceTypeId}
+              onChange={(event) => setFilters((value) => ({ ...value, absenceTypeId: event.target.value }))}
+            >
               <option value="">Tous les types</option>
               {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
             </select>
           </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Début à partir du</span>
-            <input className="input" type="date" value={filters.from}
-              onChange={(event) => setFilters((value) => ({ ...value, from: event.target.value }))} />
+          <label className="gsdp-field">
+            <span>Début à partir du</span>
+            <input
+              className="form-control"
+              type="date"
+              value={filters.from}
+              onChange={(event) => setFilters((value) => ({ ...value, from: event.target.value }))}
+            />
           </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Fin jusqu'au</span>
-            <input className="input" type="date" value={filters.to} min={filters.from || undefined}
-              onChange={(event) => setFilters((value) => ({ ...value, to: event.target.value }))} />
+          <label className="gsdp-field">
+            <span>Fin jusqu&rsquo;au</span>
+            <input
+              className="form-control"
+              type="date"
+              value={filters.to}
+              min={filters.from || undefined}
+              onChange={(event) => setFilters((value) => ({ ...value, to: event.target.value }))}
+            />
           </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Motif</span>
-            <input className="input" value={filters.reason} placeholder="Texte du motif…"
-              onChange={(event) => setFilters((value) => ({ ...value, reason: event.target.value }))} />
+          <label className="gsdp-field">
+            <span>Motif</span>
+            <input
+              className="form-control"
+              value={filters.reason}
+              placeholder="Texte du motif…"
+              onChange={(event) => setFilters((value) => ({ ...value, reason: event.target.value }))}
+            />
           </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Période affichée</span>
-            <select className="input" value={filters.activeOnly}
-              onChange={(event) => setFilters((value) => ({ ...value, activeOnly: event.target.value }))}>
+          <label className="gsdp-field">
+            <span>Congés chargés</span>
+            <select
+              className="form-control"
+              value={filters.activeOnly}
+              onChange={(event) => setFilters((value) => ({ ...value, activeOnly: event.target.value }))}
+            >
               <option value="true">En cours et à venir</option>
-              <option value="">Tous les congés</option>
+              <option value="">Tous, historique inclus</option>
             </select>
           </label>
+          <div className="gsdp-filters-reset">
+            <button
+              type="button"
+              className="gs-btn is-quiet"
+              disabled={!filtersActive}
+              onClick={() => setFilters(EMPTY_FILTERS)}
+            >
+              <RotateCcw size={13} strokeWidth={2} /> Réinitialiser
+            </button>
+          </div>
         </div>
-      </div>
 
-      {isError ? (
-        <div style={{ padding: 32, textAlign: 'center', color: 'var(--color-danger)', fontSize: 'var(--font-sm)' }}>
-          Les congés n'ont pas pu être chargés.
-        </div>
-      ) : isLoading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(290px,1fr))', gap: 12 }}>
-          {Array.from({ length: 4 }).map((_, index) => <div key={index} className="skeleton" style={{ height: 170, borderRadius: 12 }} />)}
-        </div>
-      ) : leaves.length === 0 ? (
-        <div style={{
-          padding: 42, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)',
-          background: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: 'var(--border-radius-lg)',
-        }}>
-          Aucun congé ne correspond aux critères choisis.
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 12 }}>
-          {leaves.map((leave) => {
-            const status = leaveStatus(leave);
-            return (
-            <article key={leave.id} className="card" style={{
-              display: 'flex', flexDirection: 'column', gap: 12, padding: 16,
-              borderTop: `4px solid ${leave.type_color || '#6366F1'}`,
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
-                <div>
-                  <h4 style={{ margin: 0, fontSize: 'var(--font-md)', color: 'var(--text-primary)' }}>
-                    {leave.first_name} {leave.last_name}
-                  </h4>
-                  <p style={{ margin: '3px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-                    {leave.department_name || 'Service non renseigné'}
-                  </p>
-                </div>
-                <span style={{ fontSize: 9, fontWeight: 800, color: status.color, background: status.bg, borderRadius: 999, padding: '3px 8px', textTransform: 'uppercase' }}>{status.label}</span>
-              </div>
+        <GsFilterBar
+          inset
+          label="Restreindre les congés affichés"
+          filters={stageFilters}
+          value={stage}
+          onChange={setStage}
+        />
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{
-                  background: `${leave.type_color || '#6366F1'}20`, color: leave.type_color || '#6366F1',
-                  padding: '3px 9px', borderRadius: 999, fontSize: 11, fontWeight: 800,
-                }}>
-                  {leave.type_name}
-                </span>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>
-                  {fmt(leave.start_date)} → {fmt(leave.end_date)}
-                </span>
-              </div>
-
-              <div style={{ minHeight: 38, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                <strong>Motif :</strong> {leave.reason || 'Non renseigné'}
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 'auto' }}>
-                {leave.justification_url ? (
-                  <a className="btn btn-ghost btn-sm" href={fileUrl(leave.justification_url)} target="_blank" rel="noreferrer">
-                    <Paperclip size={14} /> Voir la pièce jointe
-                  </a>
-                ) : (
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Aucune pièce jointe</span>
-                )}
-                <button className="btn btn-secondary btn-sm" disabled={cancelMut.isPending}
-                  onClick={() => {
-                    if (window.confirm(`Annuler le congé de ${leave.first_name} ${leave.last_name} ?`)) cancelMut.mutate(leave.id);
-                  }}>
-                  Annuler
+        {isError ? (
+          <div className="gsdp-pad">
+            <GsEmpty
+              title="Les congés n'ont pas pu être chargés"
+              hint="La liste n'a pas répondu. Réessayez : aucun congé n'a été modifié."
+              actions={(
+                <button type="button" className="gs-btn is-quiet" onClick={() => qc.invalidateQueries({ queryKey: ['leaves'] })}>
+                  <RotateCcw size={13} strokeWidth={2} /> Recharger
                 </button>
+              )}
+            />
+          </div>
+        ) : isLoading ? (
+          <div className="gsdp-pad"><GsSkeleton variant="rows" count={5} /></div>
+        ) : (
+          <GsTable
+            label="Congés du personnel"
+            columns={columns}
+            rows={shown}
+            rowKey="id"
+            caption={shown.length
+              ? `${shown.length} congé(s) affiché(s) sur ${staged.length} chargé(s).`
+              : undefined}
+            empty={(
+              <div className="gsdp-pad">
+                <GsEmpty
+                  icon={<CalendarDays size={24} strokeWidth={1.6} />}
+                  title={staged.length
+                    ? `Aucun congé « ${STAGE_LABEL[stage] || 'affiché'} »`
+                    : 'Aucun congé ne correspond aux critères'}
+                  hint={staged.length
+                    ? `${staged.length} congé(s) sont chargés, mais aucun n'est dans cet état. Chargez l'historique complet pour voir les congés terminés.`
+                    : "Élargissez les critères, ou posez un congé pour l'un des agents de l'hôpital."}
+                  actions={staged.length ? (
+                    <button type="button" className="gs-btn is-quiet" onClick={() => setStage('all')}>
+                      Tout afficher
+                    </button>
+                  ) : (
+                    <>
+                      {filtersActive && (
+                        <button type="button" className="gs-btn is-quiet" onClick={() => setFilters(EMPTY_FILTERS)}>
+                          <RotateCcw size={13} strokeWidth={2} /> Réinitialiser les critères
+                        </button>
+                      )}
+                      <button type="button" className="gs-btn is-primary" onClick={() => setShowForm(true)}>
+                        Poser un congé
+                      </button>
+                    </>
+                  )}
+                />
               </div>
-            </article>
-          );})}
-        </div>
-      )}
+            )}
+          />
+        )}
+      </GsPanel>
     </div>
   );
 }

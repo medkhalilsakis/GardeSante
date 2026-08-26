@@ -1,21 +1,18 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { notesAPI } from '../../api';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-
-const PRIORITY_CONFIG = {
-  low: { label: 'Faible', color: '#9CA3AF', bg: '#F3F4F6' },
-  normal: { label: 'Normal', color: '#3B82F6', bg: '#EFF6FF' },
-  high: { label: 'Élevée', color: '#F59E0B', bg: '#FEF3C7' },
-  urgent: { label: 'Urgent', color: '#EF4444', bg: '#FEE2E2' },
-};
+import { ArrowUpRight, FileText, Image as ImageIcon, Paperclip, Pin, Trash2 } from 'lucide-react';
+import { PRIORITY_LABELS, priorityClass } from './notes-labels';
+import './notes-ui.css';
 
 const API_BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
 
 export default function NoteModal({ noteId, onClose }) {
   const queryClient = useQueryClient();
+  const markedReadRef = useRef(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['note', noteId],
@@ -35,6 +32,18 @@ export default function NoteModal({ noteId, onClose }) {
     },
   });
 
+  const markReadMut = useMutation({
+    mutationFn: (id) => notesAPI.markRead(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notes'] });
+      queryClient.invalidateQueries({ queryKey: ['urgent-notes'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+    onError: () => {
+      markedReadRef.current = null;
+    },
+  });
+
   const note = data?.data?.data;
   const { data: readersData, isLoading: readersLoading } = useQuery({
     queryKey: ['note-readers', noteId],
@@ -45,187 +54,81 @@ export default function NoteModal({ noteId, onClose }) {
 
   useEffect(() => {
     if (!note?.id) return;
+    if (!note.isRead && markedReadRef.current !== note.id) {
+      markedReadRef.current = note.id;
+      markReadMut.mutate(note.id);
+    }
     queryClient.invalidateQueries({ queryKey: ['notes'] });
     queryClient.invalidateQueries({ queryKey: ['urgent-notes'] });
     queryClient.invalidateQueries({ queryKey: ['notifications'] });
-  }, [note?.id, queryClient]);
+  }, [note?.id, note?.isRead, queryClient, markReadMut]);
   if (!noteId) return null;
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 9999,
-        padding: '20px',
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: 'white',
-          borderRadius: '16px',
-          maxWidth: '800px',
-          width: '100%',
-          maxHeight: '90vh',
-          overflow: 'auto',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="gsn-overlay" onClick={onClose}>
+      <div className="gsn-modal" onClick={(e) => e.stopPropagation()}>
         {isLoading ? (
-          <div style={{ padding: '60px', textAlign: 'center', color: '#9CA3AF' }}>
-            Chargement…
-          </div>
+          <div className="gsn-state">Chargement…</div>
         ) : !note ? (
-          <div style={{ padding: '60px', textAlign: 'center', color: '#EF4444' }}>
-            Note introuvable
-          </div>
+          <div className="gsn-state is-error">Note introuvable</div>
         ) : (
           <>
-            <div
-              style={{
-                padding: '24px',
-                borderBottom: '1px solid #E5E7EB',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-              }}
-            >
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                  <span
-                    style={{
-                      background: PRIORITY_CONFIG[note.priority]?.bg || '#F3F4F6',
-                      color: PRIORITY_CONFIG[note.priority]?.color || '#6B7280',
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                    }}
-                  >
-                    {PRIORITY_CONFIG[note.priority]?.label || note.priority}
+            <div className="gsn-modal__head">
+              <div>
+                <div className="gsn-tags">
+                  <span className={priorityClass(note.priority)}>
+                    {PRIORITY_LABELS[note.priority] || note.priority}
                   </span>
                   {note.isPinned && (
-                    <span
-                      style={{
-                        background: '#FEF3C7',
-                        color: '#F59E0B',
-                        padding: '6px 12px',
-                        borderRadius: '8px',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                      }}
-                    >
-                      📌 Épinglé
+                    <span className="gsn-pill is-pinned"><Pin size={12} /> Épinglé</span>
+                  )}
+                  {note.recipientsCount > 0 && (
+                    <span className="gsn-pill is-quiet">
+                      Lu par {note.readCount}/{note.recipientsCount} destinataires
                     </span>
                   )}
                 </div>
-                <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
-                  {note.title}
-                </h2>
-                <div style={{ fontSize: '14px', color: '#6B7280' }}>
-                  <strong style={{ color: '#4B5563' }}>{note.author}</strong>
+                <h2 className="gsn-modal__title">{note.title}</h2>
+                <div className="gsn-modal__byline">
+                  <strong>{note.author}</strong>
                   {note.authorRole && <span> · {note.authorRole}</span>}
                   <span> · {format(new Date(note.publishedAt), 'd MMM yyyy à HH:mm', { locale: fr })}</span>
                 </div>
-                {note.recipientsCount > 0 && (
-                  <div
-                    style={{
-                      marginTop: '8px',
-                      background: '#F3F4F6',
-                      padding: '6px 10px',
-                      borderRadius: '6px',
-                      fontSize: '13px',
-                      color: '#6B7280',
-                      display: 'inline-block',
-                    }}
-                  >
-                    Lu par {note.readCount}/{note.recipientsCount} destinataires
-                  </div>
-                )}
               </div>
-              <button
-                onClick={onClose}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '24px',
-                  color: '#9CA3AF',
-                  padding: '8px',
-                  marginLeft: '16px',
-                }}
-              >
-                ✕
-              </button>
+              <button type="button" className="gsn-close" onClick={onClose} aria-label="Fermer">✕</button>
             </div>
 
-            <div style={{ padding: '24px' }}>
+            <div className="gsn-modal__body">
               {note.body && (
-                <div
-                  style={{
-                    fontSize: '15px',
-                    lineHeight: '1.7',
-                    color: '#374151',
-                    whiteSpace: 'pre-wrap',
-                    marginBottom: note.attachments?.length > 0 ? '24px' : 0,
-                  }}
-                >
+                <div className={`gsn-prose${note.attachments?.length > 0 ? ' has-attachments' : ''}`}>
                   {note.body}
                 </div>
               )}
 
               {note.attachments?.length > 0 && (
                 <div>
-                  <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#6B7280', marginBottom: '12px' }}>
-                    📎 Pièces jointes ({note.attachments.length})
+                  <h3 className="gsn-sub-title">
+                    <Paperclip size={13} /> Pièces jointes ({note.attachments.length})
                   </h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div className="gsn-attach-list">
                     {note.attachments.map((att) => (
                       <a
                         key={att.id}
+                        className="gsn-attach"
                         href={`${API_BASE}${att.file_url}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '12px',
-                          padding: '12px',
-                          background: '#F9FAFB',
-                          border: '1px solid #E5E7EB',
-                          borderRadius: '8px',
-                          textDecoration: 'none',
-                          color: '#111827',
-                          transition: 'all 0.2s',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = '#F3F4F6';
-                          e.currentTarget.style.borderColor = '#D1D5DB';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = '#F9FAFB';
-                          e.currentTarget.style.borderColor = '#E5E7EB';
-                        }}
                       >
-                        <span style={{ fontSize: '24px' }}>
-                          {att.kind === 'pdf' ? '📄' : '🖼️'}
+                        <span className="gsn-attach__kind">
+                          {att.kind === 'pdf' ? <FileText size={16} /> : <ImageIcon size={16} />}
                         </span>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: '14px', fontWeight: '500' }}>{att.file_name}</div>
-                          <div style={{ fontSize: '12px', color: '#9CA3AF' }}>
+                        <div className="gsn-attach__text">
+                          <div className="gsn-attach__name">{att.file_name}</div>
+                          <div className="gsn-attach__meta">
                             {att.kind.toUpperCase()} · {Math.round(att.size_bytes / 1024)} Ko
                           </div>
                         </div>
-                        <span style={{ fontSize: '18px', color: '#9CA3AF' }}>↗</span>
+                        <ArrowUpRight className="gsn-attach__go" size={16} />
                       </a>
                     ))}
                   </div>
@@ -233,20 +136,18 @@ export default function NoteModal({ noteId, onClose }) {
               )}
 
               {note.canViewReaders && (
-                <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #E5E7EB' }}>
-                  <h3 style={{ fontSize: 14, fontWeight: 700, color: '#374151', marginBottom: 10 }}>
-                    Lecteurs ({readers.length}/{note.recipientsCount})
-                  </h3>
+                <div className="gsn-readers">
+                  <h3 className="gsn-sub-title">Lecteurs ({readers.length}/{note.recipientsCount})</h3>
                   {readersLoading ? (
-                    <div style={{ color: '#9CA3AF', fontSize: 13 }}>Chargement des lecteurs…</div>
+                    <div className="gsn-state">Chargement des lecteurs…</div>
                   ) : readers.length === 0 ? (
-                    <div style={{ color: '#9CA3AF', fontSize: 13 }}>Aucun destinataire n'a encore lu cette note.</div>
+                    <div className="gsn-state">Aucun destinataire n'a encore lu cette note.</div>
                   ) : (
-                    <div style={{ display: 'grid', gap: 7 }}>
+                    <div className="gsn-reader-list">
                       {readers.map((reader) => (
-                        <div key={reader.userId} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 10px', borderRadius: 7, background: '#F9FAFB', fontSize: 12 }}>
+                        <div key={reader.userId} className="gsn-reader">
                           <span><strong>{reader.name}</strong>{reader.roleName ? ` · ${reader.roleName}` : ''}</span>
-                          <span style={{ color: '#6B7280' }}>{format(new Date(reader.readAt), 'd MMM yyyy · HH:mm', { locale: fr })}</span>
+                          <time>{format(new Date(reader.readAt), 'd MMM yyyy · HH:mm', { locale: fr })}</time>
                         </div>
                       ))}
                     </div>
@@ -256,33 +157,19 @@ export default function NoteModal({ noteId, onClose }) {
             </div>
 
             {note.isAuthor && (
-              <div
-                style={{
-                  padding: '20px 24px',
-                  borderTop: '1px solid #E5E7EB',
-                  display: 'flex',
-                  justifyContent: 'flex-end',
-                }}
-              >
+              <div className="gsn-modal__foot">
                 <button
+                  type="button"
+                  className="gs-btn is-danger"
+                  disabled={deleteMut.isPending}
                   onClick={() => {
                     if (window.confirm('Supprimer définitivement cette note ?')) {
                       deleteMut.mutate();
                     }
                   }}
-                  disabled={deleteMut.isPending}
-                  style={{
-                    padding: '10px 20px',
-                    background: '#EF4444',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: deleteMut.isPending ? 'wait' : 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    color: 'white',
-                  }}
                 >
-                  {deleteMut.isPending ? 'Suppression…' : '🗑️ Supprimer'}
+                  <Trash2 size={14} />
+                  {deleteMut.isPending ? 'Suppression…' : 'Supprimer'}
                 </button>
               </div>
             )}

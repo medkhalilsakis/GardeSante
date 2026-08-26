@@ -1,89 +1,71 @@
 import React from 'react';
+import './PlanningStateBadge.css';
 
 /**
- * Badge affichant l'état dérivé d'un planning
- * États : brouillon | soumis | en_cours | terminé
+ * Badge affichant l'état dérivé d'un planning.
+ * États : brouillon | soumis | en_cours | termine
  *
  * `state` est facultatif : quand le serveur a déjà calculé l'état via la fonction
  * SQL planning_state(), on l'affiche tel quel plutôt que de le redériver côté client.
+ *
+ * Les intitulés et la correspondance état → couleur sont exportés : le calendrier
+ * de l'hôpital et les compteurs du Super Admin les recopiaient à la main, et une
+ * règle recopiée est une règle qui finit par diverger.
  */
+
+/** Intitulés officiels d'un état de planning. */
+export const PLANNING_STATES = {
+  brouillon: { label: 'Brouillon',  labelAr: 'مسودة' },
+  // Un planning envoyé est effectif : il n'y a plus d'approbation à attendre,
+  // il est « en vigueur » jusqu'à sa date de début.
+  soumis:    { label: 'En vigueur', labelAr: 'ساري' },
+  en_cours:  { label: 'En cours',   labelAr: 'جاري' },
+  termine:   { label: 'Terminé',    labelAr: 'منتهي' },
+  // Le calendrier de l'hôpital connaît un cinquième cas que `planning_state()`
+  // ne produit pas : un planning suspendu. Il vit ici pour que les deux
+  // surfaces partagent un seul vocabulaire.
+  suspendu:  { label: 'Suspendu',   labelAr: 'معلق' },
+};
+
+/**
+ * Couleur d'un état, sous forme de jeton — pour les surfaces qui ont besoin de
+ * la teinte seule (pastille de calendrier, segment de barre) et non du badge
+ * entier. Brouillon et terminé partagent l'encre pâle : ni l'un ni l'autre
+ * n'est en vigueur, et seul le badge distingue l'ouvert du clos, par sa forme.
+ */
+export const PLANNING_STATE_COLOR = {
+  brouillon: 'var(--gs-ink-faint)',
+  soumis:    'var(--gs-seal)',
+  en_cours:  'var(--gs-duty)',
+  termine:   'var(--gs-ink-faint)',
+  suspendu:  'var(--gs-alert)',
+};
+
+/** État dérivé comme la fonction SQL `planning_state()`. */
+export const derivePlanningState = (status, startDate, endDate) => {
+  if (status === 'draft') return 'brouillon';
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const start = new Date(startDate);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(endDate);
+  end.setHours(0, 0, 0, 0);
+
+  if (today < start) return 'soumis';
+  if (today >= start && today <= end) return 'en_cours';
+  return 'termine';
+};
+
 export default function PlanningStateBadge({ state: stateProp, status, startDate, endDate, size = 'md' }) {
-  // Dériver l'état comme la fonction SQL planning_state()
-  const getState = () => {
-    if (status === 'draft') return 'brouillon';
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date(endDate);
-    end.setHours(0, 0, 0, 0);
-
-    if (today < start) return 'soumis';
-    if (today >= start && today <= end) return 'en_cours';
-    return 'termine';
-  };
-
-  const state = stateProp || getState();
-
-  const config = {
-    brouillon: {
-      label: 'Brouillon',
-      labelAr: 'مسودة',
-      color: '#8B5CF6',
-      bg: '#F3F1FF',
-      borderColor: '#E0D7FF'
-    },
-    soumis: {
-      // Un planning envoyé est effectif : il n'y a plus d'approbation à
-      // attendre, il est « en vigueur » jusqu'à sa date de début.
-      label: 'En vigueur',
-      labelAr: 'ساري',
-      color: '#3B82F6',
-      bg: '#EFF6FF',
-      borderColor: '#DBEAFE'
-    },
-    en_cours: {
-      label: 'En cours',
-      labelAr: 'جاري',
-      color: '#10B981',
-      bg: '#ECFDF5',
-      borderColor: '#D1FAE5'
-    },
-    termine: {
-      label: 'Terminé',
-      labelAr: 'منتهي',
-      color: '#6B7280',
-      bg: '#F9FAFB',
-      borderColor: '#E5E7EB'
-    }
-  };
-
-  const { label, color, bg, borderColor } = config[state] || config.brouillon;
-
-  const sizeStyles = {
-    sm: { fontSize: 'var(--font-xs)', padding: '2px 8px', height: '20px' },
-    md: { fontSize: 'var(--font-sm)', padding: '4px 10px', height: '24px' },
-    lg: { fontSize: 'var(--font-sm)', padding: '6px 12px', height: '28px' }
-  };
+  const derived = stateProp || derivePlanningState(status, startDate, endDate);
+  const state = PLANNING_STATES[derived] ? derived : 'brouillon';
 
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        fontWeight: 600,
-        borderRadius: '12px',
-        backgroundColor: bg,
-        color: color,
-        border: `1px solid ${borderColor}`,
-        whiteSpace: 'nowrap',
-        ...sizeStyles[size]
-      }}
-    >
-      {label}
+    <span className={`gspb is-${state} is-${size}`}>
+      {PLANNING_STATES[state].label}
     </span>
   );
 }

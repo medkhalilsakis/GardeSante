@@ -1,0 +1,393 @@
+/**
+ * Congés et Historique de la direction — habillage
+ * ═══════════════════════════════════════════════
+ * Les deux panneaux que le tableau de bord du directeur délègue à des
+ * composants : « Congés » et « Historique du personnel ». Préfixe `.gsdp-`,
+ * distinct du `.gsd-` de l'écran pour que chaque fichier reste importable seul —
+ * la géométrie des champs y est donc redéclarée volontairement, plutôt que
+ * dépendre de l'import de `director.css` par le parent.
+ *
+ * Ce que la refonte change, et pourquoi :
+ *
+ *   • **Les congés deviennent un registre.** Ils étaient des cartes à filet
+ *     coloré, une par congé, ce qui interdit exactement ce que le directeur
+ *     fait : comparer des périodes entre agents. Un tableau aligne les dates.
+ *
+ *   • **Les trois cartes de mesure disparaissent.** « Résultats affichés »,
+ *     « En cours », « À venir » sont déjà les compteurs des filtres, au chiffre
+ *     près. Trois tuiles à icône colorée pour répéter trois compteurs, c'est de
+ *     la place prise à la liste.
+ *
+ *   • **Le type de congé perd sa couleur.** `type_color` peignait une pastille
+ *     par type ; un type de congé est une taxonomie, pas un état, et l'en-tête
+ *     de colonne le nomme déjà. Les seuls tons du système — `duty`, `alert`,
+ *     `seal` — restent réservés à ce qui engage ou alerte.
+ *
+ *   • **La position dans le temps garde trois états lisibles sans couleur
+ *     inventée** : « En cours » porte le point (c'est effectif aujourd'hui),
+ *     « À venir » est neutre, « Terminé » est atténué. Un congé normal n'est ni
+ *     une alerte ni une garde : aucun ton sémantique ne lui est prêté.
+ *
+ *   • **La gravité d'une trace d'historique n'invente plus quatre couleurs.**
+ *     `info` reste muet, tout ce qui est au-dessus prend le ton d'alerte, et une
+ *     erreur ou une trace critique marque sa ligne. Le code d'action redevient
+ *     ce qu'il est : un identifiant, en chasse fixe, sans couleur.
+ *
+ * Aucune valeur hexadécimale, aucun style en ligne : uniquement les jetons
+ * `--gs-*` et les variables de thème, donc le mode sombre suit.
+ */
+
+/* ── Empilement ────────────────────────────────────────────────────────────
+   Le panneau vit dans le corps d'onglet du tableau de bord, qui porte déjà sa
+   marge : ici, seul l'écart entre le formulaire et le registre est fixé. */
+
+.gsdp-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 13px;
+  min-width: 0;
+}
+
+.gsdp-note {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-faint);
+  max-width: 78ch;
+}
+
+/* Le corps d'un panneau `flush` n'a pas de marge : les blocs qui ne sont pas
+   des tableaux (attente, vide, pagination) reprennent la sienne. */
+.gsdp-pad { padding: 14px 16px; min-width: 0; }
+
+/* ── Critères ──────────────────────────────────────────────────────────────
+   Ce qui est CHARGÉ. Grille sous l'en-tête du panneau : l'en-tête ferme déjà
+   son filet du bas, la grille ferme le sien, et les filtres pressés qui la
+   suivent tracent le troisième. */
+
+.gsdp-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 10px 12px;
+  padding: 11px 16px 13px;
+  background: var(--gs-paper-alt);
+  border-bottom: 1px solid var(--gs-rule);
+  min-width: 0;
+}
+
+.gsdp-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gsdp-field > span {
+  font-family: var(--gs-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gsdp-field > .form-control {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-family: var(--gs-body);
+  font-size: 12px;
+}
+
+.gsdp-field > select.form-control { padding-right: 26px; }
+.gsdp-field > textarea.form-control { height: auto; padding: 8px 10px; }
+
+.gsdp-field > .form-control:focus {
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
+}
+
+/* La règle qui accompagne un champ : sous le champ, jamais dans son libellé —
+   `.gsdp-field > span` habille le libellé et l'avalerait. */
+.gsdp-hint {
+  font-family: var(--gs-body);
+  font-size: 10px;
+  font-weight: 500;
+  font-style: normal;
+  line-height: 1.45;
+  color: var(--gs-ink-faint);
+}
+
+.gsdp-hint.is-alert { color: var(--gs-alert); font-weight: 600; }
+.gsdp-hint.is-duty  { color: var(--gs-duty);  font-weight: 600; }
+
+/* La remise à zéro tient le pied de la grille, alignée sur les champs. */
+.gsdp-filters-reset {
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.gsdp-filters-reset > button { width: 100%; justify-content: center; }
+
+/* ── Formulaire ────────────────────────────────────────────────────────────
+   Le congé se pose dans un panneau qui s'ouvre au-dessus du registre, et non
+   dans une modale : le directeur consulte la liste pendant qu'il saisit. */
+
+.gsdp-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.gsdp-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  gap: 11px 12px;
+  min-width: 0;
+}
+
+.gsdp-form-wide {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(256px, 1fr));
+  gap: 11px 12px;
+  min-width: 0;
+}
+
+.gsdp-form-acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding-top: 2px;
+  border-top: 1px solid var(--gs-rule);
+  margin-top: 1px;
+}
+
+.gsdp-req { color: var(--gs-alert); margin-left: 3px; }
+
+/* La pièce jointe : une zone déposable, filet interrompu — le pointillé dit
+   « rien encore ici », comme dans le vide du kit. */
+.gsdp-drop {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  padding: 10px 12px;
+  border: 1px dashed var(--gs-rule-strong);
+  border-radius: 8px;
+  background: var(--gs-paper-alt);
+  min-width: 0;
+}
+
+.gsdp-drop > span {
+  font-family: var(--gs-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsdp-drop > input {
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  color: var(--gs-ink-soft);
+  min-width: 0;
+}
+
+.gsdp-drop-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--gs-duty);
+}
+
+/* Une règle encadrée : le filet de gauche porte le ton, l'icône ouvre la
+   phrase. Remplace les encadrés à fond teinté codés en dur. */
+.gsdp-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--gs-rule-strong);
+  border-radius: 0 7px 7px 0;
+  background: var(--gs-paper-alt);
+  min-width: 0;
+}
+
+.gsdp-rule > svg { color: var(--gs-ink-faint); flex-shrink: 0; margin-top: 1px; }
+
+.gsdp-rule p {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--gs-ink-soft);
+}
+
+.gsdp-rule p strong { color: var(--gs-ink); font-weight: 600; }
+
+.gsdp-rule.is-seal  { border-left-color: var(--gs-seal);  background: var(--gs-seal-wash); }
+.gsdp-rule.is-seal > svg  { color: var(--gs-seal); }
+.gsdp-rule.is-alert { border-left-color: var(--gs-alert); background: var(--gs-alert-wash); }
+.gsdp-rule.is-alert > svg { color: var(--gs-alert); }
+
+/* ── Cellules de registre ──────────────────────────────────────────────────
+   Un nom sur deux lignes : l'identité en tête, sa précision dessous. */
+
+.gsdp-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gsdp-name > b {
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gs-ink);
+  line-height: 1.3;
+}
+
+.gsdp-name > span {
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--gs-ink-faint);
+  line-height: 1.35;
+}
+
+/* Une valeur de taxonomie : du texte, l'en-tête de colonne la nomme. */
+.gsdp-word {
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gs-ink-soft);
+}
+
+.gsdp-word.is-void { color: var(--gs-ink-faint); }
+
+/* Un identifiant : chasse fixe, aligné à gauche — c'est une clé, pas une
+   quantité, donc pas la colonne `num` du kit. */
+.gsdp-code {
+  font-family: var(--gs-data);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--gs-ink-soft);
+  white-space: nowrap;
+}
+
+/* Une période : la plage en clair, sa durée dessous. */
+.gsdp-span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gsdp-span > b {
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gs-ink);
+  line-height: 1.35;
+}
+
+.gsdp-span > span {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--gs-ink-faint);
+}
+
+/* Un motif est une phrase : elle respire sur deux lignes puis s'arrête. */
+.gsdp-reason {
+  display: block;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+  max-width: 34ch;
+}
+
+.gsdp-reason.is-void { color: var(--gs-ink-faint); }
+
+/* Une description de trace peut être longue : bornée, jamais tronquée. */
+.gsdp-desc {
+  display: block;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+  max-width: 52ch;
+}
+
+.gsdp-desc.is-void { color: var(--gs-ink-faint); }
+
+/* La pièce jointe, en lien discret : un trombone et un mot. */
+.gsdp-clip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gs-seal);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.gsdp-clip:hover { text-decoration: underline; text-underline-offset: 2px; }
+.gsdp-clip:focus-visible { outline: 2px solid var(--gs-seal); outline-offset: 2px; border-radius: 4px; }
+.gsdp-clip > svg { flex-shrink: 0; }
+
+.gsdp-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.gsdp-acts > button { white-space: nowrap; }
+
+/* ── Pagination ────────────────────────────────────────────────────────────
+   Le rang de page est un chiffre : registre et chasse fixe. */
+
+.gsdp-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--gs-rule);
+  flex-wrap: wrap;
+}
+
+.gsdp-pager > span {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Repli ─────────────────────────────────────────────────────────────────
+   Le registre défile dans son enveloppe (`.gsk-table-wrap`) : ce qui doit
+   céder, ce sont les grilles. */
+
+@media (max-width: 700px) {
+  .gsdp-filters { grid-template-columns: 1fr; padding: 10px 13px 12px; }
+  .gsdp-form-grid,
+  .gsdp-form-wide { grid-template-columns: 1fr; }
+  .gsdp-form-acts > button { flex: 1 1 auto; justify-content: center; }
+  .gsdp-reason, .gsdp-desc { max-width: 26ch; }
+}

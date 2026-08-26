@@ -1,9 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  Mail, Lock, Eye, EyeOff, Loader2, ShieldCheck, ArrowRight, AlertCircle,
+  Sun, Moon, Languages, CalendarDays, Repeat2, RadioTower, ScrollText, Activity,
+} from 'lucide-react';
 import { useAuthStore, useUIStore } from '../../store';
 import { authAPI } from '../../api';
 import { useTranslation } from '../../utils/helpers';
 import toast from 'react-hot-toast';
+import './LoginPage.css';
 
 // Redirection selon le rôle
 function getDashboardByRole(roleCode) {
@@ -23,20 +28,43 @@ function getDashboardByRole(roleCode) {
   }
 }
 
+// Ce que la plateforme fait réellement — volet d'identité
+const PLATFORM_FEATURES = [
+  { icon: CalendarDays, title: 'Tableurs de garde',   desc: 'Du brouillon à la mise en marche' },
+  { icon: Repeat2,      title: 'Remplacements',       desc: 'En surcouche, sans réécrire le planning' },
+  { icon: RadioTower,   title: 'Suivi en direct',     desc: 'Appel du jour et gardes en cours' },
+  { icon: ScrollText,   title: 'Traçabilité',         desc: 'Historique constant, non modifiable' },
+];
+
+// Accès rapide — un seul compte : le Super Admin de la plateforme
+const QUICK_ACCOUNT = {
+  label: 'Super Admin',
+  email: 'admin@gardesante.tn',
+  password: 'Admin@123',
+};
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [quickLoading, setQuickLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [selectedDemo, setSelectedDemo] = useState(null);
+  const [capsOn, setCapsOn] = useState(false);
+  const [error, setError] = useState('');
   const { setAuth, updateUser } = useAuthStore();
-  const { language, setLanguage } = useUIStore();
+  const { language, setLanguage, theme, setTheme, toggleTheme } = useUIStore();
   const navigate = useNavigate();
   const { t } = useTranslation();
 
-  // Fonction centrale de connexion — utilisée par le formulaire ET le clic démo
+  // Le thème persisté n'est appliqué au document que par le store : sur un
+  // chargement direct de /login, l'attribut manque et le thème sombre choisi
+  // précédemment n'apparaît pas. On le réapplique ici, sans rien changer ailleurs.
+  useEffect(() => { setTheme(theme); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fonction centrale de connexion — utilisée par le formulaire ET l'accès rapide
   const doLogin = async (loginEmail, loginPassword) => {
     setLoading(true);
+    setError('');
     try {
       const res = await authAPI.login(loginEmail, loginPassword);
       const { user, accessToken, refreshToken } = res.data.data;
@@ -63,8 +91,10 @@ export default function LoginPage() {
       // Redirection selon le rôle
       navigate(getDashboardByRole(user.roleCode), { replace: true });
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Identifiants incorrects');
-      setSelectedDemo(null);
+      const message = err.response?.data?.message || 'Identifiants incorrects';
+      setError(message);
+      toast.error(message);
+      setQuickLoading(false);
     } finally {
       setLoading(false);
     }
@@ -76,75 +106,119 @@ export default function LoginPage() {
     await doLogin(email, password);
   };
 
-  // Clic sur un compte démo → connexion immédiate
-  const handleDemoClick = async (acc) => {
+  // Accès rapide Super Admin → connexion immédiate
+  const handleQuickLogin = async () => {
     if (loading) return;
-    setSelectedDemo(acc.email);
-    setEmail(acc.email);
-    setPassword('Admin@123');
-    await doLogin(acc.email, 'Admin@123');
+    setQuickLoading(true);
+    setEmail(QUICK_ACCOUNT.email);
+    setPassword(QUICK_ACCOUNT.password);
+    await doLogin(QUICK_ACCOUNT.email, QUICK_ACCOUNT.password);
   };
 
-  // Connexion rapide — seulement les acteurs avec un compte plateforme
-  const demoAccounts = [
-    { label: 'Super Admin',     email: 'admin@gardesante.dz',  role: 'super_admin',        dest: '/dashboard', icon: '🛡️' },
-    { label: 'Directeur',       email: 'directeur@hca.dz',     role: 'director',           dest: '/director',  icon: '🏛️' },
-    { label: 'Surveillant Gén.',email: 'surv.general@hca.dz',  role: 'general_supervisor', dest: '/schedules', icon: '👁️' },
-    { label: 'Chef de Service', email: 'chef.urg@hca.dz',      role: 'department_head',    dest: '/schedules', icon: '🏥' },
-  ];
+  // Détection du verrouillage majuscules pendant la saisie du mot de passe
+  const handleCapsCheck = (e) => {
+    if (typeof e.getModifierState === 'function') {
+      setCapsOn(e.getModifierState('CapsLock'));
+    }
+  };
 
+  const isDark = theme === 'dark';
 
   return (
-    <div className="login-page">
-      <div className="login-bg">
-        <div className="login-bg-orb orb-1" />
-        <div className="login-bg-orb orb-2" />
-        <div className="login-bg-orb orb-3" />
-      </div>
-
-      <div className="login-container">
-        {/* Logo + Branding */}
-        <div className="login-brand">
-          <div className="login-logo">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-            </svg>
+    <div className="lp-page">
+      {/* ─── Volet d'identité ─────────────────────────────────
+          `data-theme='dark'` n'est pas une coquille : ce volet est sombre quel
+          que soit le thème de la page — c'est un choix de mise en page. Il
+          portait pour cela sa propre palette de bleus marine ; l'attribut fait
+          descendre les jetons du thème sombre depuis leur unique déclaration,
+          si bien qu'il n'y a plus de seconde palette à maintenir. L'attribut
+          n'est lu que par le CSS ; le store continue de piloter celui du
+          document, sans interférence. */}
+      <aside className="lp-aside" data-theme="dark">
+        <div className="lp-brand">
+          <div className="lp-brand-mark" aria-hidden="true">
+            <Activity size={24} strokeWidth={2.5} />
           </div>
           <div>
-            <h1 className="login-app-name">GardeSante</h1>
-            <p className="login-app-sub">{t('auth.platform_desc')}</p>
+            <div className="lp-brand-name">GardeSante</div>
+            <div className="lp-brand-tag">{t('auth.platform_desc')}</div>
           </div>
-          {/* Toggle langue */}
+        </div>
+
+        <div className="lp-hero">
+          <span className="lp-hero-eyebrow">
+            <ShieldCheck size={13} aria-hidden="true" />
+            Plateforme nationale
+          </span>
+          <h1 className="lp-hero-title">
+            Les gardes hospitalières,<br />
+            <em>d'un seul tenant.</em>
+          </h1>
+          <p className="lp-hero-text">
+            Établissements, services, plannings et remplacements dans un même espace —
+            chaque action tracée, chaque changement visible immédiatement par tous.
+          </p>
+        </div>
+
+        <ul className="lp-features">
+          {PLATFORM_FEATURES.map(({ icon: Icon, title, desc }) => (
+            <li key={title} className="lp-feature">
+              <span className="lp-feature-icon" aria-hidden="true"><Icon size={17} /></span>
+              <span>
+                <span className="lp-feature-title">{title}</span>
+                <span className="lp-feature-desc">{desc}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        <p className="lp-aside-foot">
+          GardeSante v1.0 · Gestion des gardes hospitalières · Tunisie
+        </p>
+      </aside>
+
+      {/* ─── Volet de connexion ───────────────────────────── */}
+      <main className="lp-main">
+        <div className="lp-toolbar">
           <button
-            className="lang-toggle"
+            type="button"
+            className="lp-chip"
             onClick={() => setLanguage(language === 'fr' ? 'ar' : 'fr')}
             title="Changer la langue / تغيير اللغة"
           >
+            <Languages size={14} aria-hidden="true" />
             {language === 'fr' ? 'العربية' : 'Français'}
+          </button>
+          <button
+            type="button"
+            className="lp-chip"
+            onClick={toggleTheme}
+            title={isDark ? 'Thème clair' : 'Thème sombre'}
+            aria-label={isDark ? 'Passer au thème clair' : 'Passer au thème sombre'}
+          >
+            {isDark ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
+            {isDark ? 'Clair' : 'Sombre'}
           </button>
         </div>
 
-        {/* Carte login */}
-        <div className="login-card glass-card">
-          <div className="login-card-header">
-            <h2 className="login-title">{t('auth.welcome_back')}</h2>
-            <p className="login-subtitle">{t('auth.login')}</p>
+        <div className="lp-form-wrap lp-rise">
+          <div className="lp-head">
+            <h2>{t('auth.welcome_back')}</h2>
+            <p>Connectez-vous pour accéder à votre espace de travail.</p>
           </div>
 
-          <form className="login-form" onSubmit={handleLogin}>
-            <div className="form-group">
-              <label className="form-label" htmlFor="email">{t('auth.email')}</label>
-              <div className="input-icon-wrapper">
-                <svg className="input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
-                </svg>
+          <form className="lp-form" onSubmit={handleLogin}>
+            <div className="lp-field">
+              <label className="lp-label" htmlFor="email">{t('auth.email')}</label>
+              <div className="lp-input-shell">
+                <span className="lp-input-icon"><Mail size={17} aria-hidden="true" /></span>
                 <input
                   id="email"
                   type="email"
-                  className="form-control with-icon"
-                  placeholder="votre@email.dz"
+                  className="lp-input"
+                  placeholder="votre@email.tn"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => { setEmail(e.target.value); setError(''); }}
                   required
                   autoComplete="email"
                   autoFocus
@@ -152,238 +226,88 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="password">{t('auth.password')}</label>
-              <div className="input-icon-wrapper">
-                <svg className="input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
-                </svg>
+            <div className="lp-field">
+              <label className="lp-label" htmlFor="password">{t('auth.password')}</label>
+              <div className="lp-input-shell">
+                <span className="lp-input-icon"><Lock size={17} aria-hidden="true" /></span>
                 <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
-                  className="form-control with-icon"
+                  className="lp-input"
                   placeholder="••••••••"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                  onKeyUp={handleCapsCheck}
+                  onKeyDown={handleCapsCheck}
                   required
                   autoComplete="current-password"
                 />
                 <button
                   type="button"
-                  className="input-toggle-btn"
-                  onClick={() => setShowPassword(!showPassword)}
+                  className="lp-eye"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                 >
-                  {showPassword ? (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                  ) : (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                  )}
+                  {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
               </div>
+              {capsOn && (
+                <span className="lp-caps">
+                  <AlertCircle size={13} aria-hidden="true" />
+                  Verrouillage des majuscules activé
+                </span>
+              )}
             </div>
 
-            <button type="submit" className="btn btn-primary w-full btn-login" disabled={loading}>
-              {loading ? (
-                <span className="btn-loading">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
-                    <path d="M21 12a9 9 0 11-6.219-8.56"/>
-                  </svg>
+            {error && (
+              <div className="lp-error" role="alert">
+                <AlertCircle size={16} aria-hidden="true" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button type="submit" className="lp-submit" disabled={loading}>
+              {loading && !quickLoading ? (
+                <>
+                  <Loader2 size={17} className="lp-spin" aria-hidden="true" />
                   {t('auth.signing_in')}
-                </span>
-              ) : t('auth.sign_in')}
+                </>
+              ) : (
+                <>
+                  {t('auth.sign_in')}
+                  <ArrowRight size={17} aria-hidden="true" />
+                </>
+              )}
             </button>
           </form>
 
-          {/* Comptes de démonstration */}
-          <div className="demo-section">
-            <p className="demo-title">
-              Connexion rapide
-              <span> — cliquez pour vous connecter directement</span>
-            </p>
-            <div className="demo-grid">
-              {demoAccounts.map((acc) => (
-                <button
-                  key={acc.email}
-                  className={`demo-btn${selectedDemo === acc.email ? ' demo-btn-selected' : ''}`}
-                  onClick={() => handleDemoClick(acc)}
-                  disabled={loading}
-                >
-                  <span className="demo-btn-top">
-                    <span className="demo-icon">{acc.icon}</span>
-                    <span className="demo-role">{acc.label}</span>
-                    {selectedDemo === acc.email && loading && (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin" style={{marginLeft:'auto',flexShrink:0}}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-                    )}
-                  </span>
-                  <span className="demo-email">{acc.email}</span>
-                  <span className="demo-dest">→ {acc.dest}</span>
-                </button>
-              ))}
-            </div>
+          {/* Accès rapide — Super Admin uniquement */}
+          <div className="lp-quick">
+            <p className="lp-quick-label">Connexion rapide</p>
+            <button
+              type="button"
+              className="lp-quick-btn"
+              onClick={handleQuickLogin}
+              disabled={loading}
+            >
+              <span className="lp-quick-icon" aria-hidden="true">
+                <ShieldCheck size={19} />
+              </span>
+              <span className="lp-quick-text">
+                <span className="lp-quick-role">{QUICK_ACCOUNT.label}</span>
+                <span className="lp-quick-mail">{QUICK_ACCOUNT.email}</span>
+              </span>
+              {quickLoading
+                ? <Loader2 size={17} className="lp-spin lp-quick-arrow" aria-hidden="true" />
+                : <ArrowRight size={17} className="lp-quick-arrow" aria-hidden="true" />}
+            </button>
           </div>
+
+          <p className="lp-foot">
+            Accès réservé au personnel habilité · Toute connexion est enregistrée.
+          </p>
         </div>
-
-        {/* Footer */}
-        <p className="login-footer">
-          GardeSante v1.0 · Plateforme nationale de gestion des gardes hospitalières
-        </p>
-      </div>
-
-      <style>{`
-        .login-page {
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--bg-base);
-          padding: var(--space-4);
-          position: relative;
-          overflow: hidden;
-        }
-        .login-bg { position: fixed; inset: 0; pointer-events: none; }
-        .login-bg-orb {
-          position: absolute; border-radius: 50%;
-          filter: blur(80px); opacity: 0.12;
-        }
-        .orb-1 {
-          width: 600px; height: 600px;
-          background: var(--color-primary);
-          top: -200px; left: -200px;
-          animation: float 8s ease-in-out infinite;
-        }
-        .orb-2 {
-          width: 400px; height: 400px;
-          background: var(--color-secondary);
-          bottom: -100px; right: -100px;
-          animation: float 10s ease-in-out infinite reverse;
-        }
-        .orb-3 {
-          width: 300px; height: 300px;
-          background: var(--color-info);
-          top: 50%; left: 60%;
-          animation: float 12s ease-in-out infinite;
-        }
-        @keyframes float {
-          0%,100% { transform: translate(0,0) scale(1); }
-          33%      { transform: translate(20px,-20px) scale(1.05); }
-          66%      { transform: translate(-15px,15px) scale(0.95); }
-        }
-        .login-container {
-          width: 100%;
-          max-width: 480px;
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-6);
-          position: relative;
-          z-index: 1;
-        }
-        .login-brand {
-          display: flex;
-          align-items: center;
-          gap: var(--space-4);
-        }
-        .login-logo {
-          width: 52px; height: 52px;
-          background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-          border-radius: 14px;
-          display: flex; align-items: center; justify-content: center;
-          color: #fff;
-          box-shadow: 0 8px 24px rgba(27,79,202,0.5);
-          flex-shrink: 0;
-        }
-        .login-app-name {
-          font-size: var(--font-3xl); font-weight: 800;
-          background: linear-gradient(135deg, #fff, var(--color-secondary));
-          -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .login-app-sub { font-size: var(--font-xs); color: var(--text-muted); }
-        .lang-toggle {
-          margin-left: auto;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border-default);
-          border-radius: var(--border-radius-full);
-          color: var(--text-secondary);
-          font-size: var(--font-sm);
-          font-weight: 600;
-          padding: 6px 14px;
-          cursor: pointer;
-          transition: all var(--transition-fast);
-          font-family: inherit;
-        }
-        .lang-toggle:hover { border-color: var(--color-primary); color: var(--color-primary-light); }
-        .login-card {
-          padding: 0;
-          overflow: hidden;
-        }
-        .login-card-header {
-          padding: var(--space-8) var(--space-8) var(--space-6);
-          background: linear-gradient(135deg, var(--color-primary-10), transparent);
-          border-bottom: 1px solid var(--border-subtle);
-        }
-        .login-title {
-          font-size: var(--font-3xl); font-weight: 800;
-          color: var(--text-primary);
-          margin-bottom: var(--space-1);
-        }
-        .login-subtitle { color: var(--text-muted); font-size: var(--font-sm); }
-        .login-form {
-          padding: var(--space-6) var(--space-8);
-          display: flex; flex-direction: column; gap: var(--space-4);
-        }
-        .input-icon-wrapper { position: relative; }
-        .input-icon {
-          position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
-          color: var(--text-muted); pointer-events: none;
-        }
-        .form-control.with-icon { padding-left: 42px; }
-        .input-toggle-btn {
-          position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-          background: none; border: none; color: var(--text-muted);
-          cursor: pointer; padding: 4px;
-          transition: color var(--transition-fast);
-        }
-        .input-toggle-btn:hover { color: var(--text-secondary); }
-        .btn-login { height: 46px; font-size: var(--font-md); font-weight: 600; justify-content: center; margin-top: var(--space-2); }
-        .btn-loading { display: flex; align-items: center; gap: var(--space-2); }
-        .demo-section {
-          padding: var(--space-5) var(--space-8) var(--space-8);
-          border-top: 1px solid var(--border-subtle);
-        }
-        .demo-title {
-          font-size: var(--font-xs); font-weight: 600;
-          color: var(--text-secondary);
-          margin-bottom: var(--space-3);
-        }
-        .demo-title span { font-weight: 400; color: var(--text-muted); }
-        .demo-grid {
-          display: grid; grid-template-columns: repeat(2,1fr); gap: var(--space-2);
-        }
-        .demo-btn {
-          background: var(--bg-elevated);
-          border: 1px solid var(--border-subtle);
-          border-radius: var(--border-radius-sm);
-          padding: var(--space-2) var(--space-3);
-          cursor: pointer;
-          display: flex; flex-direction: column; gap: 3px;
-          text-align: left;
-          transition: all var(--transition-fast);
-          font-family: inherit;
-          position: relative;
-        }
-        .demo-btn:hover:not(:disabled) { border-color: var(--color-primary); background: var(--color-primary-10); transform: translateY(-1px); }
-        .demo-btn:disabled { opacity: 0.7; cursor: wait; }
-        .demo-btn-selected {
-          border-color: var(--color-primary) !important;
-          background: var(--color-primary-10) !important;
-          box-shadow: 0 0 0 2px rgba(27,79,202,0.2);
-        }
-        .demo-btn-top { display: flex; align-items: center; gap: 6px; }
-        .demo-icon { font-size: 14px; flex-shrink: 0; }
-        .demo-role { font-size: var(--font-xs); font-weight: 700; color: var(--text-primary); }
-        .demo-email { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .demo-dest { font-size: 10px; color: var(--color-primary-light); font-weight: 600; opacity: 0.8; }
-        .login-footer { text-align: center; font-size: var(--font-xs); color: var(--text-muted); }
-      `}</style>
+      </main>
     </div>
   );
 }

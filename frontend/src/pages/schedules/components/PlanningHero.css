@@ -1,0 +1,256 @@
+/**
+ * PlanningHero — habillage
+ * ════════════════════════
+ * Fichier neuf, préfixe `.gs-hero-`. Une seule épaisseur de filet, une seule
+ * couleur d'autorité, des chiffres tabulaires : la grammaire du registre.
+ */
+
+.gs-hero {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px 0;
+  background: var(--gs-paper);
+  border-bottom: 1px solid var(--gs-rule);
+  min-width: 0;
+}
+
+.gs-hero-back {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px 4px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--transition-fast, .15s), background var(--transition-fast, .15s);
+}
+
+.gs-hero-back:hover { color: var(--gs-seal); background: var(--gs-seal-wash); }
+
+.gs-hero-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.gs-hero-identity { min-width: 0; flex: 1 1 320px; }
+
+.gs-hero-eyebrow-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 3px;
+}
+
+.gs-hero-kind {
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 32%, transparent);
+  background: var(--gs-alert-wash);
+  color: var(--gs-alert);
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.gs-hero-title {
+  font-size: clamp(20px, 2.4vw, 27px);
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.gs-hero-range {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--gs-ink-soft);
+}
+
+.gs-hero-side {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.gs-hero-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Le cachet d'état : un rond plein et un mot, comme un tampon de service. */
+.gs-hero-seal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.gs-hero-seal > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.gs-hero-seal.is-live {
+  color: var(--gs-duty);
+  background: var(--gs-duty-wash);
+  border-color: color-mix(in srgb, var(--gs-duty) 30%, transparent);
+}
+
+.gs-hero-seal.is-sealed {
+  color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+  border-color: color-mix(in srgb, var(--gs-seal) 30%, transparent);
+}
+
+.gs-hero-seal.is-open {
+  color: var(--gs-ink-soft);
+  background: transparent;
+  border-style: dashed;
+}
+
+.gs-hero-seal.is-stopped {
+  color: var(--gs-alert);
+  background: var(--gs-alert-wash);
+  border-color: color-mix(in srgb, var(--gs-alert) 30%, transparent);
+}
+
+.gs-hero-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gs-alert);
+}
+
+.gs-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ── Les quantités du planning ─────────────────────────────────────────
+   Ce qui était une ligne de puces colorées devient une réglure : un filet
+   vertical sépare chaque mesure, le chiffre porte le poids. */
+
+.gs-hero-quants {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.gs-hero-quant {
+  display: grid;
+  gap: 1px;
+  padding: 0 16px 12px 0;
+  margin-right: 16px;
+  border-right: 1px solid var(--gs-rule);
+}
+
+.gs-hero-quant:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+
+.gs-hero-quant > dt {
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gs-hero-quant > dd {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--gs-ink);
+}
+
+.gs-hero-quant > dd > span {
+  font-family: var(--gs-body);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--gs-ink-faint);
+  margin-left: 3px;
+}
+
+.gs-hero-quant.is-duty > dd { color: var(--gs-duty); }
+.gs-hero-quant.is-alert > dd { color: var(--gs-alert); }
+
+/* ── Avis bloquants posés au-dessus du titre ───────────────────────── */
+
+.gs-hero-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.gs-hero-notice.is-alert {
+  background: var(--gs-alert-wash);
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 30%, transparent);
+  color: var(--gs-alert);
+}
+
+.gs-hero-notice.is-wait {
+  background: var(--gs-paper-alt);
+  border: 1px dashed var(--gs-rule-strong);
+  color: var(--gs-ink-soft);
+}
+
+.gs-hero-notice strong { font-weight: 700; }
+
+/* Employée seule, hors d'un document : la coquille devient une carte à part
+   entière, donc plus de filet de séparation en bas et un peu d'air.
+
+   Le titre descend d'un cran. Quand un tableau de bord porte cette coquille et
+   qu'un planning ouvert porte la même juste en dessous, deux titres de 27 px se
+   disputent l'écran : le service est le contexte, le planning est le sujet. */
+.gs-hero.is-standalone {
+  padding: 16px 18px 4px;
+  border-bottom: 0;
+  border-radius: inherit;
+}
+
+.gs-hero.is-standalone .gs-hero-title { font-size: clamp(17px, 1.8vw, 21px); }
+
+@media (max-width: 760px) {
+  .gs-hero { padding: 12px 12px 0; }
+  .gs-hero.is-standalone { padding: 12px 12px 4px; }
+  .gs-hero-side { justify-items: start; }
+  .gs-hero-actions { justify-content: flex-start; }
+  .gs-hero-quant { padding-right: 12px; margin-right: 12px; }
+}

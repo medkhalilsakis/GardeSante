@@ -53,10 +53,12 @@ const handleTabKeyDown = (event, currentId, setTab) => {
   window.requestAnimationFrame(() => document.getElementById(`appel-tab-${nextId}`)?.focus());
 };
 
+// Chaque marque porte son libellé, son ton et son icône. Le ton nomme la
+// classe CSS qui l'habille : la couleur reste dans la feuille de styles.
 const MARKS = {
-  present: { label: 'Présent', color: '#059669', tone: 'success', icon: CheckCircle2 },
-  late: { label: 'Retard', color: '#D97706', tone: 'warning', icon: Clock3 },
-  absent: { label: 'Absent', color: '#DC2626', tone: 'danger', icon: UserX },
+  present: { label: 'Présent', tone: 'success', icon: CheckCircle2 },
+  late: { label: 'Retard', tone: 'warning', icon: Clock3 },
+  absent: { label: 'Absent', tone: 'danger', icon: UserX },
 };
 
 const STATUS_FILTERS = [
@@ -66,14 +68,6 @@ const STATUS_FILTERS = [
   { value: 'late', label: 'Retards' },
   { value: 'absent', label: 'Absents' },
 ];
-
-const SHIFT_COLORS = {
-  J: { color: '#2563EB', soft: '#EFF6FF' },
-  N: { color: '#4F46E5', soft: '#EEF2FF' },
-  S: { color: '#7C3AED', soft: '#F5F3FF' },
-  G: { color: '#DC2626', soft: '#FEF2F2' },
-  R: { color: '#64748B', soft: '#F1F5F9' },
-};
 
 const todayKey = () => {
   const values = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
@@ -165,7 +159,6 @@ function MarkBadge({ declaration }) {
 }
 
 function GuardCard({ guard, declaration, busy, mutationBusy, isNew, onMark }) {
-  const shift = SHIFT_COLORS[guard.code] || { color: '#475569', soft: '#F1F5F9' };
   const state = declaration?.mark || 'pending';
 
   return (
@@ -188,10 +181,10 @@ function GuardCard({ guard, declaration, busy, mutationBusy, isNew, onMark }) {
           <div><small>Service</small><strong>{guard.departmentName || 'Non précisé'}</strong></div>
         </div>
         <div>
-          <span className="appel-detail-icon appel-detail-shift" style={{ '--shift-color': shift.color, '--shift-soft': shift.soft }}><Clock3 size={15} /></span>
+          <span className="appel-detail-icon appel-detail-shift"><Clock3 size={15} /></span>
           <div>
             <small>Garde</small>
-            <strong>{guard.label || guard.code || 'Service'}</strong>
+            <strong>{guard.label || 'De service'}</strong>
             {guard.shiftStart && guard.shiftEnd && <em>{guard.shiftStart} → {guard.shiftEnd}</em>}
           </div>
         </div>
@@ -291,7 +284,7 @@ function ReasonModal({ mark, guard, onClose, onConfirm, busy }) {
           <div>
             <span>Déclaration individuelle</span>
             <h2 id="appel-reason-title">Déclarer « {meta.label} »</h2>
-            <p id="appel-reason-description">{guard.name} · {guard.departmentName || 'Service'} · {guard.label || guard.code}</p>
+            <p id="appel-reason-description">{guard.name} · {guard.departmentName || 'Service'} · {guard.label || 'De service'}</p>
           </div>
           <button ref={closeButtonRef} type="button" className="appel-modal-close" onClick={onClose} aria-label="Fermer"><X size={18} /></button>
         </div>
@@ -512,7 +505,7 @@ export default function AppelDuJourPage() {
     mutationFn: (guard) => journalAPI.addEvent({
       departmentId: guard.departmentId, scheduleId: guard.scheduleId, eventType: 'presence', userId: guard.userId,
       severity: 'info', title: `Présence confirmée — ${guard.name}`,
-      description: `Garde ${guard.label || guard.code} du ${serverToday} · ${guard.scheduleName || ''}`.trim(),
+      description: `Garde ${guard.label || 'De service'} du ${serverToday} · ${guard.scheduleName || ''}`.trim(),
     }),
     onSuccess: () => { toast.success('Présence enregistrée'); refreshAll(); },
     onError: (mutationError) => toast.error(mutationError?.response?.data?.message || 'Enregistrement impossible'),

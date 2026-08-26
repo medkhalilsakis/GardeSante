@@ -19,11 +19,15 @@ import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../store';
 import { scheduleInboxAPI } from '../../api';
+import { CalendarDays, Eye, FileClock, Pencil, ShieldCheck } from 'lucide-react';
+import { GsBadge, GsEmpty, GsFilterBar, GsPageHeader, GsPanel, GsSkeleton, GsStat, GsStatRail } from '../../components/gs';
 import PlanningStateBadge from '../../components/planning/PlanningStateBadge';
 import ContextBadge from '../../components/layout/ContextBadge';
 import SchedulePreviewModal from '../replacements/components/SchedulePreviewModal';
 import ScheduleChangeProposals from '../schedules/components/ScheduleChangeProposals';
 import SmartSpreadsheet from '../schedules/components/SmartSpreadsheet';
+import ErrorBoundary from '../../components/common/ErrorBoundary';
+import './PlanningInboxPage.css';
 
 const STATE_FILTERS = [
   { id: '',          label: 'Tous' },
@@ -39,25 +43,6 @@ const fmt = (d) => {
   const [y, m, day] = String(d).split('-');
   return `${day}/${m}/${y}`;
 };
-
-const card = {
-  background: 'var(--bg-card)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 12,
-  padding: 16,
-};
-
-const btn = (primary) => ({
-  padding: '7px 13px',
-  borderRadius: 8,
-  fontSize: 12,
-  fontWeight: 700,
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  border: `1px solid ${primary ? 'var(--color-primary)' : 'var(--border-default)'}`,
-  background: primary ? 'var(--color-primary)' : 'var(--bg-elevated)',
-  color: primary ? '#fff' : 'var(--text-secondary)',
-});
 
 export default function PlanningInboxPage() {
   const { user } = useAuthStore();
@@ -93,123 +78,93 @@ export default function PlanningInboxPage() {
   // dashboard du chef de service, et on revient par « Retour ».
   if (editing) {
     return (
-      <SmartSpreadsheet
-        scheduleId={editing.id}
-        departmentId={editing.departmentId}
-        onBack={() => setEditing(null)}
-        onManageProposals={() => setProposalsFor(editing.id)}
-      />
+      <ErrorBoundary label="Tableur de garde" onBack={() => setEditing(null)}>
+        <SmartSpreadsheet
+          scheduleId={editing.id}
+          departmentId={editing.departmentId}
+          onBack={() => setEditing(null)}
+          onManageProposals={() => setProposalsFor(editing.id)}
+        />
+      </ErrorBoundary>
     );
   }
 
   return (
-    <div>
+    <div className="gsin-page">
       <ContextBadge variant="header" />
 
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Planning à consulter</h1>
-          <p className="page-subtitle">
-            Plannings envoyés par les chefs de service — consultation et propositions de modification
-          </p>
-        </div>
-      </div>
+      <GsPageHeader
+        eyebrow="Registre des plannings"
+        title="Planning à consulter"
+        subtitle="Plannings envoyés par les chefs de service — consultation et propositions de modification."
+        rail={(
+          <GsStatRail>
+            <GsStat label="En vigueur" value={counts.soumis} tone="seal" />
+            <GsStat label="En cours" value={counts.en_cours} tone="duty" />
+            <GsStat label="Terminés" value={counts.termine} />
+            <GsStat label="Propositions" value={counts.proposals} tone={counts.proposals ? 'alert' : undefined} />
+          </GsStatRail>
+        )}
+      />
 
       {forbidden ? (
-        <div style={{ ...card, textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-          Cet espace est réservé aux surveillants et à la hiérarchie du service.
-        </div>
+        <GsPanel tone="alert">
+          <GsEmpty icon={<ShieldCheck size={27} />} title="Accès réservé" hint="Cet espace est réservé aux surveillants et à la hiérarchie du service." />
+        </GsPanel>
       ) : (
         <>
-          {/* Filtres par état dérivé */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-            {STATE_FILTERS.map((f) => (
-              <button
-                key={f.id || 'all'}
-                onClick={() => setState(f.id)}
-                style={{
-                  ...btn(state === f.id),
-                  padding: '6px 14px',
-                }}
-              >
-                {f.label}
-                {f.id && counts[f.id] ? ` (${counts[f.id]})` : ''}
-              </button>
-            ))}
-            {counts.proposals > 0 && (
-              <span style={{
-                marginLeft: 'auto', alignSelf: 'center', fontSize: 12, fontWeight: 700,
-                color: '#92400E', background: '#FEF3C7', border: '1px solid #FDE68A',
-                borderRadius: 999, padding: '4px 12px',
-              }}>
-                {counts.proposals} proposition(s) en attente de décision
-              </span>
-            )}
-          </div>
+          <GsFilterBar
+            inset
+            filters={STATE_FILTERS.map((filter) => ({
+              id: filter.id,
+              label: filter.label,
+              count: filter.id ? counts[filter.id] : schedules.length,
+              tone: filter.id && counts[filter.id] ? 'alert' : undefined,
+            }))}
+            value={state}
+            onChange={setState}
+            end={counts.proposals > 0 ? <GsBadge tone="alert" icon={<FileClock size={12} />}>{counts.proposals} proposition{counts.proposals > 1 ? 's' : ''} en attente</GsBadge> : null}
+          />
 
           {isLoading ? (
-            <div style={{ ...card, textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-              Chargement des plannings…
-            </div>
+            <GsPanel><GsSkeleton variant="rows" count={5} /></GsPanel>
           ) : isError ? (
-            <div style={{ ...card, textAlign: 'center', padding: 40, color: 'var(--color-danger)' }}>
-              Impossible de charger les plannings à consulter.
-            </div>
+            <GsPanel tone="alert"><GsEmpty icon={<CalendarDays size={27} />} title="Chargement impossible" hint="Impossible de charger les plannings à consulter. Réessayez dans quelques instants." /></GsPanel>
           ) : schedules.length === 0 ? (
-            <div style={{ ...card, textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-              Aucun planning à consulter pour le moment.
-              <div style={{ fontSize: 12, marginTop: 6 }}>
-                Les plannings apparaissent ici dès que le chef de service les envoie.
-              </div>
-            </div>
+            <GsPanel><GsEmpty icon={<CalendarDays size={27} />} title="Aucun planning à consulter" hint="Les plannings apparaissent ici dès que le chef de service les envoie." /></GsPanel>
           ) : (
-            <div style={{ display: 'grid', gap: 12 }}>
-              {schedules.map((s) => (
-                <div key={s.id} style={card}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-                        <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>{s.name}</span>
+            <GsPanel flush title={`Plannings disponibles (${schedules.length})`} icon={<CalendarDays size={14} />}>
+              <div className="gsin-list">
+                {schedules.map((s) => (
+                  <article key={s.id} className="gsin-item">
+                    <div className="gsin-item-main">
+                      <div className="gsin-item-heading">
+                        <div className="gsin-item-title"><span>{s.name}</span>
                         <PlanningStateBadge state={s.state} status={s.status} startDate={s.startDate} endDate={s.endDate} size="sm" />
-                        {s.pendingProposals > 0 && (
-                          <span style={{
-                            fontSize: 11, fontWeight: 700, color: '#92400E', background: '#FEF3C7',
-                            border: '1px solid #FDE68A', borderRadius: 999, padding: '1px 9px',
-                          }}>
-                            {s.pendingProposals} en attente
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                        {s.departmentName || 'Service —'} · {fmt(s.startDate)} → {fmt(s.endDate)}
-                        {s.authorName ? ` · envoyé par ${s.authorName}` : ''}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>
-                        {s.guardCount} garde(s) · {s.staffCount} agent(s)
-                        {s.myProposals > 0 ? ` · ${s.myProposals} proposition(s) de ma part` : ''}
+                        {s.pendingProposals > 0 ? <GsBadge tone="alert">{s.pendingProposals} en attente</GsBadge> : null}
+                        </div>
+                        <p className="gsin-item-meta">{s.departmentName || 'Service non précisé'} · {fmt(s.startDate)} → {fmt(s.endDate)}{s.authorName ? ` · envoyé par ${s.authorName}` : ''}</p>
+                        <p className="gsin-item-stats"><span><ShieldCheck size={13} /> {s.guardCount} garde{s.guardCount === 1 ? '' : 's'}</span><span><CalendarDays size={13} /> {s.staffCount} agent{s.staffCount === 1 ? '' : 's'}</span>{s.myProposals > 0 ? <span><Pencil size={13} /> {s.myProposals} proposition{s.myProposals === 1 ? '' : 's'} de ma part</span> : null}</p>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <button style={btn(false)} onClick={() => setPreviewSchedule(s)}>
-                        👁 Consulter
+                    <div className="gsin-item-actions">
+                      <button type="button" className="gs-btn" onClick={() => setPreviewSchedule(s)}>
+                        <Eye size={14} /> Consulter
                       </button>
                       {canPropose(s) && (
-                        <button
-                          style={btn(true)}
-                          onClick={() => setEditing({ id: s.id, departmentId: s.departmentId })}
-                        >
-                          ✏️ Proposer une modification
+                        <button type="button" className="gs-btn is-primary" onClick={() => setEditing({ id: s.id, departmentId: s.departmentId })}>
+                          <Pencil size={14} /> Proposer une modification
                         </button>
                       )}
-                      <button style={btn(false)} onClick={() => setProposalsFor(s.id)}>
-                        📋 Propositions
+                      <button type="button" className="gs-btn" onClick={() => setProposalsFor(s.id)}>
+                        <FileClock size={14} /> Propositions
                       </button>
                     </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  </article>
+                ))}
+              </div>
+            </GsPanel>
           )}
         </>
       )}

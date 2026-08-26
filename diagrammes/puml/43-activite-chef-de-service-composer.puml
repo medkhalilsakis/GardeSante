@@ -1,0 +1,192 @@
+' ============================================================================
+' GardeSanté — Diagramme d'activités : Chef de Service (1/2)
+'                                      composer le tableur, puis l'engager
+'
+' C'est le rôle central : il compose le tableur de garde de son service et
+' l'engage. Toute la chaîne de contrôles converge sur son geste d'envoi. Ce
+' qu'il fait ENSUITE, une fois le tableur en vigueur, fait l'objet de la
+' figure 44.
+'
+' Sources vérifiées :
+'   backend/src/db/migrations/012_role_autre.sql
+'     23 permissions, dont schedules.create/update/submit/generate. Il ne
+'     détient NI schedules.approve NI schedules.reject.
+'   backend/src/modules/schedules/schedule-builder.controller.js
+'     :754      un brouillon est privé à son auteur chef de service
+'     :671-692  saveDraft journalise schedule_draft_update / _live_update
+'     :1317     refus si le planning n'est plus en brouillon
+'     :1320-1328 GATE BLOQUANT : evaluateRules ; si isValid est faux, 400 et
+'               la soumission n'a pas lieu
+'     :1331-1340 l'envoi met en vigueur SANS approbation : 'active' si la
+'               période a commencé, 'submitted' sinon
+'   backend/src/jobs/schedule-activation.js:33,88
+'     une tâche fait passer 'submitted' à 'active' toutes les 30 minutes
+'   backend/src/modules/absences/leave-check.js
+'     Règle I — un agent en congé ne peut pas être affecté à une garde ;
+'     contrôle SERVEUR appelé par le tableur et par l'assistant
+'   backend/src/modules/schedules/external-staff.js:127-212
+'     à CHAQUE sauvegarde, les agents d'un autre service déclenchent une
+'     demande de prêt, dans un bloc protégé : l'enregistrement passe d'abord
+'   backend/src/modules/schedules/rules-engine.js
+'     lit les gardes du tableur : une période continue = une affectation,
+'     une case cochée = une garde
+'   backend/src/modules/schedules/import.controller.js  import de tableur Excel
+'   backend/src/modules/schedules/assistant-generator.js  répartition proposée
+' ============================================================================
+@startuml 43-activite-chef-de-service-composer
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontColor #0F172A
+  DiamondBackgroundColor #EEF2FF
+  DiamondBorderColor #1B4FCA
+  DiamondFontColor #1B4FCA
+  StartColor #0F766E
+  EndColor #B91C1C
+  BarColor #7A3E9D
+}
+skinparam partition {
+  BackgroundColor #F8FAFC
+  BorderColor #94A3B8
+  FontColor #475569
+  FontStyle bold
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Activités — Chef de Service (1/2) : composer le tableur, puis l'engager
+
+start
+
+:s'authentifier;
+
+partition "Composer le tableur" {
+  :créer un planning\npériode, service, intitulé;
+  note right
+    Le planning naît en **brouillon**, privé à son
+    auteur. Ni le surveillant, ni la direction ne le
+    voient : le chef compose à l'abri des regards.
+  end note
+
+  if (partir d'une base existante ?) then (oui)
+    fork
+      :dupliquer un planning\nprécédent;
+    fork again
+      :importer un tableur\nExcel;
+    fork again
+      :laisser l'assistant\nproposer une répartition;
+    end fork
+    note right
+      L'assistant applique les règles de garde et
+      l'équité de charge. Sa sortie est un brouillon
+      comme un autre : le chef la reprend ligne à
+      ligne. Aucune décision ne lui est déléguée.
+    end note
+  else (non)
+    :partir d'une grille vide;
+  endif
+
+  repeat
+    :ajouter une ligne : un agent;
+    :cocher ses jours de garde;
+
+    if (l'agent est-il en congé\nsur un jour coché ?) then (oui)
+      #FEE2E2:refus — un agent en congé ne peut pas\nêtre affecté à une garde;
+      note right
+        Règle I, contrôlée sur le serveur et non
+        seulement à l'écran : ni le tableur, ni
+        l'assistant ne peuvent la contourner.
+      end note
+      :retirer le jour, ou changer d'agent;
+    else (non)
+      #F3E8FF:enregistrer la grille;
+      note right
+        L'ordre compte : la grille est écrite AVANT
+        toute demande de prêt, dans un bloc protégé.
+        Une panne de la couche d'approbation ne fait
+        pas perdre au chef ce qu'il vient de saisir.
+      end note
+
+      if (l'agent relève-t-il\nd'un autre service ?) then (oui)
+        :demander son prêt au chef\ndu service propriétaire;
+        :la ligne est signalée « en attente »\nsans bloquer la suite;
+      else (non)
+      endif
+      #E6F4F1:consigner la sauvegarde au journal;
+    endif
+  repeat while (la grille est-elle complète ?) is (non)
+  -> oui;
+}
+
+partition "Engager le tableur" {
+  :demander l'envoi;
+
+  if (le planning est-il encore\nen brouillon ?) then (non)
+    #FEE2E2:refus — ce planning est déjà\nenvoyé ou en cours;
+    stop
+  else (oui)
+  endif
+
+  :le moteur de règles évalue la grille;
+  note right
+    Le moteur lit les gardes du tableur : une période
+    continue de cases cochées vaut une affectation,
+    chaque case cochée vaut une garde. Repos entre
+    gardes, plafonds mensuels, doubles affectations et
+    congés y passent.
+  end note
+
+  if (des erreurs bloquantes\nsubsistent-elles ?) then (oui)
+    #FEE2E2:refus — corriger avant de soumettre;
+    note right
+      Barrière **bloquante** : l'envoi n'a pas lieu.
+      Les avertissements non bloquants, eux, sont
+      signalés et laissent passer — doubler une garde
+      peut être le seul choix d'une nuit.
+    end note
+    :revenir à la composition;
+    stop
+  else (non)
+  endif
+
+  if (la période a-t-elle\ndéjà commencé ?) then (oui)
+    #F3E8FF:le planning passe « en cours »;
+  else (non)
+    #F3E8FF:le planning passe « envoyé »;
+    note right
+      Une tâche du serveur le fera passer « en cours »
+      de lui-même quand sa période s'ouvrira, dans les
+      trente minutes : aucune intervention n'est
+      requise.
+    end note
+  endif
+
+  #E6F4F1:consigner l'envoi et l'étape du circuit;
+  :notifier les surveillants et la direction,\nen temps réel;
+}
+
+:le tableur est en vigueur\n— voir la figure 44;
+stop
+
+floating note left
+  **Il n'y a ni approbation ni refus.** L'envoi met le planning en vigueur. Le
+  surveillant général et la direction le consultent et proposent des
+  modifications : ils ne le débloquent pas, et ne peuvent pas le bloquer. Le
+  chef, symétriquement, ne détient aucun visa — pas même sur ses propres
+  plannings. Les états « en révision », « approuvé » et « rejeté » existent dans
+  le schéma de la base mais aucun chemin du logiciel n'y conduit.
+end note
+
+legend right
+  Fond teinté vert : écriture au journal. Fond teinté violet : écriture en base. Fond teinté rouge : refus.
+  Cycle de vie complet du planning : figure 21. Prêt de personnel : figure 25.
+  Ce que le chef fait une fois le tableur engagé : figure 44.
+endlegend
+
+@enduml

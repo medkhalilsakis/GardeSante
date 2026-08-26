@@ -19,16 +19,13 @@
  * Aucune écriture : ce module ne fait que calculer.
  */
 
-const { datesBetween, REST_CODE } = require('./spreadsheet-reader');
+const { datesBetween } = require('./spreadsheet-reader');
 const { getLeavesInPeriod, isOnLeaveAt } = require('../absences/leave-check');
 const {
   generateRoundRobin,
   generateABRotation,
   generateCyclic,
 } = require('./rules-engine');
-
-/** Code posé par défaut : « J » (Jour), comme le fait le tableur. */
-const DEFAULT_CODE = 'J';
 
 const dayKey = (value) => String(value || '').slice(0, 10);
 
@@ -110,7 +107,7 @@ const prepare = async ({ members, startDate, endDate, scheduleId }) => {
     return true;
   };
 
-  const assign = (member, date, code = DEFAULT_CODE) => {
+  const assign = (member, date) => {
     const d = dayKey(date);
     if (!state.busy.has(d)) state.busy.set(d, new Set());
     state.busy.get(d).add(member.userId);
@@ -118,7 +115,8 @@ const prepare = async ({ members, startDate, endDate, scheduleId }) => {
     state.lastDate.set(member.userId, d);
     if (!state.grid) state.grid = new Map();
     if (!state.grid.has(member.userId)) state.grid.set(member.userId, {});
-    state.grid.get(member.userId)[d] = code;
+    // Une seule notion : de service ce jour-là. Le tableur lit ce marqueur.
+    state.grid.get(member.userId)[d] = true;
   };
 
   /** Le moins chargé d'abord ; à charge égale, celui qui a gardé le plus tôt. */
@@ -143,8 +141,8 @@ const toRows = (ctx) =>
   ctx.roster.map((member) => {
     const shifts = {};
     const grid = ctx.state.grid?.get(member.userId) || {};
-    for (const [date, code] of Object.entries(grid)) {
-      if (code && code !== REST_CODE) shifts[date] = code;
+    for (const [date, onDuty] of Object.entries(grid)) {
+      if (onDuty) shifts[date] = true;
     }
     return {
       id: `row-${member.userId}`,
@@ -402,7 +400,6 @@ const generateV2 = async ({
 };
 
 module.exports = {
-  DEFAULT_CODE,
   MODES,
   generateV2,
   computeMetrics,

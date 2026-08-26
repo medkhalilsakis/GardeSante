@@ -1,0 +1,127 @@
+' ============================================================================
+' GardeSanté — Cas d'utilisation : Surveillant de Service (niveau 5, 19 perm.)
+'
+' Sources vérifiées :
+'   - role_permissions de `service_supervisor` : absences.approve/create/read,
+'     departments.read, remarks.create/read, replacements.create/read/update,
+'     schedules.create/read/submit/update, shifts.confirm/create/read/update,
+'     stats.read, users.read.
+'   - Soumission : schedule-builder.controller.js restreint `submitSchedule`
+'     à ['department_head', 'service_supervisor'].
+'   - Proposition de modification : `canProposeScheduleChange` autorise le
+'     Surveillant Général sans condition, et le Surveillant de Service s'il
+'     est membre du service visé (user_departments) — le Chef de Service,
+'     lui, en est explicitement exclu.
+'   - Appel du jour / incidents : journal.controller.js, EVENT_WRITE_ROLES.
+'   - Surcouche de remplacement : SUPERVISOR_ROLES peut créer, pas confirmer.
+' ============================================================================
+@startuml 05-cas-surveillant-de-service
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ActorBorderColor #0F766E
+skinparam ActorBackgroundColor #E6F4F1
+skinparam ActorFontStyle bold
+skinparam UsecaseBorderColor #1B4FCA
+skinparam UsecaseBackgroundColor #EEF2FF
+skinparam usecase {
+BackgroundColor<<hérité>> #F1F5F9
+BorderColor<<hérité>> #94A3B8
+FontColor<<hérité>> #475569
+}
+skinparam PackageBorderColor #94A3B8
+skinparam PackageBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Cas d'utilisation — Surveillant de Service\nniveau 5 · 19 permissions
+
+left to right direction
+
+actor "Médecin Senior" as MED
+actor "Surveillant\nde Service" as SS
+MED <|-- SS
+
+package "Hérité du Médecin Senior" as P0 {
+  usecase "Consulter le planning\net ses gardes" as UC_PLAN <<hérité>>
+  usecase "Déclarer une absence\nou un congé" as UC_ABS <<hérité>>
+  usecase "Proposer un remplacement" as UC_REMP0 <<hérité>>
+  usecase "Gérer son compte\net sa communication" as UC_CPT <<hérité>>
+}
+
+package "Élaboration du tableur" as P1 {
+  usecase "Élaborer le tableur\nde garde" as UC_TABLEUR
+  usecase "Affecter un agent\nà une garde" as UC_AFFECTER
+  usecase "Contrôler la disponibilité\nde l'agent" as UC_DISPO
+  usecase "Enregistrer le brouillon" as UC_BROUILLON
+  usecase "Exporter le planning\n(Excel, CSV, PDF)" as UC_EXPORT
+  usecase "Soumettre le planning" as UC_SOUMETTRE
+  usecase "Notifier le\nSurveillant Général" as UC_NOTIF_SG
+  usecase "Proposer une modification\nsur planning en vigueur" as UC_PROPOSER
+}
+
+package "Absences et remplacements" as P2 {
+  usecase "Valider une absence\nde son service" as UC_ABS_VALID
+  usecase "Créer un remplacement\nen surcouche" as UC_REMP_CREER
+  usecase "Mettre à jour\nun remplacement" as UC_REMP_MAJ
+}
+
+package "Vie du service" as P3 {
+  usecase "Faire l'appel du jour" as UC_APPEL
+  usecase "Signaler un incident" as UC_INCIDENT
+  usecase "Prendre en compte\nune alerte de service" as UC_ALERTE
+  usecase "Consulter le portfolio\nde son service" as UC_PORTFOLIO
+  usecase "Consulter l'annuaire\ndu personnel" as UC_ANNUAIRE
+}
+
+MED --> UC_PLAN
+MED --> UC_ABS
+MED --> UC_REMP0
+MED --> UC_CPT
+
+SS --> UC_TABLEUR
+SS --> UC_EXPORT
+SS --> UC_SOUMETTRE
+SS --> UC_PROPOSER
+SS --> UC_ABS_VALID
+SS --> UC_REMP_CREER
+SS --> UC_REMP_MAJ
+SS --> UC_APPEL
+SS --> UC_INCIDENT
+SS --> UC_ALERTE
+SS --> UC_PORTFOLIO
+SS --> UC_ANNUAIRE
+
+UC_TABLEUR ..> UC_AFFECTER : <<include>>
+UC_TABLEUR ..> UC_BROUILLON : <<include>>
+UC_AFFECTER ..> UC_DISPO : <<include>>
+UC_SOUMETTRE ..> UC_NOTIF_SG : <<include>>
+
+note as N1
+« Proposer une modification » n'est ouvert qu'une fois
+le planning envoyé et mis en marche, et seulement au
+surveillant membre du service concerné. C'est le Chef
+de Service qui arbitre ensuite ces propositions : le
+couple proposer / décider sépare volontairement les
+deux responsabilités.
+end note
+
+note as N2
+Le contrôle de disponibilité interdit d'affecter un
+agent dont un congé approuvé recouvre la période de
+garde — règle métier explicite de la plateforme.
+end note
+
+legend right
+Bleu : cas propres à ce rôle.
+Gris : capacités héritées du Médecin Senior.
+endlegend
+
+' Ancrage des notes flottantes
+N1 .. UC_TABLEUR
+N2 .. UC_ABS_VALID
+
+@enduml

@@ -1,0 +1,94 @@
+' ============================================================================
+' GardeSanté — Vue d'ensemble : découpage du modèle en paquets
+'
+' Sources vérifiées : les 44 tables de base du schéma `public`, relevées par
+' interrogation de information_schema.tables / .columns / .key_column_usage et
+' de pg_constraint (121 clés étrangères, 6 machines à états par contrainte
+' CHECK). Le décompte de chaque paquet ci-dessous est exhaustif : 10 + 19 + 8
+' + 5 + 2 = 44 tables.
+' ============================================================================
+@startuml 10-classes-paquets
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam PackageBorderColor #1B4FCA
+skinparam PackageBackgroundColor #EEF2FF
+skinparam PackageFontStyle bold
+skinparam package {
+  BackgroundColor<<socle>> #E6F4F1
+  BorderColor<<socle>> #0F766E
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Modèle de données — découpage en paquets\n44 tables · 121 clés étrangères
+
+package "Identité, habilitations\net organisation\n(10 tables)" as P_ID <<socle>> {
+}
+
+package "Planification\n(19 tables)" as P_PLAN {
+}
+
+package "Absences et remplacements\n(8 tables)" as P_ABS {
+}
+
+package "Communication\n(5 tables)" as P_COM {
+}
+
+package "Traçabilité\n(2 tables)" as P_TRACE {
+}
+
+P_PLAN ..> P_ID : agent affecté,\nservice, établissement
+P_ABS ..> P_ID : agent absent,\nagent remplaçant
+P_ABS ..> P_PLAN : garde et planning visés
+P_COM ..> P_ID : auteur, destinataire,\nportée
+P_TRACE ..> P_ID : auteur de l'action
+P_TRACE ..> P_PLAN : entité journalisée
+P_TRACE ..> P_ABS : entité journalisée
+
+note as N1
+  **Cloisonnement multi-établissement**
+  Presque toutes les tables portent `establishment_id`.
+  Le filtre est appliqué à chaque requête, ce qui isole
+  les données d'un hôpital de celles des autres. Pour ne
+  pas surcharger les figures de détail, l'association
+  vers Établissement n'y est pas répétée : elle est
+  posée une fois dans la figure « Identité ».
+end note
+
+note as N2
+  **Traçabilité en écriture seule**
+  `activity_logs` (386 lignes observées) n'est exposée
+  par aucune route de modification ni de suppression :
+  aucun acteur, directeur compris, ne peut réécrire
+  l'historique. Le paquet référence les entités des
+  autres paquets par couple (`entity_type`,
+  `entity_id`), sans clé étrangère, afin de survivre à
+  la suppression de l'entité citée.
+  `audit_logs` est déclarée au schéma mais aucun code
+  ne l'alimente : la traçabilité repose entièrement
+  sur `activity_logs`.
+end note
+
+note as N3
+  **Sens des dépendances**
+  Aucun paquet n'est référencé par le socle Identité :
+  la dépendance va toujours du métier vers l'identité,
+  jamais l'inverse. Le graphe des paquets est donc
+  acyclique.
+end note
+
+N1 .. P_ID
+N2 .. P_TRACE
+N3 .. P_PLAN
+
+legend right
+  Vert : socle commun, référencé par tous les paquets.
+  Bleu : paquets métier.
+  Flèche pointillée : dépendance par clé étrangère.
+endlegend
+
+@enduml

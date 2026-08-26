@@ -13,11 +13,11 @@ import { connect, disconnect, authenticate, joinEstablishment, joinDepartment, o
  * Retire une ligne du tableur dans une entrée de cache `['schedule-detail', id]`.
  *
  * La source de vérité du tableur est `schedule.metadata.spreadsheet.rows` (et
- * non la table `shifts`). Deux formes de cache coexistent sur cette même clé :
- * `SmartSpreadsheet` y stocke la réponse axios entière
- * (`{ data: { data: { schedule, … } } }`) tandis que `VisualCalendar` la
- * déballe (`{ schedule, … }`). On traverse donc les deux, et on renvoie `old`
- * inchangé si la ligne n'y est pas — l'invalidation qui suit fait foi.
+ * non la table `shifts`). Les écrans qui lisent cette clé y stockent la réponse
+ * axios entière (`{ data: { data: { schedule, … } } }`), mais on traverse aussi
+ * la forme déballée : un futur lecteur qui l'écrirait ne casserait pas ce
+ * retrait. On renvoie `old` inchangé si la ligne n'y est pas — l'invalidation
+ * qui suit fait foi.
  */
 const dropSpreadsheetRow = (old, staffUserId) => {
   if (!old || typeof old !== 'object') return old;
@@ -96,6 +96,12 @@ export const useRealtime = () => {
     // Absences
     const handleAbsence = (payload) => {
       queryClient.invalidateQueries({ queryKey: ['absences'] });
+      // En react-query v5 le préfixe se compare élément par élément : `['absences']`
+      // ne couvre PAS `['absences-shift', …]`. Les absences déclarées à l'appel du
+      // jour vivent sur cette seconde clé (badge de l'onglet « Absences » du chef,
+      // panneau des signalements) — sans cette ligne, elles n'arrivaient qu'au
+      // rafraîchissement périodique de 60 s.
+      queryClient.invalidateQueries({ queryKey: ['absences-shift'] });
       queryClient.invalidateQueries({ queryKey: ['journal'] });
       queryClient.invalidateQueries({ queryKey: ['journal-overview'] });
       if (payload?.scheduleId) {
@@ -174,11 +180,20 @@ export const useRealtime = () => {
 
     // Supervision hôpital (Lot 5) — tout ce qui bouge dans un service change la
     // vue d'ensemble, la cohérence inter-services ou les prêts de personnel.
+    //
+    // Les deux vues de pilotage ajoutées depuis (directeur, Lot Y1 ; chef de
+    // service, Lot Z3) lisent les MÊMES faits en un seul appel : elles doivent
+    // donc se rafraîchir sur exactement les mêmes événements, sinon un chef lit
+    // 8 gardes pendant que son surveillant en voit 9. `deptDetail` suit, car
+    // l'effectif du service change avec les mêmes actions.
     const handleSupervision = () => {
       queryClient.invalidateQueries({ queryKey: ['supervision-overview'] });
       queryClient.invalidateQueries({ queryKey: ['supervision-conflicts'] });
       queryClient.invalidateQueries({ queryKey: ['supervision-schedules'] });
       queryClient.invalidateQueries({ queryKey: ['supervision-loans'] });
+      queryClient.invalidateQueries({ queryKey: ['chef-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['director-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['deptDetail'] });
     };
     const SUPERVISION_EVENTS = [
       'absence:reported', 'absence:updated', 'leave:created', 'leave:cancelled',
@@ -186,6 +201,14 @@ export const useRealtime = () => {
       'alert:new', 'alert:updated', 'journal:event',
       'staff-loan:requested', 'staff-loan:decided', 'supervision:report',
       'schedule:submitted', 'schedule:activated',
+      // Ajouts : un planning créé ou modifié change le nombre de brouillons, la
+      // garde du jour et l'équité de la charge ; une alerte acquittée fait
+      // baisser « non acquittées ». Aucun de ces trois événements ne rafraîchissait
+      // quoi que ce soit d'un tableau de bord.
+      'schedule:created', 'schedule:updated', 'alert:acknowledged',
+      // Une proposition déposée ou arbitrée change le compteur « en attente »
+      // des tableaux de bord chef et surveillance.
+      'schedule:change-proposal',
     ];
 
     // Cycle de vie du planning — l'envoi le met en vigueur et la date de début
@@ -201,6 +224,14 @@ export const useRealtime = () => {
       } else {
         queryClient.invalidateQueries({ queryKey: ['schedule-detail'] });
       }
+    };
+
+    // Propositions de modification d'un planning en vigueur : la liste vit sous
+    // sa propre clé, qu'aucun autre gestionnaire n'invalide. Le surveillant voit
+    // la décision du chef, et le chef voit la proposition arriver.
+    const handleChangeProposal = (payload) => {
+      queryClient.invalidateQueries({ queryKey: ['schedule-change-proposals'] });
+      handleScheduleLifecycle(payload);
     };
 
     // Enregistrement des listeners
@@ -222,6 +253,7 @@ export const useRealtime = () => {
     on('schedule:updated', handleStaffRemoved);
     on('schedule:submitted', handleScheduleLifecycle);
     on('schedule:activated', handleScheduleLifecycle);
+    on('schedule:change-proposal', handleChangeProposal);
     on('account:archived', handleAccountArchived);
     on('journal:event', handleJournal);
     on('alert:updated', handleAlertChange);
@@ -248,6 +280,7 @@ export const useRealtime = () => {
       off('schedule:updated', handleStaffRemoved);
       off('schedule:submitted', handleScheduleLifecycle);
       off('schedule:activated', handleScheduleLifecycle);
+      off('schedule:change-proposal', handleChangeProposal);
       off('account:archived', handleAccountArchived);
       off('journal:event', handleJournal);
       off('alert:updated', handleAlertChange);

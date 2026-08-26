@@ -48,32 +48,55 @@ const getReplacements = async (req, res) => {
   const eid = req.user.isSuperAdmin ? (req.query.establishmentId || req.user.establishmentId) : req.user.establishmentId;
   const offset = (page - 1) * limit;
 
+  // Un remplacement de la couche overlay ne référence AUCUNE garde de la table
+  // `shifts` : `shift_id` reste NULL, la ligne porte son planning (`schedule_id`)
+  // et sa propre période. Les jointures internes sur `shifts` écartaient donc
+  // tous les remplacements réels — dans le comptage comme dans les données, la
+  // liste était structurellement vide. D'où les LEFT JOIN, et la dérivation du
+  // service et de la date depuis `schedules` quand la garde est absente.
+  const fromClause = `
+     FROM replacements r
+     LEFT JOIN shifts s          ON r.shift_id = s.id
+     LEFT JOIN schedules sch     ON r.schedule_id = sch.id
+     LEFT JOIN shift_types st    ON s.shift_type_id = st.id
+     LEFT JOIN departments d     ON COALESCE(s.department_id, r.department_id, sch.department_id) = d.id
+     LEFT JOIN users absent      ON r.absent_user_id = absent.id
+     LEFT JOIN users replacement ON r.replacement_user_id = replacement.id
+     JOIN users requester        ON r.requested_by = requester.id`;
+
   let conditions = ['r.establishment_id = $1'];
   let params = [eid]; let idx = 2;
   if (status) { conditions.push(`r.status = $${idx}`); params.push(status); idx++; }
-  if (departmentId) { conditions.push(`s.department_id = $${idx}`); params.push(departmentId); idx++; }
+  if (departmentId) {
+    conditions.push(`COALESCE(s.department_id, r.department_id, sch.department_id) = $${idx}`);
+    params.push(departmentId); idx++;
+  }
   if (urgency) { conditions.push(`r.urgency = $${idx}`); params.push(urgency); idx++; }
 
   const countResult = await query(
-    `SELECT COUNT(*) FROM replacements r JOIN shifts s ON r.shift_id = s.id WHERE ${conditions.join(' AND ')}`,
+    `SELECT COUNT(*) ${fromClause} WHERE ${conditions.join(' AND ')}`,
     params
   );
 
+  // Les colonnes dérivées sont placées APRÈS `r.*` : à nom égal, node-postgres
+  // retient la dernière, donc la valeur dérivée. Les dates sont formatées côté
+  // serveur — une colonne DATE brute se décale d'un jour au passage par
+  // `new Date()` dans le navigateur.
   const result = await query(
     `SELECT r.*,
-            s.shift_date, s.department_id,
-            st.name AS shift_type_name, st.color, st.start_time, st.end_time,
+            COALESCE(TO_CHAR(s.shift_date, 'YYYY-MM-DD'), TO_CHAR(r.start_date, 'YYYY-MM-DD')) AS shift_date,
+            TO_CHAR(r.start_date, 'YYYY-MM-DD') AS start_date,
+            TO_CHAR(r.end_date,   'YYYY-MM-DD') AS end_date,
+            COALESCE(s.department_id, r.department_id, sch.department_id) AS department_id,
+            sch.name AS schedule_name,
+            st.name AS shift_type_name, st.color,
+            COALESCE(st.start_time, r.start_time) AS start_time,
+            COALESCE(st.end_time,   r.end_time)   AS end_time,
             absent.first_name AS absent_first, absent.last_name AS absent_last, absent.speciality AS absent_speciality,
             replacement.first_name AS replacement_first, replacement.last_name AS replacement_last,
             requester.first_name AS requested_by_first, requester.last_name AS requested_by_last,
             d.name AS department_name, d.name_ar AS department_name_ar
-     FROM replacements r
-     JOIN shifts s ON r.shift_id = s.id
-     JOIN shift_types st ON s.shift_type_id = st.id
-     JOIN users absent ON r.absent_user_id = absent.id
-     JOIN departments d ON s.department_id = d.id
-     JOIN users requester ON r.requested_by = requester.id
-     LEFT JOIN users replacement ON r.replacement_user_id = replacement.id
+     ${fromClause}
      WHERE ${conditions.join(' AND ')}
      ORDER BY CASE r.urgency WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END, r.created_at DESC
      LIMIT $${idx} OFFSET $${idx + 1}`,

@@ -1,0 +1,757 @@
+/* ============================================================
+   Conformité des établissements — Super Admin (Lot X6, C1)
+   Toutes les classes sont préfixées `.cf-` : ce fichier ne peut
+   pas déteindre sur le reste du tableau de bord.
+   ============================================================ */
+
+.cf-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5, 20px);
+}
+
+/* ── En-tête ───────────────────────────────────────────────── */
+.cf-head,
+.cf-fiche-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3, 12px);
+  padding: 14px 18px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 14px;
+}
+
+.cf-head-title {
+  margin: 0;
+  font-size: var(--font-base, 14px);
+  font-weight: 800;
+  color: var(--gs-ink);
+  letter-spacing: -0.01em;
+}
+
+.cf-head-sub {
+  margin: 4px 0 0;
+  max-width: 74ch;
+  font-size: var(--font-xs, 11px);
+  line-height: 1.55;
+  color: var(--gs-ink-faint);
+}
+
+.cf-fiche-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cf-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.cf-refresh:hover:not(:disabled) {
+  color: var(--gs-seal);
+  border-color: var(--gs-seal);
+}
+
+.cf-refresh:disabled { opacity: 0.55; cursor: default; }
+
+.cf-spin { animation: cf-rotate 0.9s linear infinite; }
+
+@keyframes cf-rotate { to { transform: rotate(360deg); } }
+
+/* ── Fil d'Ariane ──────────────────────────────────────────── */
+.cf-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 700;
+  color: var(--gs-ink-faint);
+}
+
+.cf-crumb > span { color: var(--gs-ink); }
+
+.cf-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.cf-back:hover { color: var(--gs-seal); border-color: var(--gs-seal); }
+
+/* ── Bandeau de synthèse ───────────────────────────────────── */
+.cf-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3, 12px);
+}
+
+.cf-kpi {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 15px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-left: 3px solid var(--gs-seal);
+  border-radius: 12px;
+  color: var(--gs-seal);
+}
+
+.cf-kpi-ok   { border-left-color: var(--gs-duty); color: var(--gs-duty); }
+.cf-kpi-bad  { border-left-color: var(--gs-alert-strong);  color: var(--gs-alert-strong); }
+.cf-kpi-warn { border-left-color: var(--gs-alert); color: var(--gs-alert); }
+
+.cf-kpi > div { display: flex; flex-direction: column; line-height: 1.2; }
+
+.cf-kpi b {
+  font-size: var(--font-xl, 20px);
+  font-weight: 800;
+  color: var(--gs-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-kpi span {
+  font-size: var(--font-xs, 11px);
+  font-weight: 600;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Sections ──────────────────────────────────────────────── */
+.cf-block {
+  padding: 15px 17px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 14px;
+}
+
+.cf-block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: var(--font-sm, 12px);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gs-ink-faint);
+}
+
+.cf-block-note {
+  margin: -4px 0 12px;
+  font-size: var(--font-xs, 11px);
+  line-height: 1.55;
+  color: var(--gs-ink-faint);
+}
+
+.cf-block-note em { font-style: italic; }
+
+/* ── Barres « où le réseau faiblit » ───────────────────────── */
+.cf-checkbars {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.cf-checkbar-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.cf-checkbar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+}
+
+.cf-checkbar-value {
+  font-size: var(--font-xs, 11px);
+  font-weight: 800;
+  color: var(--gs-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cf-checkbar-value span { font-weight: 600; color: var(--gs-ink-faint); }
+
+.cf-sev {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cf-sev-blocking {
+  background: color-mix(in srgb, var(--gs-alert-strong) 14%, transparent);
+  color: var(--gs-alert-strong);
+}
+
+.cf-sev-warning {
+  background: color-mix(in srgb, var(--gs-alert) 16%, transparent);
+  color: var(--gs-alert);
+}
+
+/* ── Jauges ────────────────────────────────────────────────── */
+.cf-score { margin-top: 10px; }
+
+.cf-score-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 600;
+  color: var(--gs-ink-faint);
+}
+
+.cf-score-pct {
+  font-weight: 800;
+  color: var(--gs-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-score-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gs-ink-faint) 16%, transparent);
+  overflow: hidden;
+}
+
+.cf-score-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width var(--transition-slow, 0.4s ease);
+}
+
+.cf-fill-ok   { background: var(--gs-duty); }
+.cf-fill-warn { background: var(--gs-alert); }
+.cf-fill-bad  { background: var(--gs-alert-strong); }
+
+/* ── Barre d'outils ────────────────────────────────────────── */
+.cf-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3, 12px);
+}
+
+.cf-filters { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.cf-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.cf-filter em {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  background: color-mix(in srgb, var(--gs-ink-faint) 14%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-filter:hover { border-color: var(--gs-seal); color: var(--gs-seal); }
+
+.cf-filter-on {
+  color: var(--gs-on-tone);
+  background: var(--gs-seal);
+  border-color: var(--gs-seal);
+}
+
+/* Le compteur posé dans un filtre actif : son fond n'est pas déclaré ici, il
+   hérite du cachet de `.cf-filter-on`, et le voile blanc l'éclaircissait encore.
+   En thème sombre le cachet est déjà un ton clair, donc le voile le poussait
+   vers le blanc avec du texte blanc dessus. Un voile d'encre déplace toujours
+   la pastille du côté opposé au texte — il fonce en thème clair, il éclaircit
+   en thème sombre — si bien que l'écart de lecture ne fait que croître. */
+.cf-filter-on em {
+  background: color-mix(in srgb, var(--gs-ink) 22%, transparent);
+  color: var(--gs-on-tone);
+}
+
+.cf-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  min-width: 240px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 10px;
+  color: var(--gs-ink-faint);
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.cf-search:focus-within {
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gs-seal) 14%, transparent);
+}
+
+.cf-search input {
+  flex: 1;
+  padding: 8px 0;
+  font-size: var(--font-xs, 11px);
+  font-family: inherit;
+  color: var(--gs-ink);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+/* ── Cartes du réseau ──────────────────────────────────────── */
+.cf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
+  gap: var(--space-3, 12px);
+}
+
+.cf-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px 15px;
+  text-align: left;
+  font-family: inherit;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 13px;
+  cursor: pointer;
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.cf-card:hover {
+  border-color: var(--gs-seal);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px -10px color-mix(in srgb, var(--gs-seal) 55%, transparent);
+}
+
+.cf-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cf-card-ident { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.cf-card-name {
+  font-size: var(--font-sm, 12px);
+  font-weight: 800;
+  color: var(--gs-ink);
+  line-height: 1.3;
+}
+
+.cf-card-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-xs, 11px);
+  color: var(--gs-ink-faint);
+}
+
+.cf-off {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--gs-alert-strong) 14%, transparent);
+  color: var(--gs-alert-strong);
+}
+
+.cf-card-chevron { flex: 0 0 auto; color: var(--gs-ink-faint); }
+
+.cf-card:hover .cf-card-chevron { color: var(--gs-seal); }
+
+.cf-card-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--gs-rule);
+  font-size: var(--font-xs, 11px);
+  color: var(--gs-ink-faint);
+}
+
+.cf-card-foot > span { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── Verdicts ──────────────────────────────────────────────── */
+.cf-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 800;
+}
+
+.cf-verdict-sm { font-size: 10px; padding: 3px 9px; }
+
+.cf-verdict-ok {
+  background: color-mix(in srgb, var(--gs-duty) 12%, transparent);
+  color: var(--gs-duty);
+  border: 1px solid color-mix(in srgb, var(--gs-duty) 30%, transparent);
+}
+
+.cf-verdict-warn {
+  background: color-mix(in srgb, var(--gs-alert) 14%, transparent);
+  color: var(--gs-alert);
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 32%, transparent);
+}
+
+.cf-verdict-bad {
+  background: color-mix(in srgb, var(--gs-alert-strong) 12%, transparent);
+  color: var(--gs-alert-strong);
+  border: 1px solid color-mix(in srgb, var(--gs-alert-strong) 30%, transparent);
+}
+
+.cf-verdicts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--space-3, 12px);
+}
+
+.cf-verdict-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 13px 15px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-top: 3px solid var(--gs-rule);
+  border-radius: 12px;
+}
+
+.cf-vc-ok  { border-top-color: var(--gs-duty); }
+.cf-vc-bad { border-top-color: var(--gs-alert-strong); }
+
+.cf-vc-label {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gs-ink-faint);
+}
+
+.cf-verdict-card strong {
+  font-size: var(--font-lg, 17px);
+  font-weight: 800;
+  color: var(--gs-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-vc-note {
+  font-size: var(--font-xs, 11px);
+  line-height: 1.45;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Réparation groupée ────────────────────────────────────── */
+.cf-repair-all {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 11px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--gs-alert) 8%, var(--gs-paper));
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 28%, transparent);
+  border-radius: 12px;
+  color: var(--gs-alert);
+}
+
+.cf-repair-all > span {
+  flex: 1;
+  min-width: 200px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+}
+
+/* ── Liste des contrôles ───────────────────────────────────── */
+.cf-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cf-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 11px 13px;
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-left: 3px solid var(--gs-rule);
+  border-radius: 10px;
+}
+
+.cf-check-ok       { border-left-color: var(--gs-duty); }
+.cf-check-blocking { border-left-color: var(--gs-alert-strong); }
+.cf-check-warning  { border-left-color: var(--gs-alert); }
+
+.cf-check-icon { flex: 0 0 auto; display: flex; margin-top: 1px; }
+
+.cf-check-ok       .cf-check-icon { color: var(--gs-duty); }
+.cf-check-blocking .cf-check-icon { color: var(--gs-alert-strong); }
+.cf-check-warning  .cf-check-icon { color: var(--gs-alert); }
+
+.cf-check-body { flex: 1; min-width: 0; }
+
+.cf-check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--font-sm, 12px);
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.cf-check-detail {
+  margin-top: 2px;
+  font-size: var(--font-xs, 11px);
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+}
+
+.cf-check-hint {
+  margin-top: 3px;
+  font-size: var(--font-xs, 11px);
+  font-style: italic;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Boutons ───────────────────────────────────────────────── */
+.cf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: var(--font-xs, 11px);
+  font-family: inherit;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.cf-btn:disabled { opacity: 0.55; cursor: default; }
+
+.cf-btn-primary {
+  color: var(--gs-on-tone);
+  background: var(--gs-alert);
+  border: 1px solid var(--gs-alert);
+}
+
+/* Même correction que les autres boutons principaux : éclaircir n'enfonce
+   qu'en thème clair, alors qu'en thème sombre l'ambre est déjà un ton clair. */
+.cf-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gs-alert) 86%, #000);
+  border-color: color-mix(in srgb, var(--gs-alert) 86%, #000);
+}
+
+.cf-btn-fix {
+  color: var(--gs-alert);
+  background: var(--gs-paper);
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 42%, transparent);
+}
+
+.cf-btn-fix:hover:not(:disabled) {
+  color: var(--gs-on-tone);
+  background: var(--gs-alert);
+}
+
+.cf-btn-go {
+  color: var(--gs-seal);
+  background: var(--gs-paper);
+  border: 1px solid color-mix(in srgb, var(--gs-seal) 42%, transparent);
+}
+
+.cf-btn-go:hover { color: var(--gs-on-tone); background: var(--gs-seal); }
+
+/* ── Lignes génériques (directeurs, services, plannings) ───── */
+.cf-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 13px;
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-radius: 10px;
+}
+
+.cf-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.cf-row-name {
+  font-size: var(--font-sm, 12px);
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.cf-row-sub {
+  font-size: var(--font-xs, 11px);
+  color: var(--gs-ink-faint);
+}
+
+.cf-row-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cf-row-login {
+  font-size: var(--font-xs, 11px);
+  color: var(--gs-ink-faint);
+}
+
+/* ── Étiquettes ────────────────────────────────────────────── */
+.cf-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  background: color-mix(in srgb, var(--gs-ink-faint) 14%, transparent);
+  color: var(--gs-ink-soft);
+  white-space: nowrap;
+}
+
+.cf-tag-ok {
+  background: color-mix(in srgb, var(--gs-duty) 13%, transparent);
+  color: var(--gs-duty);
+}
+
+.cf-tag-warn {
+  background: color-mix(in srgb, var(--gs-alert) 15%, transparent);
+  color: var(--gs-alert);
+}
+
+.cf-tag-bad {
+  background: color-mix(in srgb, var(--gs-alert-strong) 13%, transparent);
+  color: var(--gs-alert-strong);
+}
+
+/* ── États et vides ────────────────────────────────────────── */
+.cf-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+  text-align: center;
+  font-size: var(--font-sm, 12px);
+  font-weight: 600;
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper);
+  border: 1px dashed var(--gs-rule);
+  border-radius: 14px;
+}
+
+.cf-empty-hint {
+  margin: 0;
+  max-width: 52ch;
+  font-size: var(--font-xs, 11px);
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.cf-empty {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: var(--font-xs, 11px);
+  line-height: 1.55;
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper-alt);
+  border: 1px dashed var(--gs-rule);
+  border-radius: 10px;
+}
+
+.cf-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  font-size: var(--font-xs, 11px);
+  line-height: 1.55;
+  color: var(--gs-ink-faint);
+}
+
+.cf-foot svg { flex: 0 0 auto; margin-top: 2px; }
+
+/* ── Petits écrans ─────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .cf-grid { grid-template-columns: 1fr; }
+  .cf-search { min-width: 100%; }
+  .cf-check { flex-wrap: wrap; }
+  .cf-btn { width: 100%; justify-content: center; }
+}

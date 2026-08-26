@@ -1,268 +1,254 @@
-import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, useNavigate } from 'react-router-dom';
-import { schedulesAPI, shiftsAPI, departmentsAPI, usersAPI } from '../../api';
-import { useAuthStore } from '../../store';
-import { useTranslation, formatDate } from '../../utils/helpers';
-import PlanningStateBadge from '../../components/planning/PlanningStateBadge';
+import React, { useMemo } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CalendarDays,
+  CheckCircle2,
+  ClipboardList,
+  FileClock,
+  Users,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
+import { schedulesAPI } from '../../api';
+import { useAuthStore } from '../../store';
+import {
+  GsBadge,
+  GsEmpty,
+  GsPageHeader,
+  GsPanel,
+  GsSkeleton,
+  GsStat,
+  GsStatRail,
+} from '../../components/gs';
+import { frenchRange, longFrenchDate } from '../../utils/frenchDates';
+import './ScheduleDetailPage.css';
 
-const DAYS_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+const WEEKDAYS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+
+const dateKey = (value) => String(value || '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] || '';
+
+const localToday = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+const daysBetween = (start, end) => {
+  const first = dateKey(start);
+  const last = dateKey(end);
+  if (!first || !last || first > last) return [];
+  const cursor = new Date(`${first}T12:00:00`);
+  const stop = new Date(`${last}T12:00:00`);
+  const result = [];
+  while (cursor <= stop) {
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+    result.push(key);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return result;
+};
+
+const dayOfWeek = (key) => new Date(`${key}T12:00:00`).getDay();
+
+const stateMeta = (schedule) => {
+  const state = schedule?.state || (schedule?.status === 'draft' ? 'brouillon' : '');
+  if (state === 'en_cours' || schedule?.status === 'active') return { label: 'En cours', tone: 'duty' };
+  if (state === 'soumis' || schedule?.status === 'submitted') return { label: 'En vigueur', tone: 'seal' };
+  if (state === 'termine' || schedule?.status === 'archived') return { label: 'Terminé', tone: 'quiet' };
+  return { label: 'Brouillon', tone: 'quiet' };
+};
+
+const normalizeShift = (shift) => ({
+  ...shift,
+  userId: shift?.user_id || shift?.userId,
+  date: dateKey(shift?.shift_date || shift?.shiftDate),
+  label: shift?.shift_type_name || shift?.shiftTypeName || 'De service',
+  status: shift?.status || 'planned',
+});
 
 export default function ScheduleDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user, hasPermission } = useAuthStore();
-  const { t } = useTranslation();
+  const { hasPermission } = useAuthStore();
   const qc = useQueryClient();
-
-  const [showAddShift, setShowAddShift] = useState(false);
-  const [showGenerate, setShowGenerate] = useState(false);
-
   const canEdit = hasPermission('schedules.update');
-  const canGenerate = hasPermission('schedules.generate');
 
   const { data: schedule, isLoading: loadingSchedule } = useQuery({
     queryKey: ['schedule', id],
-    queryFn: () => schedulesAPI.getOne(id).then(r => r.data.data),
+    queryFn: () => schedulesAPI.getOne(id).then((response) => response.data.data),
+    enabled: Boolean(id),
   });
 
+  // Keep the historical cache key for realtime consumers, but read the
+  // projection produced from metadata.spreadsheet.rows instead of `/shifts`.
   const { data: shiftsData, isLoading: loadingShifts } = useQuery({
     queryKey: ['schedule-shifts', id],
-    queryFn: () => shiftsAPI.getAll({ scheduleId: id, limit: 500 }).then(r => r.data.data),
-    enabled: !!id,
+    queryFn: () => schedulesAPI.getOne(id).then((response) => response.data.data?.shifts || []),
+    enabled: Boolean(id),
   });
 
   const { data: conflicts = [] } = useQuery({
     queryKey: ['schedule-conflicts', id],
-    queryFn: () => schedulesAPI.getConflicts(id).then(r => r.data.data),
-    enabled: !!id,
+    queryFn: () => schedulesAPI.getConflicts(id).then((response) => response.data.data),
+    enabled: Boolean(id),
   });
 
-  const shifts = shiftsData || [];
+  const shifts = useMemo(() => {
+    const source = Array.isArray(shiftsData) && shiftsData.length
+      ? shiftsData
+      : Array.isArray(schedule?.shifts) ? schedule.shifts : [];
+    return source.map(normalizeShift).filter((shift) => shift.userId && shift.date);
+  }, [schedule?.shifts, shiftsData]);
+
+  const days = useMemo(() => daysBetween(schedule?.start_date, schedule?.end_date), [schedule?.start_date, schedule?.end_date]);
+  const staff = useMemo(() => {
+    const byId = new Map();
+    shifts.forEach((shift) => {
+      if (!byId.has(shift.userId)) {
+        byId.set(shift.userId, {
+          id: shift.userId,
+          firstName: shift.first_name || shift.firstName || '',
+          lastName: shift.last_name || shift.lastName || '',
+          grade: shift.grade || shift.role_name || '',
+        });
+      }
+    });
+    return [...byId.values()].sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, 'fr'));
+  }, [shifts]);
+  const shiftMap = useMemo(() => {
+    const map = new Map();
+    shifts.forEach((shift) => {
+      const key = `${shift.userId}|${shift.date}`;
+      const current = map.get(key) || [];
+      current.push(shift);
+      map.set(key, current);
+    });
+    return map;
+  }, [shifts]);
+  const coveredDays = useMemo(() => new Set(shifts.map((shift) => shift.date)).size, [shifts]);
+  const meta = stateMeta(schedule);
 
   const submitMutation = useMutation({
     mutationFn: () => schedulesAPI.submit(id, {}),
-    onSuccess: (res) => {
-      toast.success(res?.data?.message || 'Planning envoyé et mis en vigueur');
-      qc.invalidateQueries(['schedule', id]);
+    onSuccess: (response) => {
+      toast.success(response?.data?.message || 'Planning envoyé et mis en vigueur');
+      qc.invalidateQueries({ queryKey: ['schedule', id] });
+      qc.invalidateQueries({ queryKey: ['schedules'] });
     },
-  });
-
-  // Il n'y a plus d'approbation ni de refus : l'envoi met le planning en
-  // marche directement. Les surveillants proposent des modifications.
-
-  const generateMutation = useMutation({
-    mutationFn: (config) => schedulesAPI.generate({ scheduleId: id, ...config }),
-    onSuccess: (res) => {
-      toast.success(`${res.data.data?.length || 0} gardes générées automatiquement`);
-      qc.invalidateQueries(['schedule-shifts', id]);
-      setShowGenerate(false);
-    },
-    onError: (err) => toast.error(err.response?.data?.message || 'Erreur de génération'),
+    onError: (error) => toast.error(error?.response?.data?.message || 'Impossible de mettre le planning en vigueur'),
   });
 
   if (loadingSchedule) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300 }}>
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" className="animate-spin">
-          <path d="M21 12a9 9 0 11-6.219-8.56"/>
-        </svg>
+      <div className="gsdl-page gs-clamp">
+        <GsSkeleton variant="block" count={3} />
       </div>
     );
   }
 
-  if (!schedule) return <div style={{ color: 'var(--text-muted)', padding: 40 }}>Planning introuvable</div>;
-
-  // Construire le calendrier du planning
-  const startDate = new Date(schedule.start_date);
-  const endDate = new Date(schedule.end_date);
-  const days = [];
-  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-    days.push(new Date(d));
+  if (!schedule) {
+    return (
+      <div className="gsdl-page gs-clamp">
+        <GsEmpty
+          icon={<ClipboardList size={28} />}
+          title="Planning introuvable"
+          hint="Ce planning n'est plus accessible dans votre périmètre."
+          actions={<button type="button" className="gs-btn" onClick={() => navigate('/schedules')}><ArrowLeft size={14} /> Retour aux plannings</button>}
+        />
+      </div>
+    );
   }
 
-  // Grouper les gardes par médecin et par date
-  const doctors = [...new Map(shifts.map(s => [s.user_id, { id: s.user_id, firstName: s.first_name, lastName: s.last_name, grade: s.grade }])).values()];
-  const shiftMap = shifts.reduce((acc, s) => {
-    const key = `${s.user_id}|${s.shift_date?.split('T')[0] || s.shift_date}`;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(s);
-    return acc;
-  }, {});
+  const openSpreadsheet = () => navigate(`/chef-de-service?tab=schedules&view=spreadsheet&scheduleId=${encodeURIComponent(id)}`);
 
   return (
-    <div>
-      {/* Header */}
-      <div className="page-header">
-        <div>
-          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/schedules')} style={{ marginBottom: 8 }}>
-            ← Retour aux plannings
-          </button>
-          <h1 className="page-title">{schedule.name}</h1>
-          <p className="page-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
-            <span>{schedule.department_name}</span>
-            <span>·</span>
-            <span>{formatDate(schedule.start_date)} → {formatDate(schedule.end_date)}</span>
-            <span>·</span>
-            <PlanningStateBadge
-              state={schedule.state}
-              status={schedule.status}
-              startDate={schedule.start_date}
-              endDate={schedule.end_date}
-              size="sm"
-            />
-          </p>
-        </div>
-        <div className="quick-actions">
-          {conflicts.length > 0 && (
-            <span className="badge badge-absent" style={{ padding: '6px 12px' }}>
-              ⚠ {conflicts.length} conflit(s)
-            </span>
-          )}
-          {canGenerate && schedule.status === 'draft' && (
-            <button className="btn btn-secondary" onClick={() => setShowGenerate(true)}>
-              ⚡ Génération auto
+    <div className="gsdl-page gs-clamp">
+      <GsPageHeader
+        eyebrow="Détail du planning"
+        title={schedule.name}
+        subtitle={schedule.department_name || schedule.department_name_ar || 'Service non précisé'}
+        meta={[
+          { icon: <CalendarDays size={14} />, value: frenchRange(dateKey(schedule.start_date), dateKey(schedule.end_date)) },
+          { icon: <Users size={14} />, value: `${staff.length} personnel(s)` },
+          { value: <GsBadge tone={meta.tone}>{meta.label}</GsBadge> },
+        ]}
+        actions={(
+          <div className="gsdl-actions">
+            <button type="button" className="gs-btn" onClick={() => navigate('/schedules')}>
+              <ArrowLeft size={14} /> Plannings
             </button>
-          )}
-          {canEdit && schedule.status === 'draft' && (
-            <button className="btn btn-primary btn-sm" onClick={() => { setShowAddShift(true); }}>
-              + Ajouter une garde
-            </button>
-          )}
-          {schedule.status === 'draft' && hasPermission('schedules.submit') && (
-            <button className="btn btn-warning" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
-              Envoyer et mettre en marche
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Alertes conflits */}
-      {conflicts.length > 0 && (
-        <div className="alert alert-danger mb-6">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <div>
-            <strong>{conflicts.length} conflit(s) détecté(s)</strong>
-            <ul style={{ marginTop: 6, paddingLeft: 16 }}>
-              {conflicts.slice(0, 5).map((c, i) => (
-                <li key={i} style={{ fontSize: 'var(--font-xs)', marginBottom: 2 }}>
-                  {c.message || JSON.stringify(c)}
-                </li>
-              ))}
-            </ul>
+            {canEdit && ['draft', 'submitted', 'active'].includes(schedule.status) ? (
+              <button type="button" className="gs-btn is-primary" onClick={openSpreadsheet}>
+                <ClipboardList size={14} /> Ouvrir le tableur
+              </button>
+            ) : null}
+            {schedule.status === 'draft' && hasPermission('schedules.submit') ? (
+              <button type="button" className="gs-btn is-primary" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
+                <CheckCircle2 size={14} /> {submitMutation.isPending ? 'Envoi...' : 'Mettre en vigueur'}
+              </button>
+            ) : null}
           </div>
-        </div>
-      )}
+        )}
+      />
 
-      {/* Résumé */}
-      <div className="kpi-grid mb-6" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-        {[
-          { label: 'Total gardes', value: shifts.length },
-          { label: 'Médecins', value: doctors.length },
-          { label: 'Jours couverts', value: days.length },
-          { label: 'Conflits', value: conflicts.length, color: conflicts.length > 0 ? 'var(--color-danger)' : 'var(--color-success)' },
-        ].map(s => (
-          <div key={s.label} className="kpi-card" style={{ '--kpi-color': s.color || 'var(--color-primary)', '--kpi-color-10': `${s.color || 'var(--color-primary)'}18` }}>
-            <div className="kpi-value" style={{ color: s.color }}>{s.value}</div>
-            <div className="kpi-label">{s.label}</div>
-          </div>
-        ))}
-      </div>
+      {conflicts.length > 0 ? (
+        <GsPanel tone="alert" title="Points à vérifier" sub={`${conflicts.length} conflit(s) détecté(s)`} icon={<AlertTriangle size={16} />}>
+          <ul className="gsdl-conflict-list">
+            {conflicts.slice(0, 8).map((conflict, index) => <li key={conflict.id || `${conflict.type || 'conflict'}-${index}`}>{conflict.message || JSON.stringify(conflict)}</li>)}
+          </ul>
+        </GsPanel>
+      ) : null}
 
-      {/* Tableau type Gantt / Calendrier médecin×date */}
-      {loadingShifts ? (
-        <div className="skeleton" style={{ height: 300, borderRadius: 12 }} />
-      ) : doctors.length === 0 ? (
-        <div className="card" style={{ padding: '60px 20px', textAlign: 'center' }}>
-          <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-md)' }}>
-            {schedule.status === 'draft' ? 'Aucune garde — utilisez la génération automatique ou ajoutez manuellement' : 'Aucune garde dans ce planning'}
-          </p>
-          {canGenerate && schedule.status === 'draft' && (
-            <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => setShowGenerate(true)}>
-              ⚡ Générer les gardes automatiquement
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="card" style={{ overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
+      <GsStatRail>
+        <GsStat label="Affectations" value={shifts.length} tone="duty" hint="Personnel × jour" />
+        <GsStat label="Personnel de service" value={staff.length} hint="Agents distincts" />
+        <GsStat label="Jours couverts" value={coveredDays} hint={`sur ${days.length || 0} jour(s)`} />
+        <GsStat label="Conflits" value={conflicts.length} tone={conflicts.length ? 'alert' : 'seal'} hint={conflicts.length ? 'À examiner' : 'Aucun signalement'} />
+      </GsStatRail>
+
+      <GsPanel
+        title="Registre quotidien"
+        sub={loadingShifts ? 'Lecture des affectations...' : 'Une case cochée représente une journée de service dans le Tableur.'}
+        icon={<CalendarDays size={16} />}
+        flush
+      >
+        {loadingShifts ? <GsSkeleton variant="rows" count={7} /> : staff.length === 0 ? (
+          <GsEmpty
+            icon={<FileClock size={26} />}
+            title="Aucune affectation enregistrée"
+            hint={schedule.status === 'draft' ? 'Ouvrez le tableur pour affecter le personnel et les périodes.' : 'Ce planning ne contient aucune journée de service.'}
+            actions={canEdit && schedule.status === 'draft' ? <button type="button" className="gs-btn is-primary" onClick={openSpreadsheet}>Ouvrir le tableur</button> : null}
+          />
+        ) : (
+          <div className="gsdl-grid-wrap">
+            <table className="gsdl-grid" aria-label="Affectations par personnel et par jour">
               <thead>
                 <tr>
-                  <th style={{
-                    padding: '10px 16px', textAlign: 'left',
-                    fontSize: 'var(--font-xs)', fontWeight: 700, color: 'var(--text-muted)',
-                    background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)',
-                    position: 'sticky', left: 0, zIndex: 2,
-                    minWidth: 160,
-                  }}>
-                    Médecin
-                  </th>
-                  {days.map(d => {
-                    const dateStr = d.toISOString().split('T')[0];
-                    const isWeekend = [0, 6].includes(d.getDay());
-                    const isToday = dateStr === new Date().toISOString().split('T')[0];
-                    return (
-                      <th key={dateStr} style={{
-                        padding: '6px 4px', textAlign: 'center',
-                        fontSize: 10, color: isToday ? 'var(--color-primary-light)' : isWeekend ? 'var(--color-warning)' : 'var(--text-muted)',
-                        fontWeight: isToday ? 800 : 500,
-                        background: isToday ? 'var(--color-primary-10)' : isWeekend ? 'rgba(245,158,11,0.05)' : 'var(--bg-elevated)',
-                        borderBottom: '1px solid var(--border-subtle)',
-                        minWidth: 42,
-                      }}>
-                        <div>{DAYS_FR[d.getDay()]}</div>
-                        <div style={{ fontWeight: 800, fontSize: 11 }}>{d.getDate()}</div>
-                      </th>
-                    );
+                  <th className="gsdl-person-col" scope="col">Personnel</th>
+                  {days.map((day) => {
+                    const weekend = [0, 6].includes(dayOfWeek(day));
+                    const today = day === localToday();
+                    return <th key={day} className={[weekend ? 'is-weekend' : '', today ? 'is-today' : ''].filter(Boolean).join(' ')} scope="col"><span>{WEEKDAYS[dayOfWeek(day)]}</span><b>{day.slice(8)}</b></th>;
                   })}
                 </tr>
               </thead>
               <tbody>
-                {doctors.map((doctor, dIdx) => (
-                  <tr key={doctor.id}>
-                    <td style={{
-                      padding: '8px 16px',
-                      background: 'var(--bg-surface)',
-                      borderBottom: '1px solid var(--border-subtle)',
-                      position: 'sticky', left: 0, zIndex: 1,
-                    }}>
-                      <p style={{ fontWeight: 600, fontSize: 'var(--font-xs)', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                        Dr. {doctor.firstName?.[0]}. {doctor.lastName}
-                      </p>
-                      <p style={{ fontSize: 10, color: 'var(--text-muted)' }}>{doctor.grade}</p>
-                    </td>
-                    {days.map(d => {
-                      const dateStr = d.toISOString().split('T')[0];
-                      const key = `${doctor.id}|${dateStr}`;
-                      const cellShifts = shiftMap[key] || [];
-                      const isWeekend = [0, 6].includes(d.getDay());
-
+                {staff.map((person) => (
+                  <tr key={person.id}>
+                    <th className="gsdl-person" scope="row">
+                      <strong>{person.firstName} {person.lastName}</strong>
+                      <span>{person.grade || 'Fonction non précisée'}</span>
+                    </th>
+                    {days.map((day) => {
+                      const entries = shiftMap.get(`${person.id}|${day}`) || [];
+                      const weekend = [0, 6].includes(dayOfWeek(day));
                       return (
-                        <td key={dateStr} style={{
-                          borderBottom: '1px solid var(--border-subtle)',
-                          borderRight: '1px solid var(--border-subtle)',
-                          padding: 2, textAlign: 'center',
-                          background: isWeekend ? 'rgba(245,158,11,0.03)' : 'transparent',
-                          verticalAlign: 'middle',
-                        }}>
-                          {cellShifts.map(s => (
-                            <div key={s.id} style={{
-                              background: `${s.shift_color || '#1B4FCA'}30`,
-                              borderRadius: 3, padding: '3px 4px',
-                              fontSize: 9, fontWeight: 700,
-                              color: s.shift_color || 'var(--color-primary-light)',
-                              margin: 1,
-                              title: s.shift_type_name,
-                              opacity: s.status === 'cancelled' ? 0.3 : 1,
-                              borderLeft: s.status === 'absent' ? '3px solid var(--color-danger)' : 'none',
-                              cursor: 'pointer',
-                            }}
-                            title={`${s.shift_type_name} — ${t(`status.${s.status}`)}`}
-                            >
-                              {s.shift_type_name?.substring(0, 3).toUpperCase()}
-                            </div>
+                        <td key={day} className={weekend ? 'is-weekend' : undefined}>
+                          {entries.map((entry) => (
+                            <span key={entry.id || `${entry.userId}-${entry.date}-${entry.label}`} className={`gsdl-duty${entry.status === 'cancelled' ? ' is-cancelled' : ''}`} title={`${entry.label} — ${entry.status}`}>
+                              {entry.label.slice(0, 3).toUpperCase()}
+                            </span>
                           ))}
                         </td>
                       );
@@ -272,81 +258,17 @@ export default function ScheduleDetailPage() {
               </tbody>
             </table>
           </div>
+        )}
+      </GsPanel>
 
-          {/* Légende types de garde */}
-          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-            {[...new Map(shifts.map(s => [s.shift_type_name, s])).values()].map(s => (
-              <div key={s.shift_type_id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 12, height: 12, borderRadius: 2, background: `${s.shift_color || '#1B4FCA'}40`, border: `1px solid ${s.shift_color || '#1B4FCA'}` }} />
-                <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>{s.shift_type_name}</span>
-              </div>
-            ))}
+      {shifts.length > 0 ? (
+        <GsPanel title="Périmètre du registre" sub="Les affectations sont calculées depuis la version actuelle du Tableur." icon={<ClipboardList size={16} />}>
+          <div className="gsdl-footnote">
+            <span>Du {longFrenchDate(dateKey(schedule.start_date))} au {longFrenchDate(dateKey(schedule.end_date))}</span>
+            <span>{shifts.length} affectation(s) matérialisée(s)</span>
           </div>
-        </div>
-      )}
-
-      {/* Modal Génération Auto */}
-      {showGenerate && (
-        <GenerateModal
-          schedule={schedule}
-          onClose={() => setShowGenerate(false)}
-          onGenerate={(config) => generateMutation.mutate(config)}
-          isPending={generateMutation.isPending}
-        />
-      )}
-    </div>
-  );
-}
-
-function GenerateModal({ schedule, onClose, onGenerate, isPending }) {
-  const [config, setConfig] = useState({
-    algorithm: 'round_robin',
-    minRestHours: 11,
-    maxShiftsPerWeek: 3,
-  });
-
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <div className="modal-header">
-          <h2 className="modal-title">⚡ Génération automatique</h2>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}>✕</button>
-        </div>
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="alert alert-warning">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            Les gardes existantes seront conservées. Seules les dates non couvertes seront complétées.
-          </div>
-          <div className="form-group">
-            <label className="form-label">Algorithme</label>
-            <select className="form-control" value={config.algorithm} onChange={e => setConfig(c => ({ ...c, algorithm: e.target.value }))}>
-              <option value="round_robin">Round-Robin équitable</option>
-              <option value="fair">Basé sur la charge (équilibre)</option>
-            </select>
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Repos min. entre gardes (h)</label>
-              <input type="number" className="form-control" value={config.minRestHours} onChange={e => setConfig(c => ({ ...c, minRestHours: parseInt(e.target.value) }))} min={8} max={24} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Max gardes / semaine</label>
-              <input type="number" className="form-control" value={config.maxShiftsPerWeek} onChange={e => setConfig(c => ({ ...c, maxShiftsPerWeek: parseInt(e.target.value) }))} min={1} max={7} />
-            </div>
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>Annuler</button>
-          <button className="btn btn-primary" onClick={() => onGenerate(config)} disabled={isPending}>
-            {isPending ? (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-                Génération en cours...
-              </span>
-            ) : '⚡ Générer maintenant'}
-          </button>
-        </div>
-      </div>
+        </GsPanel>
+      ) : null}
     </div>
   );
 }

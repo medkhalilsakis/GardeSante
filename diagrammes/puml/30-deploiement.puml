@@ -1,0 +1,133 @@
+' ============================================================================
+' GardeSanté — Diagramme de déploiement
+'
+' Architecture à trois niveaux, entièrement interne : aucun service tiers,
+' aucun appel sortant. Ce choix est une contrainte du projet — la plateforme
+' doit pouvoir tourner sur l'infrastructure d'un hôpital public.
+'
+' Sources vérifiées :
+'   backend/index.js
+'     :8       PORT = process.env.PORT || 5000
+'     :67-104  repli d'écoute : sur EADDRINUSE, tentative sur le port suivant
+'     :22-33   socket.io, origines multiples séparées par des virgules
+'     :38-56   salons : user:<id>, establishment:<id>, department:<id>
+'     :6       startScheduleActivationJob
+'   backend/src/app.js
+'     :49-52   helmet, sans CSP ni COEP
+'     :56-69   CORS multi-origines, credentials, méthodes explicites
+'     :71-85   500 requêtes / 15 min sur /api ; 20 / 15 min sur /api/auth/login
+'     :90-91   corps JSON et formulaires plafonnés à 10 Mo
+'     :108     /uploads servi en statique
+'     :113-132 vingt et quelques routeurs montés sous /api
+'   backend/src/jobs/schedule-activation.js:88  intervalle de 30 minutes
+'   backend/package.json  dépendances de production
+'   frontend/package.json  Vite, React 19, react-query, socket.io-client
+'
+' NOTE : `nodemailer` est déclaré dans les dépendances mais n'est importé par
+' aucun module — aucun courriel n'est envoyé. Aucun nœud de messagerie ne
+' figure donc sur ce diagramme.
+' ============================================================================
+@startuml 30-deploiement
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam nodesep 22
+skinparam ranksep 32
+skinparam node {
+  BackgroundColor #F8FAFC
+  BorderColor #1B4FCA
+  FontStyle bold
+}
+skinparam database {
+  BackgroundColor #F3E8FF
+  BorderColor #7A3E9D
+  FontStyle bold
+}
+skinparam component {
+  BackgroundColor #FFFFFF
+  BorderColor #0F766E
+}
+skinparam artifact {
+  BackgroundColor #FFFFFF
+  BorderColor #B4530A
+}
+skinparam folder {
+  BackgroundColor #FFFDF5
+  BorderColor #B4530A
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Déploiement — GardeSanté, architecture trois niveaux entièrement interne
+
+node "Poste de travail\n<<navigateur>>" as CLIENT {
+  artifact "Application React 19\nservie en fichiers statiques" as SPA
+  component "Client HTTP\n<<axios>>\net cache de requêtes" as AX
+  component "Client temps réel\n<<socket.io-client>>" as IOC
+  SPA -down-> AX
+  SPA -down-> IOC
+}
+
+node "Serveur applicatif — Node.js" as SERVEUR {
+
+  component "Serveur HTTP\nExpress 5, port 5000" as EXPRESS
+
+  component "Chaîne de sécurité\n--\nen-têtes de sécurité\norigines autorisées déclarées\n500 requêtes / 15 min sur l'API\n20 tentatives / 15 min à la connexion\njeton d'accès vérifié\nhabilitations relues en base" as SEC
+
+  component "Modules métier\n--\nplannings et tableur\nmoteur de règles\nremplacements en surcouche\nabsences et congés\nprêts de personnel\njournal et traçabilité\nadministration" as METIER
+
+  component "Serveur temps réel\nsocket.io\nsalons agent, établissement, service" as IO
+
+  component "Tâche planifiée\nmise en vigueur des plannings\ntoutes les 30 minutes" as JOB
+
+  component "Fabrique de documents\nExcel, PDF, CSV\net traitement des images" as EXPORT
+
+  EXPRESS -down-> SEC
+  SEC -down-> METIER
+  METIER -down-> EXPORT
+}
+
+database "PostgreSQL 16\n--\ncomptes, rôles et habilitations\nplannings — grille en JSON\nremplacements et binômes\nabsences, congés et prêts\njournal d'activité <<immuable>>" as PG
+
+folder "Système de fichiers\nphotos de profil\net pièces jointes" as FS
+
+AX -down-> EXPRESS : "HTTPS / JSON\nrequête authentifiée par jeton"
+IOC -down-> IO : "WebSocket, repli en\ninterrogation longue"
+IO -up-> IOC : "diffusion vers\nles salons concernés"
+
+METIER -down-> PG : "SQL par pool de connexions,\nécritures groupées en transaction"
+JOB -down-> PG : "balayage périodique"
+EXPORT -right-> FS
+
+note bottom of CLIENT
+  **Le poste de travail ne détient aucune donnée durable.** Le jeton d'accès
+  vaut 24 heures, le jeton de renouvellement 7 jours. Les habilitations ne
+  sont jamais inscrites dans le jeton : elles sont relues en base à chaque
+  requête, si bien qu'un droit retiré prend effet immédiatement, sans
+  attendre l'expiration de la session.
+end note
+
+note bottom of SERVEUR
+  **Aucun appel sortant.** Pas de service tiers, pas de passerelle de
+  paiement, pas d'hébergement externe de fichiers, pas de serveur de
+  messagerie : la totalité du traitement reste sur l'infrastructure de
+  l'établissement. Les documents Excel et PDF sont fabriqués sur le serveur
+  et renvoyés dans la réponse.
+end note
+
+note bottom of PG
+  Une seule base porte tous les établissements. Le cloisonnement est
+  applicatif : chaque requête est bornée par l'établissement de l'acteur.
+  Le compte de la plateforme échappe à cette borne, par construction.
+end note
+
+legend right
+  Trois niveaux : navigateur, serveur applicatif, base de données. Un seul hôte suffit à tout exécuter.
+  Le temps réel double le canal HTTP ; en cas de coupure du socket, les écrans se rafraîchissent d'eux-mêmes toutes les 60 secondes.
+endlegend
+
+@enduml

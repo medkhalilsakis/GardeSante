@@ -1,408 +1,705 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * « Ma journée » — l'écran d'atterrissage (`/dashboard`)
+ * ═════════════════════════════════════════════════════
+ * Premier lien du menu, et la route d'accueil du chef de service, du surveillant
+ * de service et du surveillant général. Il lisait quatre sources bâties sur la
+ * table `shifts`, que plus rien n'alimente depuis la suppression des codes de
+ * garde : « 0 garde du jour » quand le journal en voyait huit, un histogramme de
+ * barres nulles, trois barres de couverture à 0 %, et un « taux de couverture :
+ * 100 % » calculé sur six lignes héritées — pire que du vide, une fausse
+ * assurance. (Défaut D4 de l'audit.)
+ *
+ * Il ne cherche plus à être un second tableau de bord métier : celui de chaque
+ * rôle reste à un clic, en tête d'écran. Il répond à une seule question — « qu'est-ce
+ * que je fais maintenant ? » — dans cet ordre : ce qui attend ma décision, qui est
+ * de service, ce qui cloche, mes plannings, les consignes, la charge du mois.
+ *
+ * Toutes les sources tiennent réellement des données, et **aucune ne lit
+ * `shifts`** :
+ *   • `/api/journal/overview` — la garde du jour, les plannings en cours, les
+ *     compteurs de la portée (le serveur décide de la portée, pas le client) ;
+ *   • `/api/journal/calls`    — l'appel du jour, pour distinguer « pointé » de
+ *     « à pointer » ; même vérité que l'écran « Appel du jour » ;
+ *   • `/api/chef/overview`    — les files d'attente et la vigilance d'un service.
+ *     Appelé pour le chef et le surveillant de service **seulement** : sans
+ *     `?departmentId`, ce contrôleur retourne au directeur et au surveillant
+ *     général le premier service par ordre alphabétique, ce qui serait faux ici ;
+ *   • `/api/supervision/conflicts` — la même vigilance à l'échelle de l'hôpital,
+ *     réservée à la supervision et à la direction (403 pour un chef) ;
+ *   • `/api/journal/alerts`, `/api/notes`, `/api/staff-loans`,
+ *     `/api/statistics/scoped` — alertes ouvertes, consignes, prêts, charge.
+ *
+ * Les clés react-query sont celles que `hooks/useRealtime.js` invalide déjà
+ * (`journal-overview`, `journal`, `journal-alerts`, `chef-overview`,
+ * `supervision-conflicts`, `staff-loans`, `notes`) : l'écran est temps réel sans
+ * une ligne ajoutée à ce hook.
+ */
+
+import React, { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { statisticsAPI, shiftsAPI, schedulesAPI, replacementsAPI } from '../../api';
-import { useAuthStore } from '../../store';
-import { useTranslation, formatDate, getStatusBadgeClass, exportToPDF, exportToExcel } from '../../utils/helpers';
-import ContextBadge from '../../components/layout/ContextBadge';
+import { Link, useNavigate } from 'react-router-dom';
 import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-  ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend
-} from 'recharts';
-import toast from 'react-hot-toast';
+  ClipboardCheck, Users, TriangleAlert, BellRing, FileText,
+  Scale, CalendarOff, Inbox, ArrowRight,
+} from 'lucide-react';
+import {
+  journalAPI, chefOverviewAPI, supervisionAPI,
+  staffLoansAPI, notesAPI, scopedStatsAPI,
+} from '../../api';
+import { useAuthStore } from '../../store';
+import { planningScreen } from '../../utils/notificationTarget';
+import { fullFrenchDate, frenchRange, shortFrenchDate } from '../../utils/frenchDates';
+import ContextBadge from '../../components/layout/ContextBadge';
+import PlanningStateBadge from '../../components/planning/PlanningStateBadge';
+import {
+  GsPageHeader, GsPanel, GsStat, GsStatRail,
+  GsTable, GsBadge, GsEmpty, GsSkeleton,
+} from '../../components/gs';
+import './dashboard.css';
 
-// ============================================================
-// COMPOSANT COMMUN: KPI Card
-// ============================================================
-export const KpiCard = ({ icon, label, value, sublabel, color = 'var(--color-primary)', trend, loading }) => (
-  <div className="kpi-card" style={{ '--kpi-color': color, '--kpi-color-10': `${color}18` }}>
-    <div className="kpi-icon">{icon}</div>
-    {loading ? (
-      <div className="skeleton" style={{ height: 36, width: 80, marginBottom: 8 }} />
-    ) : (
-      <div className="kpi-value">{value}</div>
-    )}
-    <div className="kpi-label">{label}</div>
-    {sublabel && <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 4 }}>{sublabel}</div>}
-    {trend !== undefined && (
-      <div className={`kpi-change ${trend >= 0 ? 'up' : 'down'}`}>
-        {trend >= 0 ? '↑' : '↓'} {Math.abs(trend)}%
-      </div>
-    )}
-  </div>
-);
+// ── Vocabulaire ────────────────────────────────────────────────────────────
 
-// ============================================================
-// TOOLTIP PERSONNALISÉ pour Recharts
-// ============================================================
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{
-      background: 'var(--bg-card)', border: '1px solid var(--border-default)',
-      borderRadius: 8, padding: '10px 14px', fontSize: 'var(--font-xs)',
-    }}>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: 6 }}>{label}</p>
-      {payload.map((p) => (
-        <p key={p.name} style={{ color: p.color, fontWeight: 600 }}>
-          {p.name}: {p.value}
-        </p>
-      ))}
-    </div>
-  );
+const ROLE_LABEL = {
+  department_head: 'Chef de service',
+  service_supervisor: 'Surveillant de service',
+  general_supervisor: 'Surveillant général',
+  hospital_admin: 'Administration de l’hôpital',
+  director: 'Directeur',
+  super_admin: 'Super administrateur',
 };
 
-// ============================================================
-// DASHBOARD PRINCIPAL
-// ============================================================
+/** L'écran métier du rôle : « Ma journée » y renvoie, il ne le duplique pas. */
+const HOME_SCREEN = {
+  department_head: { path: '/chef-de-service', label: 'Planning des gardes' },
+  service_supervisor: { path: '/surveillant', label: 'Journal de service' },
+  general_supervisor: { path: '/supervision', label: 'Supervision de l’hôpital' },
+  hospital_admin: { path: '/supervision', label: 'Supervision de l’hôpital' },
+};
+
+const SEVERITY_ORDER = { urgent: 0, critical: 0, error: 1, warning: 2, info: 3 };
+
+const SEVERITY_LABEL = {
+  urgent: 'Urgent',
+  critical: 'Critique',
+  error: 'À corriger',
+  warning: 'À surveiller',
+  info: 'Pour information',
+};
+
+/** Les trois règles de `conflict-rules.js`, nommées pour un lecteur. */
+const CONFLICT_LABEL = {
+  double_booking: 'Double affectation',
+  on_leave: 'Agent en congé',
+  uncovered_day: 'Journée découverte',
+};
+
+const NOTE_CATEGORY = {
+  note: 'Note',
+  circulaire: 'Circulaire',
+  directive: 'Directive',
+  info: 'Information',
+};
+
+const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+
+/** `HH:MM:SS` comme `HH:MM` : une heure de garde se lit à la minute. */
+const hour = (v) => (v ? String(v).slice(0, 5) : null);
+
+/** Un horodatage `timestamptz` réduit à sa clé de date, sans construire de `Date`. */
+const dayOf = (v) => (v ? String(v).slice(0, 10) : '');
+
+const toneOfSeverity = (severity) =>
+  (severity === 'critical' || severity === 'urgent' || severity === 'error' ? 'alert' : undefined);
+
+/**
+ * Ce qui attend passe devant ce qui est réglé. L'ordre nommé est conservé à
+ * l'intérieur de chaque groupe (`sort` est stable) : les files gardent leur
+ * place les unes par rapport aux autres, une file vide descend simplement.
+ */
+const byPending = (rows) => [...rows].sort(
+  (a, b) => (Number(b.count) > 0 ? 1 : 0) - (Number(a.count) > 0 ? 1 : 0)
+);
+
+// ── Écran ──────────────────────────────────────────────────────────────────
+
 export default function DashboardPage() {
   const { user, hasPermission } = useAuthStore();
-  const { t } = useTranslation();
   const navigate = useNavigate();
+  const role = user?.roleCode;
 
-  const isManagement   = ['super_admin', 'hospital_admin', 'director', 'general_supervisor'].includes(user?.roleCode);
-  const isDepartmentHead = user?.roleCode === 'department_head';
-  const isDoctor       = ['senior_doctor', 'resident'].includes(user?.roleCode);
-
-  // ── Redirections par rôle ──────────────────────────────────
+  // Redirections par rôle — conservées telles quelles : le Super Admin et le
+  // directeur ont leur propre écran d'accueil.
   useEffect(() => {
-    if (user?.roleCode === 'super_admin') navigate('/admin', { replace: true });
-    else if (user?.roleCode === 'director') navigate('/director', { replace: true });
-  }, [user?.roleCode]);
+    if (role === 'super_admin') navigate('/admin', { replace: true });
+    else if (role === 'director') navigate('/director', { replace: true });
+  }, [role, navigate]);
 
-  // ── Eviter de charger si on va être redirigé ──────────────
-  const willRedirect = user?.roleCode === 'super_admin' || user?.roleCode === 'director';
+  const willRedirect = role === 'super_admin' || role === 'director';
 
+  // Deux portées, deux sources de vigilance et de files d'attente. Le serveur
+  // borne les deux ; ce partage évite seulement d'appeler un contrôleur qui
+  // répondrait à côté (ou 403) pour le rôle en question.
+  const isChefScope = role === 'department_head' || role === 'service_supervisor';
+  const isWatcher = role === 'general_supervisor' || role === 'hospital_admin';
 
-  // KPIs
-  const { data: dashData, isLoading: loadingDash } = useQuery({
-    queryKey: ['dashboard', user?.establishmentId],
-    queryFn: () => statisticsAPI.getDashboard().then(r => r.data.data),
-    refetchInterval: 30000,
+  const screen = planningScreen(role);
+  const replacementsPath = screen.deepLink ? `${screen.path}?tab=remplacements` : screen.path;
+  const home = HOME_SCREEN[role];
+
+  // ── La garde du jour, pour les quatre rôles ──────────────────────────────
+  const overviewQ = useQuery({
+    queryKey: ['journal-overview'],
+    queryFn: () => journalAPI.getOverview().then((r) => r.data.data),
     enabled: !willRedirect,
-  });
-
-  // Gardes du jour
-  const { data: todayShifts = [], isLoading: loadingShifts } = useQuery({
-    queryKey: ['today-shifts'],
-    queryFn: () => shiftsAPI.getToday().then(r => r.data.data),
     refetchInterval: 60000,
+  });
+  const overview = overviewQ.data;
+  const today = overview?.today || '';
+  const summary = overview?.summary || {};
+  const activeSchedules = overview?.activeSchedules || [];
+
+  // ── L'appel du jour : « pointé » ou « à pointer » ────────────────────────
+  const callsQ = useQuery({
+    queryKey: ['journal', 'calls', today],
+    queryFn: () => journalAPI.getCalls().then((r) => r.data.data),
+    enabled: !willRedirect && !!today,
+    refetchInterval: 60000,
+  });
+
+  // ── Files d'attente et vigilance, selon la portée ────────────────────────
+  const chefQ = useQuery({
+    queryKey: ['chef-overview', null],
+    queryFn: () => chefOverviewAPI.get().then((r) => r.data.data),
+    enabled: !willRedirect && isChefScope,
+  });
+  const chef = chefQ.data;
+
+  const conflictsQ = useQuery({
+    queryKey: ['supervision-conflicts'],
+    queryFn: () => supervisionAPI.getConflicts().then((r) => r.data.data),
+    enabled: !willRedirect && isWatcher,
+  });
+  const conflicts = conflictsQ.data;
+
+  const loansQ = useQuery({
+    queryKey: ['staff-loans', 'journee-pending'],
+    queryFn: () => staffLoansAPI.getAll({ status: 'pending' }).then((r) => r.data.data || []),
+    enabled: !willRedirect && isWatcher,
+  });
+
+  // ── Alertes ouvertes, consignes, charge du mois ──────────────────────────
+  const alertsQ = useQuery({
+    queryKey: ['journal-alerts', 'journee'],
+    queryFn: () => journalAPI.getAlerts({ limit: 8 }).then((r) => r.data.data),
     enabled: !willRedirect,
   });
 
-  // Plannings en attente (pour les validateurs)
-  const { data: pendingSchedules = [] } = useQuery({
-    queryKey: ['pending-schedules'],
-    queryFn: () => schedulesAPI.getAll({ status: 'submitted', limit: 5 }).then(r => r.data.data),
-    enabled: isManagement,
+  const notesQ = useQuery({
+    queryKey: ['notes', { journee: true }],
+    queryFn: () => notesAPI.getAll({ limit: 4 }).then((r) => r.data.data || []),
+    enabled: !willRedirect,
   });
 
-  // Remplacements urgents
-  const { data: urgentReplacements = [] } = useQuery({
-    queryKey: ['urgent-replacements'],
-    queryFn: () => replacementsAPI.getAll({ urgency: 'critical', status: 'pending', limit: 5 }).then(r => r.data.data),
-    refetchInterval: 30000,
+  const monthStart = today ? `${today.slice(0, 7)}-01` : '';
+  const statsQ = useQuery({
+    queryKey: ['scoped-stats', { journee: true, from: monthStart, to: today }],
+    queryFn: () => scopedStatsAPI.get({ from: monthStart, to: today }).then((r) => r.data.data),
+    // Le chef et le surveillant de service ont déjà leur charge de service dans
+    // `/api/chef/overview` : un second appel donnerait deux chiffres à comparer
+    // pour la même mesure.
+    enabled: !willRedirect && isWatcher && !!monthStart,
+    refetchInterval: 120000,
   });
 
-  // Stats de couverture pour graphique
-  const { data: coverageData = [] } = useQuery({
-    queryKey: ['coverage'],
-    queryFn: () => statisticsAPI.getCoverage().then(r => r.data.data),
-    enabled: isManagement || isDepartmentHead,
-  });
+  // ── Qui est de service, et où en est son appel ───────────────────────────
+  const declared = useMemo(() => {
+    const map = new Map();
+    (callsQ.data?.calls || []).forEach((c) => map.set(c.key, c.isDeclared === true));
+    return map;
+  }, [callsQ.data]);
 
-  // Stats gardes pour graphique
-  const { data: shiftStats = [] } = useQuery({
-    queryKey: ['shift-stats'],
-    queryFn: () => statisticsAPI.getShiftStats().then(r => r.data.data),
-    enabled: isManagement || isDepartmentHead,
-  });
+  const guards = useMemo(() => {
+    const rows = (overview?.todayGuards || []).map((g) => {
+      const key = `${today}|${g.scheduleId}|${g.userId}`;
+      return { ...g, key, declared: declared.get(key) === true };
+    });
+    return rows.sort((a, b) =>
+      (a.departmentName || '').localeCompare(b.departmentName || '', 'fr')
+      || (a.name || '').localeCompare(b.name || '', 'fr'));
+  }, [overview, declared, today]);
 
-  const stats = dashData || {};
+  const callsReady = callsQ.isSuccess;
+  const pointed = guards.filter((g) => g.declared).length;
+  const toPoint = guards.length - pointed;
 
-  // Données graphique gardes du mois (simulé depuis les stats)
-  const chartData = shiftStats.slice(0, 8).map(s => ({
-    name: `${s.first_name?.[0]}. ${s.last_name}`,
-    gardes: parseInt(s.total_shifts) || 0,
-    heures: parseFloat(s.total_hours) || 0,
-    absences: parseInt(s.absent) || 0,
-  }));
+  // ── Ce qui attend une décision ───────────────────────────────────────────
+  const queue = useMemo(() => {
+    if (isChefScope) {
+      const a = chef?.aTraiter;
+      if (!a) return [];
+      return byPending([
+        { key: 'proposals', label: 'Propositions de modification', count: a.propositions,
+          hint: 'À accepter ou à refuser sur vos plannings', to: screen.path },
+        { key: 'replacements', label: 'Remplacements à confirmer', count: a.remplacements,
+          hint: 'Le tableur validé reste intact : le remplacement vit à côté', to: replacementsPath },
+        { key: 'loans-in', label: 'Prêts de personnel entrants', count: a.pretsEntrants,
+          hint: 'Un autre service demande un de vos agents', to: '/staff-loans' },
+        { key: 'loans-out', label: 'Prêts de personnel sortants', count: a.pretsSortants,
+          hint: 'Vos demandes en attente de réponse', to: '/staff-loans' },
+        { key: 'leaves', label: 'Congés à décider', count: a.congesPending,
+          hint: 'Un agent en congé ne peut pas être affecté à une garde', to: '/absences' },
+        { key: 'absences', label: 'Absences à justifier', count: a.absencesNonJustifiees,
+          hint: 'Signalées à l’appel, sans justificatif déposé', to: '/absences' },
+      ]);
+    }
+    if (isWatcher) {
+      // Les alertes ouvertes ne figurent pas ici : elles sont listées, avec
+      // leur gravité et leur détail, dans « Points de vigilance » juste à
+      // côté. Une file ne vaut que si elle ouvre l'écran qui la traite.
+      return byPending([
+        { key: 'replacements', label: 'Remplacements en attente', count: summary.replacementsPending,
+          hint: 'Sur l’ensemble des services de l’hôpital', to: replacementsPath },
+        { key: 'loans', label: 'Prêts de personnel en attente', count: loansQ.data?.length,
+          hint: 'La décision revient au service prêteur', to: '/staff-loans' },
+      ]);
+    }
+    return [];
+  }, [isChefScope, isWatcher, chef, summary.replacementsPending, loansQ.data,
+    screen.path, replacementsPath]);
 
-  const pieData = coverageData.slice(0, 5).map(d => ({
-    name: d.name,
-    value: parseFloat(d.coverage_rate) || 0,
-  }));
+  const queueTotal = queue.reduce((n, q) => n + (Number(q.count) || 0), 0);
 
-  const COLORS = ['#1B4FCA', '#10B981', '#F59E0B', '#6366F1', '#EC4899'];
+  // ── Ce qui cloche : anomalies de planning et alertes ouvertes, un seul fil ─
+  // Les deux répondent à la même question et se lisent ensemble ; l'origine de
+  // chaque ligne reste nommée, pour savoir où aller la corriger.
+  const vigilance = useMemo(() => {
+    const rows = [];
+    const detected = isChefScope ? (chef?.vigilance?.list || []) : (conflicts?.conflicts || []);
+    detected.forEach((v, i) => {
+      const days = Array.isArray(v.days) ? v.days : [];
+      rows.push({
+        id: `plan-${i}`,
+        severity: v.severity,
+        origin: CONFLICT_LABEL[v.type] || 'Planning',
+        title: v.title || CONFLICT_LABEL[v.type] || 'Anomalie de planning',
+        detail: v.detail,
+        when: v.date || days[0] || null,
+        span: v.dayCount > 1 ? `${v.dayCount} jours` : null,
+      });
+    });
+    (alertsQ.data?.alerts || []).forEach((a) => {
+      rows.push({
+        id: `alert-${a.id}`,
+        severity: a.severity,
+        origin: a.departmentName ? `Alerte · ${a.departmentName}` : 'Alerte de service',
+        title: a.title,
+        detail: a.message,
+        when: dayOf(a.createdAt),
+        span: a.acknowledgedAt ? 'Acquittée' : null,
+      });
+    });
+    rows.sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
+    return rows;
+  }, [isChefScope, chef, conflicts, alertsQ.data]);
+
+  const vigilanceCritical = vigilance.filter((v) => toneOfSeverity(v.severity) === 'alert').length;
+
+  // ── La charge du mois, depuis la source déjà chargée pour le rôle ─────────
+  const load = useMemo(() => {
+    if (isChefScope && chef?.charge) {
+      return {
+        from: chef.charge.period?.from,
+        to: chef.charge.period?.to,
+        totalGuards: chef.charge.totalGuards,
+        staffCount: chef.charge.staffCount,
+        averagePerStaff: chef.charge.averagePerStaff,
+        loadGap: chef.charge.loadGap,
+        list: chef.charge.list || [],
+        note: chef.department?.name ? `Service ${chef.department.name}` : null,
+      };
+    }
+    if (isWatcher && statsQ.data) {
+      const s = statsQ.data.summary || {};
+      return {
+        from: statsQ.data.period?.from,
+        to: statsQ.data.period?.to,
+        totalGuards: s.totalGuards,
+        staffCount: s.staffCount,
+        averagePerStaff: s.averagePerStaff,
+        loadGap: s.loadGap,
+        list: statsQ.data.topStaff || [],
+        note: s.departmentsCount ? `${s.departmentsCount} service(s) au tableur` : null,
+      };
+    }
+    return null;
+  }, [isChefScope, isWatcher, chef, statsQ.data]);
+
+  const loadMax = load?.list?.length ? Math.max(...load.list.map((s) => Number(s.guards) || 0)) : 0;
+
+  // ── Rendu ────────────────────────────────────────────────────────────────
+
+  if (willRedirect) {
+    return <p className="gsj-hold">Ouverture de votre tableau de bord…</p>;
+  }
+
+  const showDept = overview?.scope === 'establishment';
+  const loading = overviewQ.isLoading;
+
+  const guardColumns = [
+    {
+      key: 'name',
+      label: 'Agent',
+      strong: true,
+      render: (g) => (
+        <span className="gsj-who">
+          <b>{g.name}</b>
+          {g.roleName ? <span>{g.roleName}</span> : null}
+        </span>
+      ),
+    },
+    {
+      key: 'label',
+      label: 'Poste',
+      render: (g) => (
+        <span className="gsj-post">
+          {g.label || '—'}
+          {g.atHome ? <GsBadge tone="quiet">À domicile</GsBadge> : null}
+        </span>
+      ),
+    },
+    {
+      key: 'hours',
+      label: 'Horaire',
+      num: true,
+      width: 118,
+      render: (g) => (hour(g.shiftStart) && hour(g.shiftEnd)
+        ? `${hour(g.shiftStart)} → ${hour(g.shiftEnd)}`
+        : '—'),
+    },
+    {
+      key: 'dept',
+      label: 'Service',
+      hidden: !showDept,
+      render: (g) => g.departmentName || '—',
+    },
+    {
+      key: 'call',
+      label: 'Appel',
+      width: 116,
+      render: (g) => {
+        if (!callsReady) return <span className="gsj-wait">…</span>;
+        return g.declared
+          ? <GsBadge tone="duty" dot>Pointé</GsBadge>
+          : <GsBadge dot>À pointer</GsBadge>;
+      },
+    },
+  ];
 
   return (
-    <div>
+    <div className="gsj-wrap">
       {/* Appartenance — hôpital et service(s). Rien pour le Super Admin. */}
       <ContextBadge variant="header" />
 
-      {/* En-tête */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">{t('dashboard.overview')}</h1>
-          <p className="page-subtitle">
-            {formatDate(new Date(), 'fr', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-            {' · '}{user?.establishmentName}
-          </p>
-        </div>
-        <div className="quick-actions">
-          <button className="btn btn-secondary" onClick={() => window.location.reload()}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-            {t('common.refresh')}
-          </button>
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div className="kpi-grid mb-6">
-        <KpiCard
-          icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>}
-          label={t('dashboard.today_shifts')}
-          value={stats.today?.shifts?.total || '—'}
-          sublabel={`${stats.today?.shifts?.confirmed || 0} confirmé(s) · ${stats.today?.shifts?.absent || 0} absent(s)`}
-          color="var(--color-primary)"
-          loading={loadingDash}
-        />
-        <KpiCard
-          icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>}
-          label={t('dashboard.coverage_rate')}
-          value={`${stats.coverage?.coverage_rate || '—'}%`}
-          sublabel={`sur les 30 derniers jours`}
-          color={
-            (stats.coverage?.coverage_rate || 0) >= 90 ? 'var(--color-success)' :
-            (stats.coverage?.coverage_rate || 0) >= 70 ? 'var(--color-warning)' :
-            'var(--color-danger)'
-          }
-          loading={loadingDash}
-        />
-        <KpiCard
-          icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}
-          label={t('dashboard.pending_schedules')}
-          value={stats.pendingSchedules ?? '—'}
-          sublabel="En attente de validation"
-          color="var(--color-warning)"
-          loading={loadingDash}
-        />
-        <KpiCard
-          icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>}
-          label={t('dashboard.open_replacements')}
-          value={stats.openReplacements ?? '—'}
-          sublabel="Remplaçants recherchés"
-          color="var(--color-danger)"
-          loading={loadingDash}
-        />
-        {isManagement && (
+      <GsPageHeader
+        eyebrow={ROLE_LABEL[role] || 'Espace personnel'}
+        title="Ma journée"
+        subtitle={today
+          ? `${cap(fullFrenchDate(today))} — ce qui se joue aujourd’hui dans votre périmètre, et ce qui attend votre décision.`
+          : 'Ce qui se joue aujourd’hui dans votre périmètre, et ce qui attend votre décision.'}
+        meta={[
+          overview?.scopeLabel ? { label: 'Périmètre', value: overview.scopeLabel } : null,
+          { label: 'Plannings en cours', value: activeSchedules.length },
+        ]}
+        actions={home ? (
           <>
-            <KpiCard
-              icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>}
-              label={t('dashboard.total_staff')}
-              value={stats.staff?.active_staff ?? '—'}
-              sublabel={`${stats.staff?.on_leave || 0} en congé`}
-              color="var(--color-info)"
-              loading={loadingDash}
-            />
-            <KpiCard
-              icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>}
-              label="Absences ce mois"
-              value={stats.monthAbsences?.total ?? '—'}
-              sublabel={`${stats.monthAbsences?.pending || 0} en attente`}
-              color="#EC4899"
-              loading={loadingDash}
-            />
+            <Link to="/appel-du-jour" className="gs-btn">
+              <ClipboardCheck size={14} strokeWidth={1.8} />
+              Appel du jour
+            </Link>
+            <Link to={home.path} className="gs-btn is-primary">
+              {home.label}
+              <ArrowRight size={14} strokeWidth={1.8} />
+            </Link>
           </>
+        ) : null}
+        rail={loading ? <GsSkeleton variant="rail" count={4} /> : (
+          <GsStatRail>
+            <GsStat
+              label="De service aujourd’hui"
+              value={summary.staffOnDutyToday}
+              tone="duty"
+              hint={`${summary.guardsToday || 0} affectation(s) au tableur`}
+              onClick={() => navigate('/appel-du-jour')}
+              title="Ouvrir l’appel du jour"
+            />
+            <GsStat
+              label="Reste à pointer"
+              value={callsReady ? toPoint : null}
+              tone={callsReady && toPoint > 0 ? 'alert' : undefined}
+              hint={callsReady ? `${pointed} pointé(s) sur ${guards.length}` : 'Lecture de l’appel…'}
+              onClick={() => navigate('/appel-du-jour')}
+              title="Ouvrir l’appel du jour"
+            />
+            <GsStat
+              label="Points de vigilance"
+              value={vigilance.length}
+              tone={vigilanceCritical > 0 ? 'alert' : undefined}
+              hint={vigilanceCritical > 0 ? `${vigilanceCritical} à traiter en premier` : 'Anomalies et alertes ouvertes'}
+            />
+            <GsStat
+              label="En attente de décision"
+              value={queue.length ? queueTotal : null}
+              tone="seal"
+              hint={isChefScope ? 'Propositions, remplacements, prêts, congés' : 'Remplacements et prêts de personnel'}
+            />
+          </GsStatRail>
         )}
-      </div>
+      />
 
-      {/* Alertes critiques */}
-      {urgentReplacements.length > 0 && (
-        <div className="alert alert-danger mb-6 animate-in" style={{ flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            {urgentReplacements.length} remplacement(s) CRITIQUE(S) nécessaire(s) immédiatement !
+      {overviewQ.isError ? (
+        <GsPanel>
+          <GsEmpty
+            icon={<TriangleAlert size={26} strokeWidth={1.6} />}
+            title="La vue du jour n’a pas pu être chargée"
+            hint="Le service n’a pas répondu. Rien n’est perdu : la lecture peut être relancée."
+            actions={<button type="button" className="gs-btn is-primary" onClick={() => overviewQ.refetch()}>Réessayer</button>}
+          />
+        </GsPanel>
+      ) : (
+        <div className="gsj-grid">
+          {/* ── Colonne principale ─────────────────────────────────────── */}
+          <div className="gsj-col">
+            <GsPanel
+              icon={<Inbox size={15} strokeWidth={1.7} />}
+              title="Ce qui m’attend"
+              sub="Les files où votre décision est attendue. Chaque ligne ouvre l’écran qui la traite."
+            >
+              {(isChefScope && chefQ.isLoading) || (isWatcher && loansQ.isLoading)
+                ? <GsSkeleton variant="rows" count={4} />
+                : queue.length === 0 ? (
+                  <GsEmpty
+                    bare
+                    title="Aucune file de décision pour votre rôle"
+                    hint="Les demandes qui vous concernent apparaissent ici dès qu’elles sont déposées."
+                  />
+                ) : (
+                  <ul className="gsj-queue">
+                    {queue.map((q) => {
+                      const n = Number(q.count) || 0;
+                      return (
+                        <li key={q.key} data-idle={n === 0 ? 'true' : 'false'}>
+                          <span className="gsj-queue-label">
+                            {q.to ? <Link to={q.to}>{q.label}</Link> : q.label}
+                            <span className="gsj-queue-hint">{q.hint}</span>
+                          </span>
+                          <span className="gsj-queue-count gs-num">{n}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+            </GsPanel>
+
+            <GsPanel
+              icon={<Users size={15} strokeWidth={1.7} />}
+              title="Qui est de service aujourd’hui"
+              sub={showDept
+                ? 'Tous les services de l’hôpital, tels que les tableurs en cours les déclarent.'
+                : 'Votre service, tel que le tableur en cours le déclare.'}
+              tools={<Link to="/appel-du-jour" className="gs-btn is-quiet">Pointer l’appel</Link>}
+              flush
+            >
+              {loading ? <GsSkeleton variant="rows" count={5} /> : (
+                <GsTable
+                  label="Personnels de garde aujourd’hui"
+                  columns={guardColumns}
+                  rows={guards}
+                  rowKey="key"
+                  empty={(
+                    <GsEmpty
+                      bare
+                      icon={<CalendarOff size={26} strokeWidth={1.6} />}
+                      title="Personne n’est de service aujourd’hui"
+                      hint={activeSchedules.length
+                        ? `${activeSchedules.length} planning(s) sont en cours dans votre périmètre, mais aucun n’affecte d’agent à cette date.`
+                        : 'Aucun planning n’est en cours dans votre périmètre : un tableur soumis et couvrant la date du jour alimente cette liste.'}
+                      actions={home ? <Link to={home.path} className="gs-btn is-primary">{home.label}</Link> : null}
+                    />
+                  )}
+                />
+              )}
+            </GsPanel>
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {urgentReplacements.map(r => (
-              <a key={r.id} href="/chef-de-service" style={{
-                background: 'var(--color-danger-20)', border: '1px solid var(--color-danger)',
-                borderRadius: 6, padding: '4px 12px', fontSize: 'var(--font-xs)',
-                color: 'var(--color-danger)', fontWeight: 600, textDecoration: 'none',
-              }}>
-                Dr. {r.absent_last} — {r.department_name} · {formatDate(r.shift_date)}
-              </a>
-            ))}
+
+          {/* ── Colonne latérale ───────────────────────────────────────── */}
+          <div className="gsj-col">
+            <GsPanel
+              tone={vigilanceCritical > 0 ? 'alert' : undefined}
+              icon={<TriangleAlert size={15} strokeWidth={1.7} />}
+              title="Points de vigilance"
+              sub="Anomalies détectées sur les plannings et alertes de service encore ouvertes."
+              scroll
+              maxHeight={340}
+            >
+              {(isChefScope && chefQ.isLoading) || (isWatcher && conflictsQ.isLoading) || alertsQ.isLoading
+                ? <GsSkeleton variant="rows" count={3} />
+                : vigilance.length === 0 ? (
+                  <GsEmpty
+                    bare
+                    title="Rien à signaler dans votre périmètre"
+                    hint="Aucun agent en congé affecté à une garde, aucune double affectation, aucune journée découverte, aucune alerte ouverte."
+                  />
+                ) : (
+                  <ul className="gsj-vig">
+                    {vigilance.map((v) => (
+                      <li key={v.id}>
+                        <span className="gsj-vig-top">
+                          <GsBadge tone={toneOfSeverity(v.severity)} dot>
+                            {SEVERITY_LABEL[v.severity] || v.severity}
+                          </GsBadge>
+                          <span className="gsj-vig-origin">{v.origin}</span>
+                        </span>
+                        <strong className="gsj-vig-title">{v.title}</strong>
+                        {v.detail ? <p className="gsj-vig-detail" title={v.detail}>{v.detail}</p> : null}
+                        {(v.when || v.span) ? (
+                          <span className="gsj-vig-when gs-num">
+                            {v.when ? shortFrenchDate(v.when, true) : null}
+                            {v.when && v.span ? ' · ' : null}
+                            {v.span}
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+            </GsPanel>
+
+            <GsPanel
+              icon={<Scale size={15} strokeWidth={1.7} />}
+              title="Mes plannings en cours"
+              sub="Ceux qui couvrent la date du jour. Les brouillons et les plannings terminés ne sont pas ici."
+            >
+              {loading ? <GsSkeleton variant="rows" count={2} /> : activeSchedules.length === 0 ? (
+                <GsEmpty
+                  bare
+                  title="Aucun planning en cours"
+                  hint="Un planning devient « en cours » le jour où sa période commence, une fois soumis."
+                  actions={home ? <Link to={home.path} className="gs-btn">{home.label}</Link> : null}
+                />
+              ) : (
+                <ul className="gsj-plan">
+                  {activeSchedules.map((s) => (
+                    <li key={s.id}>
+                      <span className="gsj-plan-top">
+                        <Link to={screen.deepLink ? `${screen.path}?scheduleId=${s.id}` : screen.path} className="gsj-plan-name">
+                          {s.name}
+                        </Link>
+                        <PlanningStateBadge state={s.state} status={s.status} startDate={s.startDate} endDate={s.endDate} size="sm" />
+                      </span>
+                      <span className="gsj-plan-meta gs-num">
+                        {frenchRange(s.startDate, s.endDate)}
+                        {showDept && s.departmentName ? <span className="gsj-plan-dept">{s.departmentName}</span> : null}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </GsPanel>
+
+            <GsPanel
+              icon={<FileText size={15} strokeWidth={1.7} />}
+              title="Notes et circulaires"
+              sub="Les dernières consignes qui vous sont destinées."
+              tools={<Link to="/notes" className="gs-btn is-quiet">Tout lire</Link>}
+            >
+              {notesQ.isLoading ? <GsSkeleton variant="text" count={3} /> : (notesQ.data || []).length === 0 ? (
+                <GsEmpty
+                  bare
+                  icon={<BellRing size={24} strokeWidth={1.6} />}
+                  title="Aucune consigne publiée"
+                  hint="Les notes de votre hôpital et les circulaires nationales arrivent ici dès leur publication."
+                />
+              ) : (
+                <ul className="gsj-notes">
+                  {(notesQ.data || []).map((n) => (
+                    <li key={n.id} data-unread={n.isRead ? 'false' : 'true'}>
+                      <span className="gsj-note-top">
+                        <Link to="/notes" className="gsj-note-title">{n.title}</Link>
+                        {n.priority === 'urgent' || n.priority === 'high'
+                          ? <GsBadge tone="alert" dot>{n.priority === 'urgent' ? 'Urgente' : 'Élevée'}</GsBadge>
+                          : null}
+                      </span>
+                      <span className="gsj-note-meta">
+                        {NOTE_CATEGORY[n.category] || cap(n.category || 'Note')}
+                        {n.publishedAt ? <span className="gs-num">{shortFrenchDate(dayOf(n.publishedAt), true)}</span> : null}
+                        {n.isRead ? null : <span className="gsj-note-flag">Non lue</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </GsPanel>
           </div>
+
+          {/* ── Charge du mois, sur toute la largeur ───────────────────── */}
+          <GsPanel
+            className="gsj-span"
+            icon={<Scale size={15} strokeWidth={1.7} />}
+            title="Charge du mois"
+            sub={load?.from
+              ? `Gardes comptées au tableur, ${frenchRange(load.from, load.to)}.`
+              : 'Gardes comptées au tableur depuis le début du mois.'}
+            tools={hasPermission?.('stats.read')
+              ? <Link to="/statistics" className="gs-btn is-quiet">Ouvrir l’analytique</Link>
+              : null}
+          >
+            {(isChefScope && chefQ.isLoading) || (isWatcher && statsQ.isLoading) ? (
+              <GsSkeleton variant="rows" count={4} />
+            ) : !load || !load.list.length ? (
+              <GsEmpty
+                bare
+                title="Aucune garde comptée ce mois-ci"
+                hint="La charge se calcule sur les tableurs soumis ou en cours de la période. Aucun n’en porte pour l’instant."
+              />
+            ) : (
+              <div className="gsj-load">
+                <GsStatRail compact>
+                  <GsStat label="Gardes au total" value={load.totalGuards} />
+                  <GsStat label="Agents concernés" value={load.staffCount} />
+                  <GsStat label="Moyenne par agent" value={load.averagePerStaff} unit="gardes" />
+                  <GsStat
+                    label="Écart max — min"
+                    value={load.loadGap}
+                    tone={load.loadGap > 2 ? 'alert' : undefined}
+                    hint={load.loadGap > 2 ? 'La répartition mérite un arbitrage' : 'Répartition resserrée'}
+                  />
+                </GsStatRail>
+
+                <ul className="gsj-bars">
+                  {load.list.slice(0, 6).map((s) => {
+                    const n = Number(s.guards) || 0;
+                    const pct = loadMax > 0 ? Math.round((n / loadMax) * 100) : 0;
+                    return (
+                      <li key={s.userId || s.name}>
+                        <span className="gsj-bars-name">
+                          {s.name}
+                          {s.roleName || s.departmentName
+                            ? <span>{s.departmentName || s.roleName}</span>
+                            : null}
+                        </span>
+                        <span className="gsj-bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></span>
+                        <span className="gsj-bars-count gs-num">{n}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {load.note ? <p className="gsj-load-note">{load.note}</p> : null}
+              </div>
+            )}
+          </GsPanel>
         </div>
       )}
-
-      {/* Contenu principal 2 colonnes */}
-      <div style={{ display: 'grid', gridTemplateColumns: isManagement ? '1fr 1fr' : '1fr', gap: 'var(--space-6)', marginBottom: 'var(--space-6)' }}>
-
-        {/* Gardes du jour */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
-              Gardes du jour — {formatDate(new Date())}
-            </h3>
-            <a href="/shifts" style={{ fontSize: 'var(--font-xs)', color: 'var(--color-primary-light)' }}>{t('common.view_all')}</a>
-          </div>
-          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {loadingShifts ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: 12 }}>
-                  <div className="skeleton" style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0 }} />
-                  <div style={{ flex: 1 }}>
-                    <div className="skeleton" style={{ height: 14, width: '60%', marginBottom: 6 }} />
-                    <div className="skeleton" style={{ height: 12, width: '40%' }} />
-                  </div>
-                </div>
-              ))
-            ) : todayShifts.length === 0 ? (
-              <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>
-                Aucune garde planifiée aujourd'hui
-              </div>
-            ) : (
-              todayShifts.map((shift) => (
-                <div key={shift.id} style={{
-                  padding: '12px 20px',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  transition: 'background var(--transition-fast)',
-                  cursor: 'default',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  <div className="avatar avatar-sm" style={{ background: `${shift.shift_color}20`, color: shift.shift_color, flexShrink: 0 }}>
-                    {shift.first_name?.[0]}{shift.last_name?.[0]}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      Dr. {shift.first_name} {shift.last_name}
-                    </p>
-                    <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>
-                      {shift.department_name} · {shift.shift_type_name} · {shift.start_time?.substring(0,5)}–{shift.end_time?.substring(0,5)}
-                    </p>
-                  </div>
-                  <span className={`badge ${getStatusBadgeClass(shift.status)}`}>{t(`status.${shift.status}`)}</span>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Graphique gardes par médecin */}
-        {(isManagement || isDepartmentHead) && (
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                Répartition des gardes
-              </h3>
-            </div>
-            <div className="card-body" style={{ paddingTop: 0 }}>
-              {chartData.length === 0 ? (
-                <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>
-                  Pas de données disponibles
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={230}>
-                  <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Bar dataKey="gardes" fill="var(--color-primary)" radius={[4, 4, 0, 0]} name="Gardes" />
-                    <Bar dataKey="absences" fill="var(--color-danger)" radius={[4, 4, 0, 0]} name="Absences" />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 2ème rangée */}
-      <div style={{ display: 'grid', gridTemplateColumns: isManagement ? '1fr 1fr' : '1fr', gap: 'var(--space-6)' }}>
-
-        {/* Plannings en attente */}
-        {isManagement && pendingSchedules.length > 0 && (
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
-                Plannings à valider
-              </h3>
-              <span className="badge badge-pending">{pendingSchedules.length}</span>
-            </div>
-            <div>
-              {pendingSchedules.map(s => (
-                <a key={s.id} href={`/schedules/${s.id}`} style={{ textDecoration: 'none' }}>
-                  <div style={{
-                    padding: '12px 20px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    transition: 'background var(--transition-fast)',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                  >
-                    <div style={{ flex: 1 }}>
-                      <p style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>{s.name}</p>
-                      <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>
-                        {s.department_name} · {formatDate(s.start_date)} → {formatDate(s.end_date)}
-                      </p>
-                    </div>
-                    <span className={`badge ${getStatusBadgeClass(s.status)}`}>{t(`status.${s.status}`)}</span>
-                  </div>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Couverture par service */}
-        {(isManagement || isDepartmentHead) && coverageData.length > 0 && (
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
-                Couverture par service
-              </h3>
-            </div>
-            <div className="card-body">
-              {coverageData.map((d, i) => (
-                <div key={d.name} style={{ marginBottom: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)', fontWeight: 500 }}>{d.name}</span>
-                    <span style={{
-                      fontSize: 'var(--font-xs)', fontWeight: 700,
-                      color: (d.coverage_rate || 0) >= 90 ? 'var(--color-success)' :
-                             (d.coverage_rate || 0) >= 70 ? 'var(--color-warning)' : 'var(--color-danger)',
-                    }}>
-                      {d.coverage_rate || 0}%
-                    </span>
-                  </div>
-                  <div style={{ height: 6, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{
-                      height: '100%',
-                      width: `${Math.min(d.coverage_rate || 0, 100)}%`,
-                      background: (d.coverage_rate || 0) >= 90 ? 'var(--color-success)' :
-                                  (d.coverage_rate || 0) >= 70 ? 'var(--color-warning)' : 'var(--color-danger)',
-                      borderRadius: 3,
-                      transition: 'width 1s ease',
-                    }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

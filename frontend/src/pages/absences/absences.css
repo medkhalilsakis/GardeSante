@@ -1,0 +1,48 @@
+/** Registre des absences. Préfixe unique `.gsab-`. */
+.gsab-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.gsab-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 11px 12px; min-width: 0; }
+.gsab-field { display: grid; gap: 5px; min-width: 0; }
+.gsab-field > span, .gsab-choice > legend { font-family: var(--gs-display); font-size: 9.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--gs-ink-faint); }
+.gsab-field > span i { color: var(--gs-alert); font-style: normal; }
+.gsab-field > .form-control { min-width: 0; height: 38px; font-family: var(--gs-body); font-size: 12px; }
+.gsab-field > textarea.form-control { height: auto; min-height: 94px; resize: vertical; }
+.gsab-field-error { font-family: var(--gs-body); font-size: 10.5px; color: var(--gs-alert); }
+.gsab-person, .gsab-period { display: grid; gap: 2px; min-width: 0; }
+.gsab-person > b, .gsab-period > b { font-family: var(--gs-body); font-size: 12px; font-weight: 600; color: var(--gs-ink); white-space: nowrap; }
+.gsab-person > small, .gsab-period > small { font-family: var(--gs-body); font-size: 10.5px; color: var(--gs-ink-faint); }
+.gsab-period > small { font-family: var(--gs-data); font-variant-numeric: tabular-nums; }
+.gsab-taxonomy { font-family: var(--gs-body); font-size: 11.5px; color: var(--gs-ink-soft); }
+.gsab-taxonomy.is-strong { font-weight: 600; color: var(--gs-ink); }
+.gsab-muted, .gsab-date { font-family: var(--gs-data); font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--gs-ink-faint); white-space: nowrap; }
+.gsab-reason { display: block; max-width: 34ch; font-family: var(--gs-body); font-size: 11.5px; line-height: 1.45; color: var(--gs-ink-soft); }
+.gsab-reason.is-empty { color: var(--gs-ink-faint); font-style: italic; }
+.gsab-loading { padding: 18px 16px; }
+.gsab-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--gs-rule); font-family: var(--gs-body); font-size: 11.5px; color: var(--gs-ink-faint); }
+.gsab-page-button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--gs-rule-strong); border-radius: 7px; background: var(--gs-paper); color: var(--gs-ink-soft); cursor: pointer; }
+.gsab-page-button:hover:not(:disabled) { border-color: var(--gs-seal); color: var(--gs-seal); background: var(--gs-seal-wash); }
+.gsab-page-button:disabled { opacity: .38; cursor: not-allowed; }
+.gsab-modal { max-width: 720px; }
+.gsab-modal-heading { display: grid; gap: 2px; }
+.gsab-modal-heading .modal-title { margin: 0; font-family: var(--gs-display); font-size: 17px; color: var(--gs-ink); }
+.gsab-close { min-width: 32px; width: 32px; padding: 0; }
+.gsab-modal-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-width: 0; }
+.gsab-form-full { grid-column: 1 / -1; }
+.gsab-date-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; }
+.gsab-rule { grid-column: 1 / -1; padding: 9px 11px; border-left: 3px solid var(--gs-seal); border-radius: 0 7px 7px 0; background: var(--gs-seal-wash); font-family: var(--gs-body); font-size: 11.5px; line-height: 1.5; color: var(--gs-ink-soft); }
+.gsab-choice { display: grid; gap: 7px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.gsab-required { color: var(--gs-alert); }
+.gsab-choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.gsab-choice-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 10px 11px; border: 1px solid var(--gs-rule-strong); border-radius: 8px; background: var(--gs-paper); cursor: pointer; }
+.gsab-choice-option:hover { border-color: var(--gs-seal); }
+.gsab-choice-option.is-seal.is-selected { border-color: var(--gs-seal); background: var(--gs-seal-wash); }
+.gsab-choice-option.is-alert.is-selected { border-color: var(--gs-alert); background: var(--gs-alert-wash); }
+.gsab-choice-option > input { flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--gs-seal); }
+.gsab-choice-option.is-alert > input { accent-color: var(--gs-alert); }
+.gsab-choice-option > span { display: grid; gap: 2px; min-width: 0; }
+.gsab-choice-option strong { font-family: var(--gs-body); font-size: 12px; font-weight: 600; color: var(--gs-ink); }
+.gsab-choice-option small { font-family: var(--gs-body); font-size: 10.5px; line-height: 1.4; color: var(--gs-ink-faint); }
+@media (max-width: 700px) {
+  .gsab-filters, .gsab-modal-body, .gsab-date-grid, .gsab-choice-grid { grid-template-columns: minmax(0, 1fr); }
+  .gsab-pagination { justify-content: center; }
+  .gsab-modal .modal-header, .gsab-modal .modal-body, .gsab-modal .modal-footer { padding-left: 14px; padding-right: 14px; }
+}

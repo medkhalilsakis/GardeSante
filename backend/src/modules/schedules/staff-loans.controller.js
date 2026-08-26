@@ -179,18 +179,42 @@ const requestLoan = async (req, res) => {
  * GET /api/staff-loans
  * Demandes reçues (chef propriétaire) et envoyées (chef demandeur).
  */
+/**
+ * Rôles qui surveillent sans décider : ils ne sont ni demandeur ni propriétaire
+ * d'un prêt, donc la contrainte d'acteur leur rendait toujours une liste vide —
+ * alors que `/api/staff-loans/stats` et `/api/supervision/loans` leur montraient
+ * le même prêt. Ils lisent tout leur établissement, en lecture seule :
+ * `decideLoan` reste réservé au chef propriétaire (règle II), inchangé.
+ */
+const WATCHER_ROLES = [ROLES.DIRECTOR, ROLES.GENERAL_SUPERVISOR, ROLES.HOSPITAL_ADMIN];
+
 const listLoans = async (req, res) => {
   try {
-    const { id: actorId, establishmentId } = req.user;
+    const { id: actorId, establishmentId, roleCode, isSuperAdmin } = req.user;
     // `scheduleId` (point 4) : traiter les prêts garde par garde. Filtre purement
     // additif — sans lui la réponse est exactement celle d'avant.
     const { status, direction, scheduleId } = req.query;
 
-    const conditions = ['l.establishment_id = $1'];
-    const params = [establishmentId];
+    const isWatcher = isSuperAdmin || WATCHER_ROLES.includes(roleCode);
 
-    if (direction === 'incoming')      { conditions.push(`l.owner_chief_id = $${params.length + 1}`);      params.push(actorId); }
-    else if (direction === 'outgoing') { conditions.push(`l.requesting_chief_id = $${params.length + 1}`); params.push(actorId); }
+    // Le Super Admin n'appartient à aucun hôpital réel : il désigne le sien.
+    let scopeEstablishment = establishmentId;
+    if (isSuperAdmin && req.query.establishmentId) {
+      if (!UUID_RE.test(String(req.query.establishmentId))) {
+        return res.status(400).json({ success: false, message: 'Identifiant d\'établissement invalide' });
+      }
+      scopeEstablishment = req.query.establishmentId;
+    }
+
+    const conditions = ['l.establishment_id = $1'];
+    const params = [scopeEstablishment];
+
+    // `direction` se définit par rapport à l'acteur : elle n'a de sens que pour
+    // un chef de service. Pour un observateur, aucune contrainte d'acteur.
+    if (isWatcher) {
+      // périmètre établissement seul
+    } else if (direction === 'incoming') { conditions.push(`l.owner_chief_id = $${params.length + 1}`);      params.push(actorId); }
+    else if (direction === 'outgoing')   { conditions.push(`l.requesting_chief_id = $${params.length + 1}`); params.push(actorId); }
     else {
       conditions.push(`(l.owner_chief_id = $${params.length + 1} OR l.requesting_chief_id = $${params.length + 1})`);
       params.push(actorId);

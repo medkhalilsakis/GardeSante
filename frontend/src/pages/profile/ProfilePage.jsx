@@ -1,624 +1,468 @@
-import React, { useState, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { profileAPI } from '../../api';
-import { useAuthStore } from '../../store';
-import Avatar from '../../components/common/Avatar';
+import { useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Building2,
+  Camera,
+  Check,
+  CheckCircle2,
+  Clock3,
+  Eye,
+  EyeOff,
+  FileClock,
+  ImagePlus,
+  KeyRound,
+  LockKeyhole,
+  Mail,
+  Save,
+  ShieldCheck,
+  Trash2,
+  Upload,
+  UserRound,
+  X,
+  XCircle,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
+import { profileAPI } from '../../api';
+import Avatar from '../../components/common/Avatar';
+import {
+  GsBadge,
+  GsEmpty,
+  GsPageHeader,
+  GsPanel,
+  GsSkeleton,
+  GsTabRail,
+} from '../../components/gs';
+import { useAuthStore } from '../../store';
+import './profile.css';
 
-const API_BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
-
-// ─── Étiquettes des champs ────────────────────────────────────
 const FIELD_LABELS = {
-  first_name:'Prénom', last_name:'Nom', first_name_ar:'Prénom (ar)', last_name_ar:'Nom (ar)',
-  phone:'Téléphone', birth_date:'Date de naissance', gender:'Genre',
-  address:'Adresse', city:'Ville', id_card_number:'N° Carte Nationale',
-  id_card_expiry:'Expiration CIN', hire_date:'Date de recrutement',
-  speciality:'Spécialité', grade:'Grade', bio:'Biographie', matricule:'Matricule',
+  first_name: 'Prénom',
+  last_name: 'Nom',
+  first_name_ar: 'Prénom (arabe)',
+  last_name_ar: 'Nom (arabe)',
+  phone: 'Téléphone',
+  birth_date: 'Date de naissance',
+  gender: 'Genre',
+  address: 'Adresse',
+  city: 'Ville',
+  id_card_number: 'N° Carte nationale',
+  id_card_expiry: 'Expiration CIN',
+  hire_date: 'Date de recrutement',
+  speciality: 'Fonction déclarée',
+  grade: 'Grade',
+  bio: 'Biographie',
+  matricule: 'Matricule',
 };
 
-const STATUS_STYLE = {
-  pending:  { bg:'#D9770618', color:'#D97706', label:"En attente d'approbation", icon:'⏳' },
-  approved: { bg:'#05966920', color:'#059669', label:'Approuvée',                icon:'✅' },
-  rejected: { bg:'#EF444420', color:'#EF4444', label:'Refusée',                  icon:'❌' },
+const STATUS = {
+  pending: { label: "En attente d'approbation", shortLabel: 'En attente', tone: 'alert', icon: Clock3 },
+  approved: { label: 'Approuvée', shortLabel: 'Approuvée', tone: 'duty', icon: CheckCircle2 },
+  rejected: { label: 'Refusée', shortLabel: 'Refusée', tone: 'alert', icon: XCircle },
+  cancelled: { label: 'Remplacée par une nouvelle demande', shortLabel: 'Remplacée', tone: 'quiet', icon: FileClock },
 };
 
-// ─── Form inputs ──────────────────────────────────────────────
-const Field = ({ label, required, children, hint }) => (
-  <div style={{ marginBottom: 16 }}>
-    <label style={{ display:'block', fontSize:11, fontWeight:700, color:'var(--text-muted)',
-      textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:5 }}>
-      {label}{required && <span style={{ color:'var(--color-danger)', marginLeft:3 }}>*</span>}
+const REQUEST_DATE = new Intl.DateTimeFormat('fr-FR', {
+  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+});
+
+const TABS = [
+  { id: 'avatar', label: 'Photo', icon: <Camera size={15} aria-hidden="true" /> },
+  { id: 'profile', label: 'Informations', icon: <UserRound size={15} aria-hidden="true" /> },
+  { id: 'security', label: 'Sécurité', icon: <ShieldCheck size={15} aria-hidden="true" /> },
+  { id: 'requests', label: 'Demandes', icon: <FileClock size={15} aria-hidden="true" /> },
+];
+
+function Field({ label, required = false, hint, children, wide = false }) {
+  return (
+    <label className={`gsprof-field${wide ? ' gsprof-field--wide' : ''}`}>
+      <span>{label}{required ? <b aria-hidden="true">*</b> : null}</span>
+      {children}
+      {hint ? <small>{hint}</small> : null}
     </label>
-    {children}
-    {hint && <p style={{ fontSize:11, color:'var(--text-muted)', marginTop:3 }}>{hint}</p>}
-  </div>
-);
-const inp = {
-  width:'100%', background:'var(--bg-input)', border:'1px solid var(--border-default)',
-  borderRadius:8, padding:'9px 12px', color:'var(--text-primary)', fontSize:'var(--font-sm)',
-  outline:'none', boxSizing:'border-box', fontFamily:'inherit', transition:'border-color 0.15s',
-};
-const Input    = (p) => <input    {...p} style={{ ...inp, ...p.style }}
-  onFocus={e => e.target.style.borderColor='var(--color-primary)'}
-  onBlur={e  => e.target.style.borderColor='var(--border-default)'} />;
-const Select   = ({ children, ...p }) => <select   {...p} style={{ ...inp }}>{children}</select>;
-const Textarea = (p) => <textarea {...p} style={{ ...inp, minHeight:72, resize:'vertical', ...p.style }} />;
+  );
+}
 
-// ══════════════════════════════════════════════════════════════
-// Onglet avatar
-// ══════════════════════════════════════════════════════════════
+function StatusBadge({ status, long = false }) {
+  const config = STATUS[status] || STATUS.pending;
+  const Icon = config.icon;
+  return (
+    <GsBadge tone={config.tone} icon={<Icon size={13} aria-hidden="true" />}>
+      {long ? config.label : config.shortLabel}
+    </GsBadge>
+  );
+}
+
+function ProfileSummary({ profile, onOpenPhoto }) {
+  const pending = profile.pendingRequest?.status === 'pending';
+  return (
+    <section className="gsprof-summary" aria-label="Identité professionnelle">
+      <button type="button" className="gsprof-summary__avatar" onClick={onOpenPhoto} aria-label="Modifier la photo de profil">
+        <Avatar avatarUrl={profile.avatar_url} firstName={profile.first_name} lastName={profile.last_name} size="xl" />
+        <Camera size={15} aria-hidden="true" />
+      </button>
+      <div className="gsprof-summary__identity">
+        <span className="gs-eyebrow">Identité professionnelle</span>
+        <h2>{profile.first_name} {profile.last_name}</h2>
+        <p>{profile.role_name || 'Rôle non renseigné'}</p>
+      </div>
+      <dl className="gsprof-summary__facts">
+        <div><dt>Établissement</dt><dd>{profile.establishment_name || 'Non renseigné'}</dd></div>
+        <div><dt>Matricule</dt><dd className="gs-num">{profile.matricule || '—'}</dd></div>
+        <div><dt>Adresse email</dt><dd>{profile.email}</dd></div>
+      </dl>
+      {pending ? (
+        <div className="gsprof-summary__state">
+          <StatusBadge status="pending" long />
+          <span>Vos changements restent visibles ici jusqu’à leur décision.</span>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function AvatarTab({ profile }) {
-  const qc = useQueryClient();
-  const { updateAvatar } = useAuthStore();
-  const fileRef = useRef();
+  const queryClient = useQueryClient();
+  const updateAvatar = useAuthStore((state) => state.updateAvatar);
+  const inputRef = useRef(null);
   const [preview, setPreview] = useState(null);
-  // Le fichier choisi est conservé ici et non relu depuis l'input : un fichier
-  // glissé-déposé n'alimente PAS `fileRef.current.files`, donc l'upload restait
-  // sans effet pour ce chemin-là.
   const [pendingFile, setPendingFile] = useState(null);
   const [dragOver, setDragOver] = useState(false);
 
-  const avatarUrl = preview
-    ? preview
-    : profile.avatar_url
-      ? (profile.avatar_url.startsWith('http') ? profile.avatar_url : `${API_BASE}${profile.avatar_url}`)
-      : null;
-
-  const uploadMut = useMutation({
+  const upload = useMutation({
     mutationFn: (file) => profileAPI.uploadAvatar(file),
-    onSuccess: (res) => {
+    onSuccess: (response) => {
+      const avatarUrl = response.data?.data?.avatarUrl;
       toast.success('Photo de profil mise à jour');
       setPreview(null);
       setPendingFile(null);
-      if (fileRef.current) fileRef.current.value = '';
-      updateAvatar(res.data.data.avatarUrl);
-      qc.invalidateQueries({ queryKey: ['profile'] });
+      if (inputRef.current) inputRef.current.value = '';
+      updateAvatar(avatarUrl);
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
-    onError: (e) => toast.error(e.response?.data?.message || 'Erreur lors de l\'upload'),
+    onError: (error) => toast.error(error.response?.data?.message || "Erreur lors de l'upload"),
   });
 
-  const deleteMut = useMutation({
+  const remove = useMutation({
     mutationFn: () => profileAPI.deleteAvatar(),
     onSuccess: () => {
       toast.success('Photo supprimée');
       setPreview(null);
       setPendingFile(null);
-      if (fileRef.current) fileRef.current.value = '';
+      if (inputRef.current) inputRef.current.value = '';
       updateAvatar(null);
-      qc.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
     onError: () => toast.error('Erreur lors de la suppression'),
   });
 
-  const handleFile = (file) => {
+  const chooseFile = (file) => {
     if (!file) return;
-    if (!['image/jpeg','image/png','image/webp'].includes(file.type)) {
-      return toast.error('Format non supporté (JPG, PNG, WebP)');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      toast.error('Format non supporté. Utilisez JPG, PNG ou WebP.');
+      return;
     }
-    if (file.size > 5 * 1024 * 1024) return toast.error('Fichier trop volumineux (max 5 Mo)');
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Fichier trop volumineux : 5 Mo maximum.');
+      return;
+    }
     setPendingFile(file);
     const reader = new FileReader();
-    reader.onload = (e) => setPreview(e.target.result);
+    reader.onload = (event) => setPreview(event.target.result);
     reader.readAsDataURL(file);
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault(); setDragOver(false);
-    handleFile(e.dataTransfer.files[0]);
-  };
-
-  const handleCancel = () => {
+  const cancelPreview = () => {
     setPreview(null);
     setPendingFile(null);
-    if (fileRef.current) fileRef.current.value = '';
-  };
-
-  const handleUpload = () => {
-    // Le fichier vient de l'état, pas de l'input : cela couvre aussi bien le
-    // clic que le glisser-déposer.
-    if (!pendingFile) return;
-    uploadMut.mutate(pendingFile);
+    if (inputRef.current) inputRef.current.value = '';
   };
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto' }}>
-      {/* Zone d'upload */}
+    <GsPanel title="Photo de profil" sub="Une image carrée et nette reste lisible dans l’annuaire comme dans les plannings." icon={<ImagePlus size={18} aria-hidden="true" />} className="gsprof-photo-panel">
       <div
-        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        className={`gsprof-dropzone${dragOver ? ' is-over' : ''}`}
+        onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => fileRef.current?.click()}
-        style={{
-          border: `2px dashed ${dragOver ? 'var(--color-primary)' : 'var(--border-default)'}`,
-          borderRadius: 16, padding: 36, textAlign: 'center',
-          cursor: 'pointer', transition: 'all 0.2s',
-          background: dragOver ? 'var(--color-primary-10)' : 'var(--bg-elevated)',
-          marginBottom: 24,
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragOver(false);
+          chooseFile(event.dataTransfer.files[0]);
         }}
       >
-        {/* Aperçu */}
-        <div style={{ display:'flex', justifyContent:'center', marginBottom:16, position:'relative' }}>
-          <Avatar
-            avatarUrl={avatarUrl}
-            firstName={profile.first_name}
-            lastName={profile.last_name}
-            size="2xl"
-            style={{
-              border: '4px solid var(--color-primary)',
-              boxShadow: '0 0 0 4px var(--color-primary-10)',
-            }}
-          />
-          {/* Icône caméra overlay */}
-          <div style={{
-            position:'absolute', bottom:0, right:'calc(50% - 48px - 12px)',
-            background:'var(--color-primary)', borderRadius:'50%', width:30, height:30,
-            display:'flex', alignItems:'center', justifyContent:'center',
-            border:'2px solid var(--bg-card)', boxShadow:'var(--shadow-md)',
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
-              <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
-              <circle cx="12" cy="13" r="4"/>
-            </svg>
-          </div>
+        <div className="gsprof-dropzone__preview">
+          <Avatar avatarUrl={preview || profile.avatar_url} firstName={profile.first_name} lastName={profile.last_name} size="2xl" />
+          <Camera size={17} aria-hidden="true" />
         </div>
-
-        <p style={{ fontWeight:700, color:'var(--text-primary)', marginBottom:4, fontSize:'var(--font-sm)' }}>
-          {dragOver ? 'Déposez ici…' : 'Cliquez ou glissez-déposez une image'}
-        </p>
-        <p style={{ fontSize:11, color:'var(--text-muted)' }}>JPG, PNG, WebP — max 5 Mo · Recadrée en 200×200px</p>
-        <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp"
-          style={{ display:'none' }} onChange={e => handleFile(e.target.files[0])} />
+        <div className="gsprof-dropzone__copy">
+          <strong>{dragOver ? 'Relâchez le fichier ici' : 'Déposez une nouvelle photo'}</strong>
+          <span>JPG, PNG ou WebP · 5 Mo maximum · recadrage automatique en 200 × 200 px</span>
+        </div>
+        <button type="button" className="gs-btn" onClick={() => inputRef.current?.click()}>
+          <Upload size={15} aria-hidden="true" /> Choisir un fichier
+        </button>
+        <input ref={inputRef} className="gsprof-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => chooseFile(event.target.files[0])} />
       </div>
 
-      {/* Actions */}
-      <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
+      <div className="gsprof-photo-actions">
         {preview ? (
           <>
-            <button className="btn btn-secondary" onClick={handleCancel}>Annuler</button>
-            <button className="btn btn-primary" onClick={handleUpload} disabled={uploadMut.isPending || !pendingFile}>
-              {uploadMut.isPending ? '⏳ Upload…' : '💾 Enregistrer cette photo'}
+            <button type="button" className="gs-btn" onClick={cancelPreview}><X size={15} aria-hidden="true" /> Annuler</button>
+            <button type="button" className="gs-btn is-primary" onClick={() => upload.mutate(pendingFile)} disabled={upload.isPending || !pendingFile}>
+              <Save size={15} aria-hidden="true" /> {upload.isPending ? 'Enregistrement…' : 'Enregistrer la photo'}
             </button>
           </>
-        ) : (
-          <>
-            <button className="btn btn-secondary" onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}>
-              📷 Changer la photo
-            </button>
-            {profile.avatar_url && (
-              <button className="btn btn-danger" onClick={e => { e.stopPropagation(); deleteMut.mutate(); }}
-                disabled={deleteMut.isPending}>
-                🗑️ Supprimer
-              </button>
-            )}
-          </>
-        )}
+        ) : profile.avatar_url ? (
+          <button type="button" className="gs-btn is-danger" onClick={() => remove.mutate()} disabled={remove.isPending}>
+            <Trash2 size={15} aria-hidden="true" /> {remove.isPending ? 'Suppression…' : 'Supprimer la photo'}
+          </button>
+        ) : null}
       </div>
 
-      {/* Conseils */}
-      <div style={{
-        marginTop:28, background:'var(--bg-elevated)', borderRadius:10,
-        padding:'14px 18px', border:'1px solid var(--border-subtle)',
-      }}>
-        <p style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', marginBottom:8, textTransform:'uppercase' }}>
-          Conseils pour une bonne photo
-        </p>
-        {['Utilisez une photo de profil professionnelle',
-          'Votre visage doit être bien visible et centré',
-          'Fond uni de préférence',
-          'L\'image sera recadrée automatiquement en carré 200×200px'].map(tip => (
-          <p key={tip} style={{ fontSize:12, color:'var(--text-secondary)', marginBottom:4 }}>
-            ✓ {tip}
-          </p>
-        ))}
+      <div className="gsprof-photo-guidance">
+        <strong>Repères de cadrage</strong>
+        <ul>
+          <li><Check size={13} aria-hidden="true" /> visage visible et centré ;</li>
+          <li><Check size={13} aria-hidden="true" /> fond simple et lumière régulière ;</li>
+          <li><Check size={13} aria-hidden="true" /> image professionnelle récente.</li>
+        </ul>
       </div>
-    </div>
+    </GsPanel>
   );
 }
 
-// ══════════════════════════════════════════════════════════════
-// Onglet infos personnelles (avec approbation)
-// ══════════════════════════════════════════════════════════════
 function ProfileInfoTab({ profile }) {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   const [form, setForm] = useState({
     first_name: profile.first_name || '', last_name: profile.last_name || '',
     first_name_ar: profile.first_name_ar || '', last_name_ar: profile.last_name_ar || '',
     phone: profile.phone || '', birth_date: profile.birth_date?.split('T')[0] || '',
-    gender: profile.gender || 'non_renseigne', address: profile.address || '',
-    city: profile.city || '', id_card_number: profile.id_card_number || '',
-    id_card_expiry: profile.id_card_expiry?.split('T')[0] || '',
-    hire_date: profile.hire_date?.split('T')[0] || '',
-    speciality: profile.speciality || '', grade: profile.grade || '',
-    matricule: profile.matricule || '', bio: profile.bio || '',
+    gender: profile.gender || 'non_renseigne', address: profile.address || '', city: profile.city || '',
+    id_card_number: profile.id_card_number || '', id_card_expiry: profile.id_card_expiry?.split('T')[0] || '',
+    hire_date: profile.hire_date?.split('T')[0] || '', speciality: profile.speciality || '',
+    grade: profile.grade || '', matricule: profile.matricule || '', bio: profile.bio || '',
   });
 
-  const mutation = useMutation({
+  const requestChange = useMutation({
     mutationFn: (data) => profileAPI.requestChange(data),
-    onSuccess: (res) => { toast.success(res.data.message || 'Demande soumise'); qc.invalidateQueries({ queryKey: ['profile'] }); },
-    onError: (e) => toast.error(e.response?.data?.message || 'Erreur'),
+    onSuccess: (response) => {
+      toast.success(response.data?.message || 'Demande soumise');
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: ['my-profile-requests'] });
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Erreur'),
   });
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!form.first_name || !form.last_name) return toast.error('Prénom et Nom requis');
-    mutation.mutate(form);
+  const change = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
+  const submit = (event) => {
+    event.preventDefault();
+    if (!form.first_name.trim() || !form.last_name.trim()) {
+      toast.error('Le prénom et le nom sont requis.');
+      return;
+    }
+    requestChange.mutate(form);
   };
 
-  const pending = profile.pendingRequest;
-
   return (
-    <form onSubmit={handleSubmit}>
-      {/* Bandeau statut demande */}
-      {pending && (
-        <div style={{
-          background: STATUS_STYLE[pending.status]?.bg,
-          border:`1px solid ${STATUS_STYLE[pending.status]?.color}44`,
-          borderRadius:10, padding:'14px 18px', marginBottom:24, display:'flex', gap:12,
-        }}>
-          <span style={{ fontSize:20 }}>{STATUS_STYLE[pending.status]?.icon}</span>
+    <form className="gsprof-form" onSubmit={submit}>
+      {profile.pendingRequest ? (
+        <div className="gsprof-request-callout" data-status={profile.pendingRequest.status}>
+          <StatusBadge status={profile.pendingRequest.status} long />
           <div>
-            <p style={{ fontWeight:700, color:STATUS_STYLE[pending.status]?.color, fontSize:'var(--font-sm)' }}>
-              {STATUS_STYLE[pending.status]?.label}
-            </p>
-            <p style={{ fontSize:11, color:'var(--text-secondary)', marginTop:3 }}>
-              Champs : <strong>{pending.changed_fields?.map(f => FIELD_LABELS[f]||f).join(', ')}</strong>
-            </p>
-            {pending.rejection_reason && (
-              <p style={{ fontSize:11, color:'var(--color-danger)', marginTop:3 }}>Motif : {pending.rejection_reason}</p>
-            )}
+            <strong>Demande en cours de traitement</strong>
+            <p>Champs concernés : {profile.pendingRequest.changed_fields?.map((field) => FIELD_LABELS[field] || field).join(', ') || 'non précisés'}.</p>
+            {profile.pendingRequest.rejection_reason ? <p>Motif : {profile.pendingRequest.rejection_reason}</p> : null}
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Infos établissement (non modifiables) */}
-      <div style={{ background:'var(--bg-elevated)', borderRadius:10, padding:'16px 20px',
-        marginBottom:24, border:'1px solid var(--border-subtle)' }}>
-        <p style={{ fontSize:10, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:12 }}>
-          🏥 Établissement · {profile.establishment_name}
-        </p>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:12 }}>
-          {[['Rôle', profile.role_name], ['Code', profile.establishment_code],
-            ['Type', profile.establishment_type], ['Email', profile.email]].map(([l, v]) => (
-            <div key={l}>
-              <p style={{ fontSize:10, color:'var(--text-muted)' }}>{l}</p>
-              <p style={{ fontWeight:600, color:'var(--text-primary)', fontSize:'var(--font-sm)' }}>{v || '—'}</p>
-            </div>
-          ))}
-        </div>
-        {profile.departments?.length > 0 && (
-          <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid var(--border-subtle)' }}>
-            <p style={{ fontSize:10, color:'var(--text-muted)', marginBottom:6 }}>Services</p>
-            <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-              {profile.departments.map(d => (
-                <span key={d.id} style={{
-                  background: d.is_head ? 'var(--color-primary-10)' : 'var(--bg-card)',
-                  border:`1px solid ${d.is_head ? 'var(--color-primary)' : 'var(--border-default)'}`,
-                  borderRadius:6, padding:'2px 10px', fontSize:11, fontWeight:600,
-                  color: d.is_head ? 'var(--color-primary-light)' : 'var(--text-secondary)',
-                }}>
-                  {d.is_head ? '👑 ' : ''}{d.name}
-                </span>
+      <GsPanel title="Cadre professionnel" sub="Ces informations sont administrées par votre établissement et ne sont pas modifiables ici." icon={<Building2 size={18} aria-hidden="true" />} className="gsprof-work-panel">
+        <dl className="gsprof-work-grid">
+          <div><dt>Établissement</dt><dd>{profile.establishment_name || '—'}</dd></div>
+          <div><dt>Code</dt><dd className="gs-num">{profile.establishment_code || '—'}</dd></div>
+          <div><dt>Type</dt><dd>{profile.establishment_type || '—'}</dd></div>
+          <div><dt>Rôle</dt><dd>{profile.role_name || '—'}</dd></div>
+          <div><dt>Email</dt><dd>{profile.email || '—'}</dd></div>
+        </dl>
+        {profile.departments?.length ? (
+          <div className="gsprof-departments">
+            <span>Services</span>
+            <div>
+              {profile.departments.map((department) => (
+                <GsBadge key={department.id} tone={department.is_head ? 'seal' : 'quiet'}>
+                  {department.name}{department.is_head ? ' · responsable' : ''}
+                </GsBadge>
               ))}
             </div>
           </div>
-        )}
-      </div>
+        ) : null}
+      </GsPanel>
 
-      {/* Formulaire */}
-      <div style={{ background:'var(--bg-card)', border:'1px solid var(--border-default)', borderRadius:12, padding:24, marginBottom:20 }}>
-        <p style={{ fontSize:10, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', marginBottom:20 }}>
-          ✏️ Informations personnelles
-          <span style={{ color:'var(--color-warning)', textTransform:'none', fontSize:10, fontStyle:'italic', marginLeft:8 }}>
-            — Nécessite l'approbation du Super Admin
-          </span>
-        </p>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 20px' }}>
-          <Field label="Prénom" required><Input value={form.first_name} onChange={e=>setForm(f=>({...f,first_name:e.target.value}))} /></Field>
-          <Field label="Nom" required><Input value={form.last_name} onChange={e=>setForm(f=>({...f,last_name:e.target.value}))} /></Field>
-          <Field label="Prénom (arabe)"><Input value={form.first_name_ar} onChange={e=>setForm(f=>({...f,first_name_ar:e.target.value}))} dir="rtl" placeholder="الاسم الأول" /></Field>
-          <Field label="Nom (arabe)"><Input value={form.last_name_ar} onChange={e=>setForm(f=>({...f,last_name_ar:e.target.value}))} dir="rtl" placeholder="اللقب" /></Field>
-          <Field label="Téléphone"><Input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="+213 …" /></Field>
-          <Field label="Genre">
-            <Select value={form.gender} onChange={e=>setForm(f=>({...f,gender:e.target.value}))}>
-              <option value="non_renseigne">Non renseigné</option>
-              <option value="homme">Homme</option>
-              <option value="femme">Femme</option>
-            </Select>
-          </Field>
-          <Field label="Date de naissance"><Input type="date" value={form.birth_date} onChange={e=>setForm(f=>({...f,birth_date:e.target.value}))} /></Field>
-          <Field label="Date de recrutement"><Input type="date" value={form.hire_date} onChange={e=>setForm(f=>({...f,hire_date:e.target.value}))} /></Field>
-          <Field label="Matricule"><Input value={form.matricule} onChange={e=>setForm(f=>({...f,matricule:e.target.value}))} /></Field>
-          <Field label="N° Carte Nationale"><Input value={form.id_card_number} onChange={e=>setForm(f=>({...f,id_card_number:e.target.value}))} /></Field>
-          <Field label="Expiration CIN"><Input type="date" value={form.id_card_expiry} onChange={e=>setForm(f=>({...f,id_card_expiry:e.target.value}))} /></Field>
-          <Field label="Spécialité"><Input value={form.speciality} onChange={e=>setForm(f=>({...f,speciality:e.target.value}))} /></Field>
-          <Field label="Grade"><Input value={form.grade} onChange={e=>setForm(f=>({...f,grade:e.target.value}))} /></Field>
-          <Field label="Ville"><Input value={form.city} onChange={e=>setForm(f=>({...f,city:e.target.value}))} /></Field>
+      <GsPanel title="Informations personnelles" sub="Une modification crée une demande traçable soumise au Super Admin." icon={<UserRound size={18} aria-hidden="true" />}>
+        <div className="gsprof-form-grid">
+          <Field label="Prénom" required><input value={form.first_name} onChange={change('first_name')} /></Field>
+          <Field label="Nom" required><input value={form.last_name} onChange={change('last_name')} /></Field>
+          <Field label="Prénom (arabe)"><input dir="rtl" value={form.first_name_ar} onChange={change('first_name_ar')} /></Field>
+          <Field label="Nom (arabe)"><input dir="rtl" value={form.last_name_ar} onChange={change('last_name_ar')} /></Field>
+          <Field label="Téléphone"><input value={form.phone} onChange={change('phone')} placeholder="+216 …" /></Field>
+          <Field label="Genre"><select value={form.gender} onChange={change('gender')}><option value="non_renseigne">Non renseigné</option><option value="homme">Homme</option><option value="femme">Femme</option></select></Field>
+          <Field label="Date de naissance"><input type="date" value={form.birth_date} onChange={change('birth_date')} /></Field>
+          <Field label="Date de recrutement"><input type="date" value={form.hire_date} onChange={change('hire_date')} /></Field>
+          <Field label="Matricule"><input value={form.matricule} onChange={change('matricule')} /></Field>
+          <Field label="N° Carte nationale"><input value={form.id_card_number} onChange={change('id_card_number')} /></Field>
+          <Field label="Expiration CIN"><input type="date" value={form.id_card_expiry} onChange={change('id_card_expiry')} /></Field>
+          <Field label="Fonction / titre"><input value={form.speciality} onChange={change('speciality')} /></Field>
+          <Field label="Grade"><input value={form.grade} onChange={change('grade')} /></Field>
+          <Field label="Ville"><input value={form.city} onChange={change('city')} /></Field>
+          <Field label="Adresse" wide><textarea value={form.address} onChange={change('address')} /></Field>
+          <Field label="Biographie / notes" wide><textarea value={form.bio} onChange={change('bio')} /></Field>
         </div>
-        <Field label="Adresse"><Textarea value={form.address} onChange={e=>setForm(f=>({...f,address:e.target.value}))} placeholder="Rue, quartier, commune…" /></Field>
-        <Field label="Bio / Notes"><Textarea value={form.bio} onChange={e=>setForm(f=>({...f,bio:e.target.value}))} style={{ minHeight:56 }} /></Field>
-      </div>
+      </GsPanel>
 
-      <div style={{ display:'flex', justifyContent:'flex-end' }}>
-        <button type="submit" className="btn btn-primary" style={{ minWidth:220 }} disabled={mutation.isPending}>
-          {mutation.isPending ? '⏳ Soumission…' : '📤 Soumettre pour approbation'}
+      <div className="gsprof-form-actions">
+        <span>Les anciennes demandes restent dans l’historique, sans réécriture.</span>
+        <button type="submit" className="gs-btn is-primary" disabled={requestChange.isPending}>
+          <Upload size={15} aria-hidden="true" /> {requestChange.isPending ? 'Soumission…' : 'Soumettre les modifications'}
         </button>
       </div>
     </form>
   );
 }
 
-// ══════════════════════════════════════════════════════════════
-// Onglet Sécurité (email + mdp directs)
-// ══════════════════════════════════════════════════════════════
 function SecurityTab({ profile }) {
-  const { user, updateUser } = useAuthStore();
-  const [email, setEmail]   = useState(profile.email);
-  const [pwd, setPwd]       = useState({ current:'', next:'', confirm:'' });
-  const [showPwd, setShow]  = useState(false);
+  const updateUser = useAuthStore((state) => state.updateUser);
+  const [email, setEmail] = useState(profile.email || '');
+  const [password, setPassword] = useState({ current: '', next: '', confirm: '' });
+  const [showPassword, setShowPassword] = useState(false);
 
-  const emailMut = useMutation({
-    mutationFn: (d) => profileAPI.updateCredentials(d),
-    onSuccess: () => { toast.success('Email mis à jour'); updateUser({ email }); },
-    onError: (e) => toast.error(e.response?.data?.message || 'Erreur'),
+  const updateEmail = useMutation({
+    mutationFn: (data) => profileAPI.updateCredentials(data),
+    onSuccess: () => { toast.success('Adresse email mise à jour'); updateUser({ email }); },
+    onError: (error) => toast.error(error.response?.data?.message || 'Erreur'),
+  });
+  const updatePassword = useMutation({
+    mutationFn: (data) => profileAPI.updateCredentials(data),
+    onSuccess: () => {
+      toast.success('Mot de passe modifié. Reconnectez-vous sur vos autres appareils.');
+      setPassword({ current: '', next: '', confirm: '' });
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Erreur'),
   });
 
-  const pwdMut = useMutation({
-    mutationFn: (d) => profileAPI.updateCredentials(d),
-    onSuccess: () => { toast.success('Mot de passe changé — reconnectez-vous'); setPwd({ current:'', next:'', confirm:'' }); },
-    onError: (e) => toast.error(e.response?.data?.message || 'Erreur'),
-  });
-
-  const checks = [
-    { ok: pwd.next.length >= 8,              label: '8 caractères min.' },
-    { ok: /[A-Z]/.test(pwd.next),            label: 'Majuscule' },
-    { ok: /[0-9]/.test(pwd.next),            label: 'Chiffre' },
-    { ok: /[^A-Za-z0-9]/.test(pwd.next),    label: 'Caractère spécial' },
+  const passwordChecks = [
+    { label: '8 caractères minimum', ok: password.next.length >= 8 },
+    { label: 'une majuscule', ok: /[A-Z]/.test(password.next) },
+    { label: 'un chiffre', ok: /[0-9]/.test(password.next) },
+    { label: 'un caractère spécial', ok: /[^A-Za-z0-9]/.test(password.next) },
   ];
 
+  const submitPassword = (event) => {
+    event.preventDefault();
+    if (password.next !== password.confirm) return toast.error('Les mots de passe ne correspondent pas.');
+    if (password.next.length < 8) return toast.error('Le mot de passe doit contenir au moins 8 caractères.');
+    updatePassword.mutate({ currentPassword: password.current, newPassword: password.next });
+  };
+
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
-      {/* Email */}
-      <div style={{ background:'var(--bg-card)', border:'1px solid var(--border-default)', borderRadius:12, padding:24 }}>
-        <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:18 }}>
-          <div style={{ background:'var(--color-info-10)', color:'var(--color-info)', borderRadius:8, padding:8, display:'flex' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
-            </svg>
-          </div>
-          <div>
-            <p style={{ fontWeight:700, fontSize:'var(--font-sm)', margin:0 }}>Adresse email</p>
-            <p style={{ fontSize:11, color:'var(--color-success)', margin:0 }}>✓ Modification immédiate</p>
-          </div>
+    <div className="gsprof-security-grid">
+      <GsPanel title="Adresse email" sub="Cette modification est immédiate et sert à votre prochaine connexion." icon={<Mail size={18} aria-hidden="true" />}>
+        <div className="gsprof-inline-form">
+          <Field label="Nouvelle adresse email"><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></Field>
+          <button type="button" className="gs-btn is-primary" disabled={updateEmail.isPending || !email || email === profile.email} onClick={() => updateEmail.mutate({ email })}>
+            <Save size={15} aria-hidden="true" /> {updateEmail.isPending ? 'Enregistrement…' : "Mettre à jour l'email"}
+          </button>
         </div>
-        <Field label="Nouvel email">
-          <Input type="email" value={email} onChange={e => setEmail(e.target.value)} />
-        </Field>
-        <button className="btn btn-primary" disabled={emailMut.isPending || email === profile.email}
-          onClick={() => emailMut.mutate({ email })}>
-          {emailMut.isPending ? 'Enregistrement…' : 'Mettre à jour l\'email'}
-        </button>
-      </div>
+      </GsPanel>
 
-      {/* Mot de passe */}
-      <div style={{ background:'var(--bg-card)', border:'1px solid var(--border-default)', borderRadius:12, padding:24 }}>
-        <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:18 }}>
-          <div style={{ background:'var(--color-danger-10)', color:'var(--color-danger)', borderRadius:8, padding:8, display:'flex' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
-            </svg>
-          </div>
-          <div>
-            <p style={{ fontWeight:700, fontSize:'var(--font-sm)', margin:0 }}>Mot de passe</p>
-            <p style={{ fontSize:11, color:'var(--color-success)', margin:0 }}>✓ Modification immédiate</p>
-          </div>
-        </div>
-        <Field label="Mot de passe actuel" required>
-          <div style={{ position:'relative' }}>
-            <Input type={showPwd ? 'text' : 'password'} value={pwd.current}
-              onChange={e => setPwd(p=>({...p,current:e.target.value}))} placeholder="Votre mot de passe actuel" />
-            <button type="button" onClick={() => setShow(s=>!s)} style={{
-              position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
-              background:'none', border:'none', cursor:'pointer', color:'var(--text-muted)', padding:0 }}>
-              {showPwd ? '🙈' : '👁️'}
-            </button>
-          </div>
-        </Field>
-        <Field label="Nouveau mot de passe" required>
-          <Input type={showPwd ? 'text' : 'password'} value={pwd.next}
-            onChange={e => setPwd(p=>({...p,next:e.target.value}))} placeholder="8 caractères minimum" />
-        </Field>
-        <Field label="Confirmer" required>
-          <Input type={showPwd ? 'text' : 'password'} value={pwd.confirm}
-            onChange={e => setPwd(p=>({...p,confirm:e.target.value}))} />
-        </Field>
-
-        {pwd.next && (
-          <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:14 }}>
-            {checks.map(({ ok, label }) => (
-              <span key={label} style={{ fontSize:11, color: ok ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                {ok ? '✓' : '○'} {label}
-              </span>
-            ))}
-          </div>
-        )}
-
-        <button className="btn btn-danger"
-          disabled={pwdMut.isPending || !pwd.current || !pwd.next || pwd.next !== pwd.confirm}
-          onClick={() => {
-            if (pwd.next !== pwd.confirm) return toast.error('Les mots de passe ne correspondent pas');
-            if (pwd.next.length < 8) return toast.error('Minimum 8 caractères');
-            pwdMut.mutate({ currentPassword: pwd.current, newPassword: pwd.next });
-          }}>
-          {pwdMut.isPending ? 'Modification…' : '🔒 Changer le mot de passe'}
-        </button>
-      </div>
+      <GsPanel title="Mot de passe" sub="La modification révoque les sessions renouvelables sur vos autres appareils." icon={<LockKeyhole size={18} aria-hidden="true" />}>
+        <form className="gsprof-password-form" onSubmit={submitPassword}>
+          <Field label="Mot de passe actuel" required>
+            <div className="gsprof-password-input">
+              <input type={showPassword ? 'text' : 'password'} value={password.current} onChange={(event) => setPassword((current) => ({ ...current, current: event.target.value }))} />
+              <button type="button" onClick={() => setShowPassword((shown) => !shown)} aria-label={showPassword ? 'Masquer les mots de passe' : 'Afficher les mots de passe'}>
+                {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+              </button>
+            </div>
+          </Field>
+          <Field label="Nouveau mot de passe" required><input type={showPassword ? 'text' : 'password'} value={password.next} onChange={(event) => setPassword((current) => ({ ...current, next: event.target.value }))} /></Field>
+          <Field label="Confirmation" required><input type={showPassword ? 'text' : 'password'} value={password.confirm} onChange={(event) => setPassword((current) => ({ ...current, confirm: event.target.value }))} /></Field>
+          {password.next ? (
+            <ul className="gsprof-password-checks">
+              {passwordChecks.map((check) => <li key={check.label} data-valid={check.ok ? 'true' : 'false'}>{check.ok ? <Check size={13} aria-hidden="true" /> : <span aria-hidden="true" />}{check.label}</li>)}
+            </ul>
+          ) : null}
+          <button type="submit" className="gs-btn is-danger" disabled={updatePassword.isPending || !password.current || !password.next || password.next !== password.confirm}>
+            <KeyRound size={15} aria-hidden="true" /> {updatePassword.isPending ? 'Modification…' : 'Changer le mot de passe'}
+          </button>
+        </form>
+      </GsPanel>
     </div>
   );
 }
 
-// ══════════════════════════════════════════════════════════════
-// Onglet Historique
-// ══════════════════════════════════════════════════════════════
 function RequestsTab() {
-  const { data, isLoading } = useQuery({
+  const { data: requests = [], isLoading } = useQuery({
     queryKey: ['my-profile-requests'],
-    queryFn: () => profileAPI.getMyRequests().then(r => r.data.data),
+    queryFn: () => profileAPI.getMyRequests().then((response) => response.data.data || []),
   });
 
-  if (isLoading) return <div style={{ padding:40, textAlign:'center', color:'var(--text-muted)' }}>Chargement…</div>;
-
-  if (!data?.length) return (
-    <div style={{ background:'var(--bg-card)', border:'1px solid var(--border-subtle)',
-      borderRadius:12, padding:48, textAlign:'center' }}>
-      <p style={{ fontSize:36, marginBottom:10 }}>📋</p>
-      <p style={{ color:'var(--text-muted)' }}>Aucune demande de modification</p>
-    </div>
-  );
+  if (isLoading) return <GsSkeleton variant="block" count={3} />;
+  if (!requests.length) {
+    return <GsEmpty icon={<FileClock size={27} aria-hidden="true" />} title="Aucune demande de modification" hint="Les changements soumis depuis l’onglet Informations apparaîtront ici avec leur décision." />;
+  }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-      {data.map(req => {
-        const st = STATUS_STYLE[req.status] || STATUS_STYLE.pending;
-        return (
-          <div key={req.id} style={{
-            background:'var(--bg-card)',
-            border:`1px solid ${st.color}33`,
-            borderLeft:`4px solid ${st.color}`,
-            borderRadius:10, padding:'16px 20px',
-          }}>
-            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
-              <span style={{ background:st.bg, color:st.color, borderRadius:20, padding:'2px 12px', fontSize:11, fontWeight:700 }}>
-                {st.icon} {st.label}
-              </span>
-              <span style={{ fontSize:11, color:'var(--text-muted)' }}>
-                {new Date(req.submitted_at).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' })}
-              </span>
+    <GsPanel title="Historique des demandes" sub="Le journal reste immuable : une nouvelle demande remplace la demande en attente sans effacer les précédentes." icon={<FileClock size={18} aria-hidden="true" />} flush>
+      <ol className="gsprof-request-list">
+        {requests.map((request) => (
+          <li key={request.id} data-status={request.status}>
+            <div className="gsprof-request-list__head">
+              <StatusBadge status={request.status} />
+              <time dateTime={request.submitted_at}>{REQUEST_DATE.format(new Date(request.submitted_at))}</time>
             </div>
-            <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:6 }}>
-              {req.changed_fields?.map(f => (
-                <span key={f} style={{
-                  background:'var(--bg-elevated)', border:'1px solid var(--border-default)',
-                  borderRadius:6, padding:'1px 8px', fontSize:11, color:'var(--text-secondary)',
-                }}>
-                  {FIELD_LABELS[f] || f}
-                </span>
-              ))}
-            </div>
-            {req.rejection_reason && (
-              <p style={{ fontSize:11, color:'var(--color-danger)', background:'var(--color-danger-10)', borderRadius:6, padding:'5px 10px' }}>
-                ❌ {req.rejection_reason}
-              </p>
-            )}
-          </div>
-        );
-      })}
-    </div>
+            <div className="gsprof-request-list__fields">{(request.changed_fields || []).map((field) => <span key={field}>{FIELD_LABELS[field] || field}</span>)}</div>
+            {request.reviewer_first || request.reviewer_last ? <p>Décision enregistrée par {[request.reviewer_first, request.reviewer_last].filter(Boolean).join(' ')}.</p> : null}
+            {request.rejection_reason ? <p className="gsprof-request-list__reason">Motif : {request.rejection_reason}</p> : null}
+          </li>
+        ))}
+      </ol>
+    </GsPanel>
   );
 }
-
-// ══════════════════════════════════════════════════════════════
-// PAGE PRINCIPALE
-// ══════════════════════════════════════════════════════════════
-const TABS = [
-  { id:'avatar',   label:'📷 Photo' },
-  { id:'profile',  label:'👤 Profil' },
-  { id:'security', label:'🔒 Sécurité' },
-  { id:'requests', label:'📋 Historique' },
-];
 
 export default function ProfilePage() {
   const [tab, setTab] = useState('avatar');
-
   const { data: profile, isLoading, error } = useQuery({
     queryKey: ['profile'],
-    queryFn: () => profileAPI.getProfile().then(r => r.data.data),
-    staleTime: 30000,
+    queryFn: () => profileAPI.getProfile().then((response) => response.data.data),
+    staleTime: 30_000,
   });
 
-  if (isLoading) return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      {[1,2,3,4].map(i => <div key={i} className="skeleton" style={{ height:60, borderRadius:10 }} />)}
-    </div>
-  );
-
-  if (error) return (
-    <div style={{ textAlign:'center', padding:60 }}>
-      <p style={{ fontSize:36, marginBottom:12 }}>⚠️</p>
-      <p style={{ color:'var(--color-danger)' }}>Impossible de charger le profil</p>
-    </div>
-  );
-
-  const avatarUrl = profile.avatar_url
-    ? (profile.avatar_url.startsWith('http') ? profile.avatar_url : `${API_BASE}${profile.avatar_url}`)
-    : null;
+  if (isLoading) return <div className="gsprof-page"><GsSkeleton variant="rail" count={3} /><GsSkeleton variant="block" count={3} /></div>;
+  if (error || !profile) {
+    return (
+      <div className="gsprof-page">
+        <GsEmpty icon={<XCircle size={27} aria-hidden="true" />} title="Impossible de charger le profil" hint="Vérifiez votre connexion, puis rechargez la page." actions={<button type="button" className="gs-btn" onClick={() => window.location.reload()}>Réessayer</button>} />
+      </div>
+    );
+  }
 
   return (
-    <div>
-      {/* En-tête hero */}
-      <div style={{
-        background:'linear-gradient(135deg, var(--color-primary) 0%, #6366F1 100%)',
-        borderRadius:16, padding:'28px 32px', marginBottom:'var(--space-6)',
-        display:'flex', alignItems:'center', gap:20, position:'relative', overflow:'hidden',
-      }}>
-        <div style={{ position:'absolute', inset:0,
-          backgroundImage:'radial-gradient(ellipse at 80% 50%, rgba(255,255,255,0.08), transparent)' }} />
-
-        <Avatar
-          avatarUrl={avatarUrl}
-          firstName={profile.first_name}
-          lastName={profile.last_name}
-          size="xl"
-          style={{ border:'3px solid rgba(255,255,255,0.5)', zIndex:1,
-            cursor:'pointer', boxShadow:'0 4px 20px rgba(0,0,0,0.3)' }}
-          onClick={() => setTab('avatar')}
-        />
-
-        <div style={{ zIndex:1, flex:1 }}>
-          <h1 style={{ color:'#fff', fontWeight:800, fontSize:'var(--font-2xl)', margin:0 }}>
-            {profile.first_name} {profile.last_name}
-          </h1>
-          <p style={{ color:'rgba(255,255,255,0.8)', margin:'4px 0 0', fontSize:'var(--font-sm)' }}>
-            {profile.role_name} · 🏥 {profile.establishment_name}
-          </p>
-          <p style={{ color:'rgba(255,255,255,0.6)', margin:'2px 0 0', fontSize:'var(--font-xs)' }}>
-            {profile.email}
-            {profile.matricule ? ` · Matricule : ${profile.matricule}` : ''}
-          </p>
-        </div>
-
-        {profile.pendingRequest?.status === 'pending' && (
-          <div style={{
-            background:'rgba(255,255,255,0.2)', borderRadius:8, padding:'8px 16px',
-            backdropFilter:'blur(8px)', zIndex:1,
-          }}>
-            <p style={{ color:'#fff', fontSize:11, fontWeight:700, margin:0 }}>⏳ Demande en attente</p>
-          </div>
-        )}
+    <div className="gsprof-page">
+      <GsPageHeader
+        eyebrow="Mon espace"
+        title="Mon profil"
+        subtitle="Votre identité, vos accès et toutes les demandes de modification dans un même dossier."
+        meta={[{ label: 'Établissement', value: profile.establishment_name || 'Non renseigné' }, { label: 'Rôle', value: profile.role_name || 'Non renseigné' }]}
+      >
+        <GsTabRail tabs={TABS} value={tab} onChange={setTab} label="Sections du profil" />
+      </GsPageHeader>
+      <ProfileSummary profile={profile} onOpenPhoto={() => setTab('avatar')} />
+      <div className="gsprof-content">
+        {tab === 'avatar' ? <AvatarTab profile={profile} /> : null}
+        {tab === 'profile' ? <ProfileInfoTab profile={profile} /> : null}
+        {tab === 'security' ? <SecurityTab profile={profile} /> : null}
+        {tab === 'requests' ? <RequestsTab /> : null}
       </div>
-
-      {/* Onglets */}
-      <div style={{
-        display:'flex', gap:4, background:'var(--bg-elevated)',
-        borderRadius:10, padding:4, marginBottom:'var(--space-6)', width:'fit-content',
-      }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            padding:'8px 18px', borderRadius:8, border:'none', cursor:'pointer',
-            fontWeight:600, fontSize:'var(--font-sm)', fontFamily:'inherit',
-            background: tab === t.id ? 'var(--color-primary)' : 'transparent',
-            color: tab === t.id ? '#fff' : 'var(--text-secondary)',
-            transition:'all 0.2s', whiteSpace:'nowrap',
-          }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Contenu */}
-      {tab === 'avatar'   && <AvatarTab profile={profile} />}
-      {tab === 'profile'  && <ProfileInfoTab profile={profile} />}
-      {tab === 'security' && <SecurityTab profile={profile} />}
-      {tab === 'requests' && <RequestsTab />}
     </div>
   );
 }

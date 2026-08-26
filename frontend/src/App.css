@@ -116,7 +116,7 @@
   }
 
   a {
-    color: var(--text-h);
+    color: var(--gs-ink);
     font-size: 16px;
     border-radius: 6px;
     background: var(--social-bg);

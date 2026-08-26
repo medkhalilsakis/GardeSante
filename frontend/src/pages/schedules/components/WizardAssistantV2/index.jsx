@@ -1,5 +1,5 @@
 /**
- * Assistant Intelligent V2 (Lot 7) — conteneur.
+ * Générateur de planning V2 (Lot 7) — conteneur.
  *
  * Écran neuf, monté à côté de `WizardAssistant` (V1) qui reste inchangé et
  * accessible : les deux cohabitent, l'utilisateur choisit à l'étape « méthode ».
@@ -63,7 +63,7 @@ export default function WizardAssistantV2({
       setDirty(false);
       setStep(2);
       const errs = data.validation?.counts?.errors || 0;
-      if (errs) toast(`Proposition générée — ${errs} anomalie(s) à corriger avant envoi`, { icon: '⚠️' });
+      if (errs) toast(`Proposition générée — ${errs} anomalie(s) à corriger avant envoi`);
       else toast.success('Proposition générée et vérifiée');
     },
     onError: (e) => toast.error(e?.response?.data?.message || 'Échec de la génération'),
@@ -94,7 +94,7 @@ export default function WizardAssistantV2({
       setProposal((p) => ({ ...p, rows: data.rows, validation: data.validation, metrics: data.metrics }));
       setDirty(false);
       const done = data.applied?.length || 0;
-      if (!done) toast('Aucune correction applicable en l\'état', { icon: 'ℹ️' });
+      if (!done) toast('Aucune correction applicable en l\'état');
       else toast.success(`${done} correction(s) appliquée(s)`);
     },
     onError: (e) => toast.error(e?.response?.data?.message || 'Échec des corrections'),
@@ -163,13 +163,14 @@ export default function WizardAssistantV2({
   }, [modes, mode]);
 
   // Édition d'une case : purement locale, puis revalidation serveur explicite.
-  const toggleCell = (userId, date, code) => {
+  // `onDuty` est un booléen — il n'y a plus de code de garde à poser.
+  const toggleCell = (userId, date, onDuty) => {
     setProposal((p) => ({
       ...p,
       rows: p.rows.map((r) => {
         if (r.userId !== userId) return r;
         const shifts = { ...r.shifts };
-        if (code) shifts[date] = code;
+        if (onDuty) shifts[date] = true;
         else delete shifts[date];
         return { ...r, shifts };
       }),
@@ -181,7 +182,7 @@ export default function WizardAssistantV2({
   const blocking = (proposal?.validation?.counts?.errors || 0) > 0;
 
   if (isLoading) {
-    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Chargement du service…</div>;
+    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--gs-ink-faint)' }}>Chargement du service…</div>;
   }
 
   return (
@@ -189,10 +190,10 @@ export default function WizardAssistantV2({
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
         <Btn variant="ghost" onClick={onBack}>← Retour</Btn>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)' }}>
-            Assistant Intelligent V2
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--gs-ink)' }}>
+            Générateur de planning
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: 12, color: 'var(--gs-ink-faint)' }}>
             {context?.department?.name} · {startDate} → {endDate} · {context?.daysCount || 0} jour(s)
           </div>
         </div>
@@ -246,7 +247,7 @@ export default function WizardAssistantV2({
 
       {step === 2 && !proposal && (
         <Section title="Aucune proposition">
-          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: 13, color: 'var(--gs-ink-faint)' }}>
             Revenez à l'étape « Mode de génération » pour lancer l'assistant.
           </div>
         </Section>
@@ -276,7 +277,7 @@ export default function WizardAssistantV2({
             <Btn
               onClick={() => confirm.mutate()}
               disabled={busy || blocking || dirty}
-              style={blocking || dirty ? undefined : { background: '#059669' }}
+              style={blocking || dirty ? undefined : { background: 'var(--gs-duty)' }}
             >
               {confirm.isPending ? 'Création…'
                 : blocking ? `${proposal.validation.counts.errors} anomalie(s) à corriger`

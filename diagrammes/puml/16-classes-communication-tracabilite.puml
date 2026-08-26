@@ -1,0 +1,241 @@
+' ============================================================================
+' GardeSanté — Diagramme de classes : communication et traçabilité
+'
+' Sources vérifiées (information_schema + pg_constraint + contrôleurs) :
+'   notes(3), note_attachments(0), note_reads(7), note_reminders(0),
+'   notifications(109), activity_logs(386), audit_logs(0).
+'
+' Contraintes CHECK relevées :
+'   chk_note_scope     : platform_directors | establishment_staff | department
+'   chk_note_priority  : low | normal | high | urgent
+'   chk_attachment_kind: image | pdf
+'
+' Règle de contrôleur vérifiée :
+'   notes.controller.js:41-56  resolveScope
+'     super admin -> 'platform_directors' ; directeur / surveillant général
+'     -> 'establishment_staff' ; chef de service -> 'department'.
+'
+' Recherche vérifiée : `audit_logs` n'apparaît que dans la migration
+' 001_schema.sql — aucun contrôleur ne l'alimente ni ne la lit.
+' ============================================================================
+@startuml 16-classes-communication-tracabilite
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam classAttributeIconSize 0
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  HeaderBackgroundColor #EEF2FF
+  FontStyle bold
+  AttributeFontSize 10
+  AttributeFontColor #334155
+  BackgroundColor<<autre paquet>> #F8FAFC
+  BorderColor<<autre paquet>> #94A3B8
+  HeaderBackgroundColor<<autre paquet>> #F1F5F9
+  FontColor<<autre paquet>> #475569
+  BackgroundColor<<association>> #FFFFFF
+  BorderColor<<association>> #7A3E9D
+  HeaderBackgroundColor<<association>> #F3E8FF
+  BackgroundColor<<immuable>> #FFFFFF
+  BorderColor<<immuable>> #0F766E
+  HeaderBackgroundColor<<immuable>> #E6F4F1
+  BackgroundColor<<inexploité>> #FEF3C7
+  BorderColor<<inexploité>> #B4530A
+  HeaderBackgroundColor<<inexploité>> #FDE68A
+  FontColor<<inexploité>> #7C2D12
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+hide circle
+hide methods
+
+title Diagramme de classes — Communication et traçabilité
+
+class Note {
+  + id : UUID
+  --
+  portée : VARCHAR(30)
+  titre : VARCHAR(255)
+  corps : TEXT
+  catégorie : VARCHAR(40) = 'note'
+  priorité : VARCHAR(10) = 'normal'
+  épinglée : BOOL = false
+  nombreDestinataires : INT = 0
+  publiéeLe : TIMESTAMPTZ
+  crééeLe : TIMESTAMPTZ
+  modifiéeLe : TIMESTAMPTZ
+  --
+  «CHECK» portée parmi platform_directors
+  | establishment_staff | department
+  «CHECK» priorité parmi low | normal |
+  high | urgent
+}
+
+class PièceJointe {
+  + id : UUID
+  --
+  nature : VARCHAR(10)
+  fichierUrl : TEXT
+  nomFichier : VARCHAR(255)
+  typeMime : VARCHAR(100)
+  tailleOctets : INT
+  --
+  «CHECK» nature parmi image | pdf
+}
+
+class AccuséDeLecture <<association>> {
+  luLe : TIMESTAMPTZ
+}
+
+class Relance {
+  + id : UUID
+  --
+  envoyéeLe : TIMESTAMPTZ
+}
+
+class Notification {
+  + id : UUID
+  --
+  type : VARCHAR(50)
+  titre : VARCHAR(255)
+  titreAr : VARCHAR(255)
+  message : TEXT
+  messageAr : TEXT
+  typeEntité : VARCHAR(50)
+  identifiantEntité : UUID
+  priorité : VARCHAR(20) = 'normal'
+  lue : BOOL = false
+  luLe : TIMESTAMPTZ
+  crééeLe : TIMESTAMPTZ
+}
+
+class JournalDActivité <<immuable>> {
+  + id : UUID
+  --
+  action : VARCHAR(80)
+  catégorie : VARCHAR(40) = 'general'
+  description : TEXT
+  descriptionAr : TEXT
+  typeEntité : VARCHAR(60)
+  identifiantEntité : UUID
+  métadonnées : JSONB
+  gravité : VARCHAR(10) = 'info'
+  adresseIP : VARCHAR(45)
+  agentUtilisateur : TEXT
+  crééLe : TIMESTAMPTZ
+}
+
+class JournalDAudit <<inexploité>> {
+  + id : UUID
+  --
+  action : VARCHAR(100)
+  typeEntité : VARCHAR(50)
+  identifiantEntité : UUID
+  ancienneValeur : JSONB
+  nouvelleValeur : JSONB
+  adresseIP : INET
+  agentUtilisateur : TEXT
+  crééLe : TIMESTAMPTZ
+}
+
+class Utilisateur <<autre paquet>> {
+  + id : UUID
+}
+
+class Service <<autre paquet>> {
+  + id : UUID
+}
+
+class Établissement <<autre paquet>> {
+  + id : UUID
+}
+
+Note "0..*" --> "1" Utilisateur : rédigée par
+Note "0..*" --> "0..1" Établissement : diffusée dans
+Note "0..*" --> "0..1" Service : restreinte au service
+Note "1" *-- "0..*" PièceJointe : porte
+Note "1" *-- "0..*" Relance : fait l'objet de
+
+Note "1" -- "0..*" AccuséDeLecture
+AccuséDeLecture "0..*" -- "1" Utilisateur
+
+Relance "0..*" --> "1" Utilisateur : destinataire
+Relance "0..*" --> "0..1" Utilisateur : envoyée par
+
+Notification "0..*" --> "1" Utilisateur : destinataire
+Notification "0..*" --> "0..1" Utilisateur : émetteur
+Notification "0..*" --> "1" Établissement : dans l'établissement
+
+JournalDActivité "0..*" --> "1" Utilisateur : auteur de l'action
+JournalDAudit "0..*" --> "0..1" Utilisateur : auteur de l'action
+JournalDAudit "0..*" --> "0..1" Établissement : dans l'établissement
+
+note as N1
+  **La portée d'une note est imposée par le rôle, pas choisie.**
+  `resolveScope` l'attribue : le super administrateur
+  écrit aux directeurs de la plateforme, le directeur et
+  le surveillant général à tout le personnel de
+  l'établissement, le chef de service au seul personnel
+  de son service. Un auteur ne peut donc pas élargir sa
+  diffusion au-delà de son périmètre.
+end note
+
+note as N2
+  **`AccuséDeLecture` est une classe-association** de
+  clé primaire composite (note, utilisateur) : elle
+  matérialise qui a lu quoi et quand. `Relance` permet
+  au diffuseur de rappeler la note aux destinataires
+  n'ayant pas encore d'accusé.
+end note
+
+note as N3
+  **`JournalDActivité` est en écriture seule.**
+  Aucune route de modification ni de suppression n'est
+  exposée : la table s'écrit et se lit, jamais ne se
+  corrige. Tout acteur y voit ses propres actions ;
+  seuls les rôles de direction lisent celles des
+  autres, bornées à leur périmètre. `adresseIP` et
+  `agentUtilisateur` permettent d'imputer l'action à un
+  poste.
+end note
+
+note as N4
+  **`JournalDAudit` n'est jamais alimentée.**
+  La table, prévue pour conserver l'avant/après de
+  chaque modification (`ancienneValeur`,
+  `nouvelleValeur`), n'est citée que par la migration
+  de création. La traçabilité effective repose
+  entièrement sur `JournalDActivité`, qui décrit
+  l'action sans conserver les valeurs remplacées.
+  À porter en perspective : le différentiel de valeurs
+  serait la brique manquante d'un audit complet.
+end note
+
+note as N5
+  `Notification` est un canal strictement interne :
+  aucun courriel n'est émis. La dépendance
+  `nodemailer` est déclarée au `package.json` mais
+  n'est importée par aucun module — vérifié par
+  recherche sur l'ensemble du backend. La diffusion
+  temps réel se fait par `socket.io`, sur les salons
+  `user:`, `establishment:` et `department:`.
+end note
+
+N1 .. Note
+N2 .. AccuséDeLecture
+N3 .. JournalDActivité
+N4 .. JournalDAudit
+N5 .. Notification
+
+legend right
+  Vert : journal immuable, sans route d'écriture ni de suppression.
+  Violet : classe-association.
+  Orange : table présente au schéma, sans usage applicatif.
+  Gris : entité d'un autre paquet, citée pour l'association.
+endlegend
+
+@enduml

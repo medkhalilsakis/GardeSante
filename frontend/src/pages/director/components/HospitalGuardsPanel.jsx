@@ -43,8 +43,8 @@ const isLate = (a) => String(a.type_name || '').toLowerCase().includes('retard')
 
 const Empty = ({ children }) => (
   <div style={{
-    padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)',
-    background: 'var(--bg-card)', border: '1px dashed var(--border-default)',
+    padding: 32, textAlign: 'center', color: 'var(--gs-ink-faint)', fontSize: 'var(--font-sm)',
+    background: 'var(--gs-paper)', border: '1px dashed var(--gs-rule)',
     borderRadius: 'var(--border-radius-lg)',
   }}>
     {children}
@@ -53,9 +53,9 @@ const Empty = ({ children }) => (
 
 const SectionTitle = ({ children, hint }) => (
   <div style={{ marginBottom: 10 }}>
-    <h4 style={{ fontSize: 'var(--font-md)', fontWeight: 700, color: 'var(--text-primary)' }}>{children}</h4>
+    <h4 style={{ fontSize: 'var(--font-md)', fontWeight: 700, color: 'var(--gs-ink)' }}>{children}</h4>
     {hint && (
-      <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 2 }}>{hint}</p>
+      <p style={{ fontSize: 'var(--font-xs)', color: 'var(--gs-ink-faint)', marginTop: 2 }}>{hint}</p>
     )}
   </div>
 );
@@ -92,7 +92,7 @@ export default function HospitalGuardsPanel() {
         </div>
 
         {isError ? (
-          <div style={{ padding: 32, textAlign: 'center', color: 'var(--color-danger)', fontSize: 'var(--font-sm)' }}>
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--gs-alert-strong)', fontSize: 'var(--font-sm)' }}>
             Les gardes n'ont pas pu être chargées.
           </div>
         ) : isLoading ? (
@@ -105,21 +105,21 @@ export default function HospitalGuardsPanel() {
               <div key={sc.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
                   <div>
-                    <div style={{ fontSize: 'var(--font-sm)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    <div style={{ fontSize: 'var(--font-sm)', fontWeight: 700, color: 'var(--gs-ink)' }}>
                       {sc.name}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: 'var(--gs-ink-faint)', marginTop: 2 }}>
                       {sc.departmentName || 'Service non précisé'}
                     </div>
                   </div>
                   <PlanningStateBadge state={sc.state} status={sc.status} size="sm" />
                 </div>
 
-                <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>
+                <div style={{ fontSize: 'var(--font-xs)', color: 'var(--gs-ink-soft)' }}>
                   du {fmt(sc.startDate)} au {fmt(sc.endDate)}
                 </div>
 
-                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-muted)' }}>
+                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--gs-ink-faint)' }}>
                   <span>🛡️ {sc.guardCount} garde(s)</span>
                   <span>👥 {sc.staffCount} agent(s)</span>
                   {sc.pendingProposals > 0 && (
@@ -150,22 +150,22 @@ export default function HospitalGuardsPanel() {
             {absences.map((a) => (
               <div key={a.id} style={{
                 display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
-                background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+                background: 'var(--gs-paper)', border: '1px solid var(--gs-rule)',
                 borderLeft: `3px solid ${isLate(a) ? '#F59E0B' : '#DC2626'}`,
                 borderRadius: 'var(--border-radius-sm)', padding: '10px 14px',
               }}>
                 <div style={{ flex: 1, minWidth: 220 }}>
-                  <div style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  <div style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--gs-ink)' }}>
                     {a.first_name} {a.last_name}
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginLeft: 8 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gs-ink-faint)', marginLeft: 8 }}>
                       {isLate(a) ? 'RETARD' : 'ABSENCE'}
                     </span>
                   </div>
-                  <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)', marginTop: 3 }}>
+                  <p style={{ fontSize: 'var(--font-xs)', color: 'var(--gs-ink-soft)', marginTop: 3 }}>
                     {fmt(a.date)}{a.start_time ? ` · ${String(a.start_time).slice(0, 5)}` : ''}
                     {a.type_name ? ` · ${a.type_name}` : ''}
                   </p>
-                  <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                  <p style={{ fontSize: 10, color: 'var(--gs-ink-faint)', marginTop: 3 }}>
                     {a.department_name || '—'}
                     {a.reason ? ` · « ${a.reason} »` : ''}
                     {typeof a.is_justified === 'boolean'

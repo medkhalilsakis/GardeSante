@@ -11,9 +11,11 @@
  */
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { CalendarDays, Eye, LockKeyhole, Repeat2, ShieldCheck, UserRoundX, Users } from 'lucide-react';
 import { adminOversightAPI } from '../../../api';
 import PlanningStateBadge from '../../../components/planning/PlanningStateBadge';
 import SchedulePreviewModal from '../../replacements/components/SchedulePreviewModal';
+import './EstablishmentOversightPanel.css';
 
 const STATES = [
   { value: '',         label: 'Tous les états' },
@@ -23,15 +25,15 @@ const STATES = [
 ];
 
 const VIEWS = [
-  { id: 'schedules',    label: '🛡️ Gardes' },
-  { id: 'absences',     label: '🤒 Absences et congés' },
-  { id: 'replacements', label: '🔄 Remplacements' },
+  { id: 'schedules',    label: 'Gardes', icon: ShieldCheck },
+  { id: 'absences',     label: 'Absences et congés', icon: UserRoundX },
+  { id: 'replacements', label: 'Remplacements', icon: Repeat2 },
 ];
 
 const KIND_LABEL = {
-  leave:          { text: 'CONGÉ',   color: '#3B82F6' },
-  shift_absence:  { text: 'ABSENCE', color: '#DC2626' },
-  late:           { text: 'RETARD',  color: '#F59E0B' },
+  leave:          { text: 'CONGÉ', tone: 'seal' },
+  shift_absence:  { text: 'ABSENCE', tone: 'alert' },
+  late:           { text: 'RETARD', tone: 'alert' },
 };
 
 const parseLocal = (d) => {
@@ -44,24 +46,9 @@ const fmt = (d) => {
   return dt ? dt.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 };
 
-const Empty = ({ children }) => (
-  <div style={{
-    padding: 36, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13,
-    background: 'var(--bg-card)', border: '1px dashed var(--border-default)', borderRadius: 12,
-  }}>
-    {children}
-  </div>
-);
+const Empty = ({ children }) => <div className="gsa-oversight-empty">{children}</div>;
 
-const Row = ({ accent, children }) => (
-  <div style={{
-    display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
-    background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-    borderLeft: `3px solid ${accent}`, borderRadius: 8, padding: '11px 14px',
-  }}>
-    {children}
-  </div>
-);
+const Row = ({ tone = 'quiet', children }) => <div className={`gsa-oversight-row is-${tone}`}>{children}</div>;
 
 export default function EstablishmentOversightPanel({ establishmentId, establishmentName }) {
   const [view, setView] = useState('schedules');
@@ -95,35 +82,29 @@ export default function EstablishmentOversightPanel({ establishmentId, establish
   const active = view === 'schedules' ? schedules : view === 'absences' ? absences : replacements;
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 4, background: 'var(--bg-elevated)', borderRadius: 10, padding: 4 }}>
+    <div className="gsa-oversight">
+      <div className="gsa-oversight-toolbar">
+        <div className="gsa-oversight-tabs" role="tablist" aria-label="Périmètre de consultation">
           {VIEWS.map((v) => (
-            <button key={v.id} onClick={() => setView(v.id)} style={{
-              padding: '7px 15px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              fontWeight: 700, fontSize: 12, fontFamily: 'inherit',
-              background: view === v.id ? 'var(--color-primary)' : 'transparent',
-              color: view === v.id ? '#fff' : 'var(--text-muted)', transition: 'all 0.2s',
-            }}>
+            <button key={v.id} type="button" role="tab" aria-selected={view === v.id} onClick={() => setView(v.id)}>
+              <v.icon size={13} aria-hidden="true" />
               {v.label}
             </button>
           ))}
         </div>
         {view === 'schedules' && (
-          <select value={state} onChange={(e) => setState(e.target.value)} style={{
-            padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border-default)',
-            background: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: 12,
-          }}>
+          <select className="gsa-oversight-state" value={state} onChange={(e) => setState(e.target.value)} aria-label="État du planning">
             {STATES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
         )}
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+        <span className="gsa-oversight-readonly">
+          <LockKeyhole size={12} aria-hidden="true" />
           Consultation uniquement — aucune modification n'est possible ici
         </span>
       </div>
 
       {active.isError ? (
-        <div style={{ padding: 32, textAlign: 'center', color: '#DC2626', fontSize: 13 }}>
+        <div className="gsa-oversight-error">
           Le chargement a échoué.
         </div>
       ) : active.isLoading ? (
@@ -132,33 +113,28 @@ export default function EstablishmentOversightPanel({ establishmentId, establish
         !schedules.data?.length ? (
           <Empty>Aucune garde {state ? 'dans cet état' : 'soumise'} pour {establishmentName || 'cet hôpital'}</Empty>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(290px,1fr))', gap: 12 }}>
+          <div className="gsa-oversight-schedules">
             {schedules.data.map((sc) => (
-              <div key={sc.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
+              <article key={sc.id} className="gsa-oversight-schedule">
+                <div className="gsa-oversight-schedule-head">
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{sc.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                      {sc.departmentName || 'Service non précisé'}
-                    </div>
+                    <strong>{sc.name}</strong>
+                    <span>{sc.departmentName || 'Service non précisé'}</span>
                   </div>
                   <PlanningStateBadge state={sc.state} status={sc.status} size="sm" />
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                <div className="gsa-oversight-period">
+                  <CalendarDays size={13} aria-hidden="true" />
                   du {fmt(sc.startDate)} au {fmt(sc.endDate)}
                 </div>
-                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-muted)' }}>
-                  <span>🛡️ {sc.guardCount} garde(s)</span>
-                  <span>👥 {sc.staffCount} agent(s)</span>
+                <div className="gsa-oversight-counts">
+                  <span><ShieldCheck size={12} /> {sc.guardCount} garde(s)</span>
+                  <span><Users size={12} /> {sc.staffCount} agent(s)</span>
                 </div>
-                <button onClick={() => setPreview(sc)} style={{
-                  alignSelf: 'flex-start', padding: '6px 12px', borderRadius: 7,
-                  border: '1px solid var(--border-default)', background: 'transparent',
-                  color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit',
-                }}>
-                  Voir le tableau
+                <button type="button" className="gs-btn" onClick={() => setPreview(sc)}>
+                  <Eye size={13} /> Voir le tableau
                 </button>
-              </div>
+              </article>
             ))}
           </div>
         )
@@ -166,23 +142,23 @@ export default function EstablishmentOversightPanel({ establishmentId, establish
         !absences.data?.length ? (
           <Empty>Aucune absence ni congé enregistré</Empty>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <div className="gsa-oversight-list">
             {absences.data.map((a) => {
-              const k = KIND_LABEL[a.kind] || { text: String(a.kind || '').toUpperCase(), color: '#6366F1' };
+              const k = KIND_LABEL[a.kind] || { text: String(a.kind || '').toUpperCase(), tone: 'quiet' };
               return (
-                <Row key={a.id} accent={k.color}>
-                  <div style={{ flex: 1, minWidth: 230 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                <Row key={a.id} tone={k.tone}>
+                  <div className="gsa-oversight-row-main">
+                    <div className="gsa-oversight-row-title">
                       {a.firstName} {a.lastName}
-                      <span style={{ fontSize: 9, fontWeight: 800, color: k.color, marginLeft: 8 }}>{k.text}</span>
+                      <span>{k.text}</span>
                     </div>
-                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                    <p>
                       {a.typeName || '—'} · du {fmt(a.startDate)} au {fmt(a.endDate)}
                       {a.startTime ? ` · ${a.startTime}` : ''}
                     </p>
-                    <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                    <small>
                       {a.departmentName || '—'}{a.reason ? ` · « ${a.reason} »` : ''}
-                    </p>
+                    </small>
                   </div>
                 </Row>
               );
@@ -192,29 +168,26 @@ export default function EstablishmentOversightPanel({ establishmentId, establish
       ) : !replacements.data?.length ? (
         <Empty>Aucun remplacement enregistré</Empty>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <div className="gsa-oversight-list">
           {replacements.data.map((r) => (
-            <Row key={r.id} accent={r.confirmationStatus === 'confirmed' ? '#10B981' : '#F59E0B'}>
-              <div style={{ flex: 1, minWidth: 230 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+            <Row key={r.id} tone={r.confirmationStatus === 'confirmed' ? 'duty' : 'alert'}>
+              <div className="gsa-oversight-row-main">
+                <div className="gsa-oversight-row-title">
                   {r.scheduleName || 'Garde'}
-                  <span style={{
-                    fontSize: 9, fontWeight: 800, marginLeft: 8,
-                    color: r.confirmationStatus === 'confirmed' ? '#10B981' : '#F59E0B',
-                  }}>
+                  <span>
                     {r.confirmationStatus === 'confirmed' ? 'CONFIRMÉ' : 'NON CONFIRMÉ'}
                   </span>
                 </div>
                 {(r.items || []).map((it, i) => (
-                  <p key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                  <p key={i}>
                     {it.absentName} → {it.replacementName}
                     {it.isCrossDepartment ? ' · inter-service' : ''}
                   </p>
                 ))}
-                <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                <small>
                   {r.departmentName || '—'} · du {fmt(r.startDate)} au {fmt(r.endDate)}
                   {r.reason ? ` · « ${r.reason} »` : ''}
-                </p>
+                </small>
               </div>
             </Row>
           ))}

@@ -17,6 +17,125 @@
  */
 
 const { query } = require('../../config/database');
+const { dutyEntries, datesBetween, dateKey } = require('./spreadsheet-reader');
+
+/**
+ * Matérialise les affectations dans la forme historique attendue par le moteur
+ * de règles. Le registre moderne est prioritaire ; les anciens plannings qui ne
+ * portent pas encore `metadata.spreadsheet.rows` restent lisibles via `shifts`.
+ */
+const readSpreadsheetShifts = async (scheduleId) => {
+  const scheduleResult = await query(
+    `SELECT id, schedule_type, metadata,
+            TO_CHAR(start_date, 'YYYY-MM-DD') AS start_date,
+            TO_CHAR(end_date,   'YYYY-MM-DD') AS end_date,
+            establishment_id
+       FROM schedules WHERE id = $1`, [scheduleId]
+  );
+  const schedule = scheduleResult.rows[0];
+  if (!schedule) return [];
+
+  // Une liste `rows` explicite, même vide, est la source de vérité du Tableur.
+  // L'absence de cette clé identifie les plannings historiques (wizard/ancien
+  // assistant) pour lesquels la table `shifts` reste la seule source disponible.
+  const hasSpreadsheet = Array.isArray(schedule.metadata?.spreadsheet?.rows);
+  if (!hasSpreadsheet) {
+    const legacyResult = await query(
+      `SELECT s.id, s.user_id, TO_CHAR(s.shift_date, 'YYYY-MM-DD') AS shift_date,
+              s.status, st.start_time, st.end_time, st.duration_hours,
+              st.is_overnight, u.first_name, u.last_name, r.code AS role_code
+         FROM shifts s
+         JOIN users u ON u.id = s.user_id
+         LEFT JOIN roles r ON r.id = u.role_id
+         LEFT JOIN shift_types st ON st.id = s.shift_type_id
+        WHERE s.schedule_id = $1 AND s.status <> 'cancelled'
+        ORDER BY s.shift_date, u.last_name`,
+      [scheduleId]
+    );
+    return legacyResult.rows.map((shift) => ({
+      id: shift.id,
+      user_id: shift.user_id,
+      userId: shift.user_id,
+      shift_date: shift.shift_date,
+      date: shift.shift_date,
+      status: shift.status || 'planned',
+      first_name: shift.first_name || '',
+      last_name: shift.last_name || '',
+      role_code: shift.role_code || null,
+      start_time: shift.start_time || '07:00:00',
+      end_time: shift.end_time || '19:00:00',
+      shiftStart: shift.start_time || '07:00:00',
+      shiftEnd: shift.end_time || '19:00:00',
+      duration_hours: Number(shift.duration_hours) || null,
+      is_overnight: Boolean(shift.is_overnight),
+    }));
+  }
+
+  // Un registre explicitement vide signifie « aucune affectation » : seuls les
+  // plannings antérieurs au registre retombent sur la table `shifts`, et le
+  // retour anticipé ci-dessus les a déjà traités. La variable à interroger est
+  // `schedule` : lire `row` ici levait un ReferenceError à chaque appel, donc à
+  // chaque envoi de tableur.
+  const hasSpreadsheetRows = Array.isArray(schedule.metadata?.spreadsheet?.rows);
+  const spreadsheetEntries = hasSpreadsheetRows
+    ? dutyEntries(schedule, schedule.start_date, schedule.end_date)
+    : [];
+  const legacyEntries = hasSpreadsheetRows
+    ? []
+    : (await readSpreadsheetShifts(scheduleId)).map((shift) => ({
+      userId: shift.user_id,
+      date: dateKey(shift.shift_date),
+      shiftStart: shift.start_time || shift.shiftStart || '07:00:00',
+      shiftEnd: shift.end_time || shift.shiftEnd || '19:00:00',
+      firstName: shift.first_name || '',
+      lastName: shift.last_name || '',
+    }));
+  const entries = [...spreadsheetEntries, ...legacyEntries];
+  const userIds = [...new Set(entries.map((entry) => entry.userId).filter(Boolean))];
+  const usersResult = userIds.length
+    ? await query(
+      `SELECT u.id, u.first_name, u.last_name, r.code AS role_code
+         FROM users u LEFT JOIN roles r ON r.id = u.role_id
+        WHERE u.id = ANY($1)`, [userIds]
+    )
+    : { rows: [] };
+  const users = new Map(usersResult.rows.map((user) => [user.id, user]));
+  return entries.map((entry, index) => {
+    const user = users.get(entry.userId) || {};
+    const startTime = entry.shiftStart || '07:00:00';
+    const endTime = entry.shiftEnd || '19:00:00';
+    const [startHour, startMinute] = String(startTime).split(':').map(Number);
+    const [endHour, endMinute] = String(endTime).split(':').map(Number);
+    const startMinutes = startHour * 60 + (startMinute || 0);
+    const endMinutes = endHour * 60 + (endMinute || 0);
+    const duration = Number.isFinite(startHour) && Number.isFinite(endHour)
+      ? (endMinutes <= startMinutes ? endMinutes + 24 * 60 - startMinutes : endMinutes - startMinutes) / 60
+      : 12;
+    return {
+      id: `spreadsheet-${schedule.id}-${entry.userId}-${entry.date}-${index}`,
+      user_id: entry.userId,
+      userId: entry.userId,
+      shift_date: entry.date,
+      date: entry.date,
+      status: 'planned',
+      first_name: entry.firstName || user.first_name || '',
+      last_name: entry.lastName || user.last_name || '',
+      role_code: user.role_code || null,
+      start_time: startTime,
+      end_time: endTime,
+      shiftStart: startTime,
+      shiftEnd: endTime,
+      duration_hours: duration,
+      // 07:00 -> 07:00 is the tableur convention for a full-day/overnight guard.
+      is_overnight: endMinutes <= startMinutes,
+      // Ligne d'origine et mode de lecture, repris tels quels de
+      // `rosterOnDate` : la règle de repos s'en sert pour ne pas découper une
+      // période de service continue en autant de gardes distinctes.
+      rowKey: entry.rowKey || null,
+      continuous: entry.continuous === true,
+    };
+  });
+};
 
 // ── Règles système par défaut (injectées à la création d'un établissement) ──
 const DEFAULT_RULES = [
@@ -236,22 +355,9 @@ const evaluateRules = async (scheduleId, establishmentId) => {
     [establishmentId]
   );
 
-  // Charger les gardes du planning avec contexte
-  const shiftsResult = await query(
-    `SELECT s.id, s.user_id, s.shift_date, s.status,
-            u.first_name, u.last_name,
-            r.code AS role_code,
-            st.start_time, st.end_time, st.duration_hours, st.is_overnight
-     FROM shifts s
-     JOIN users u ON s.user_id = u.id
-     JOIN roles r ON u.role_id = r.id
-     JOIN shift_types st ON s.shift_type_id = st.id
-     WHERE s.schedule_id = $1 AND s.status != 'cancelled'
-     ORDER BY s.user_id, s.shift_date`,
-    [scheduleId]
-  );
-
-  const shifts = shiftsResult.rows;
+  // Le registre est la source de vérité : la table `shifts` ne contient plus
+  // les affectations saisies dans le tableur.
+  const shifts = await readSpreadsheetShifts(scheduleId);
 
   for (const rule of rulesResult.rows) {
     const results = await evaluateRule(rule, shifts, scheduleId, establishmentId);
@@ -289,6 +395,24 @@ const evaluateRules = async (scheduleId, establishmentId) => {
 };
 
 /**
+ * Deux affectations appartiennent-elles au même bloc de service continu ?
+ *
+ * Vrai lorsqu'elles viennent de la même ligne de tableur, que cette ligne est
+ * lue par sa **période** (`continuous`, cf. l'arbitrage de `spreadsheet-reader`)
+ * et qu'elles portent sur deux jours qui se suivent. Dans ce cas la « fin » de
+ * la première et le « début » de la seconde sont un découpage d'affichage, pas
+ * deux prises de garde : il n'y a pas de repos à mesurer entre elles.
+ */
+const isSameContinuousBlock = (prev, curr) => {
+  if (!prev?.continuous || !curr?.continuous) return false;
+  if (!prev.rowKey || prev.rowKey !== curr.rowKey) return false;
+  const veille = new Date(`${curr.shift_date}T12:00:00`);
+  veille.setDate(veille.getDate() - 1);
+  const attendu = `${veille.getFullYear()}-${String(veille.getMonth() + 1).padStart(2, '0')}-${String(veille.getDate()).padStart(2, '0')}`;
+  return prev.shift_date === attendu;
+};
+
+/**
  * Évalue une règle spécifique sur un ensemble de gardes.
  */
 const evaluateRule = async (rule, shifts, scheduleId, establishmentId) => {
@@ -307,6 +431,13 @@ const evaluateRule = async (rule, shifts, scheduleId, establishmentId) => {
         for (let i = 1; i < sorted.length; i++) {
           const prev = sorted[i - 1];
           const curr = sorted[i];
+          // Deux jours consécutifs d'une même ligne lue par sa période ne sont
+          // pas deux gardes : c'est une seule affectation continue (« de
+          // service du 14 au 20 »). Mesurer un repos entre eux donnerait
+          // toujours 0 h et rendrait tout planning de période insoumissible.
+          // Les jours cochés, eux, restent des gardes distinctes : la règle
+          // garde ses dents là où le chef a désigné des journées précises.
+          if (isSameContinuousBlock(prev, curr)) continue;
           const prevEnd = new Date(`${prev.shift_date}T${prev.end_time}`);
           if (prev.is_overnight) prevEnd.setDate(prevEnd.getDate() + 1);
           const currStart = new Date(`${curr.shift_date}T${curr.start_time}`);
@@ -354,7 +485,10 @@ const evaluateRule = async (rule, shifts, scheduleId, establishmentId) => {
         const userIds = [...new Set(shifts.map(s => s.user_id))];
         if (userIds.length > 0) {
           const absResult = await query(
-            `SELECT a.user_id, a.start_date, a.end_date, u.first_name, u.last_name
+            `SELECT a.user_id,
+                    TO_CHAR(a.start_date, 'YYYY-MM-DD') AS start_date,
+                    TO_CHAR(a.end_date,   'YYYY-MM-DD') AS end_date,
+                    u.first_name, u.last_name
              FROM absences a JOIN users u ON a.user_id = u.id
              WHERE a.user_id = ANY($1)
                AND a.status = 'approved'
@@ -363,12 +497,10 @@ const evaluateRule = async (rule, shifts, scheduleId, establishmentId) => {
           );
 
           for (const abs of absResult.rows) {
-            const absStart = new Date(abs.start_date);
-            const absEnd   = new Date(abs.end_date);
             const conflicting = shifts.filter(s =>
               s.user_id === abs.user_id &&
-              new Date(s.shift_date) >= absStart &&
-              new Date(s.shift_date) <= absEnd
+              String(s.shift_date).slice(0, 10) >= abs.start_date &&
+              String(s.shift_date).slice(0, 10) <= abs.end_date
             );
             if (conflicting.length > 0) {
               violations.push({
@@ -532,51 +664,93 @@ const generateNationalSnapshot = async (scheduleId) => {
        sch.*,
        d.name AS dept_name, d.code AS dept_code, d.department_type,
        e.name AS est_name, e.code AS est_code, e.governorate,
-       COUNT(DISTINCT s.id) AS total_shifts,
-       COUNT(DISTINCT s.user_id) AS staff_count,
-       SUM(st.duration_hours) AS total_hours,
-       COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'completed') AS completed_shifts,
-       COUNT(DISTINCT rep.id) AS replacements_count
+       TO_CHAR(sch.start_date, 'YYYY-MM-DD') AS start_date_key,
+       TO_CHAR(sch.end_date,   'YYYY-MM-DD') AS end_date_key
      FROM schedules sch
      JOIN departments d ON sch.department_id = d.id
      JOIN establishments e ON sch.establishment_id = e.id
-     LEFT JOIN shifts s ON s.schedule_id = sch.id AND s.status != 'cancelled'
-     LEFT JOIN shift_types st ON s.shift_type_id = st.id
-     LEFT JOIN replacements rep ON rep.shift_id = s.id
      WHERE sch.id = $1
-     GROUP BY sch.id, d.id, e.id`,
+    `,
     [scheduleId]
   );
 
   if (!result.rows[0]) return null;
   const row = result.rows[0];
 
-  // Résumé par personne
-  const staffSummary = await query(
-    `SELECT u.id, u.first_name, u.last_name,
-            r.code AS role_code,
-            COUNT(s.id) AS shifts,
-            SUM(st.duration_hours) AS hours
-     FROM shifts s
-     JOIN users u ON s.user_id = u.id
-     JOIN roles r ON u.role_id = r.id
-     JOIN shift_types st ON s.shift_type_id = st.id
-     WHERE s.schedule_id = $1 AND s.status != 'cancelled'
-     GROUP BY u.id, r.code`,
+  // Le tableur est la source de vérité depuis le registre : `shifts` n'est plus
+  // alimentée par cette voie. Utiliser le lecteur partagé garantit que les
+  // périodes multiples, les cases des plannings spéciaux et les lignes
+  // proposées non validées sont interprétées comme dans le reste de la plateforme.
+  const schedule = {
+    ...row,
+    start_date: row.start_date_key || dateKey(row.start_date),
+    end_date: row.end_date_key || dateKey(row.end_date),
+  };
+  const entries = dutyEntries(schedule, schedule.start_date, schedule.end_date);
+  const userIds = [...new Set(entries.map((entry) => entry.userId).filter(Boolean))];
+  const usersResult = userIds.length
+    ? await query(
+      `SELECT u.id, u.first_name, u.last_name, r.code AS role_code
+         FROM users u
+         LEFT JOIN roles r ON r.id = u.role_id
+        WHERE u.id = ANY($1)`,
+      [userIds]
+    )
+    : { rows: [] };
+  const usersById = new Map(usersResult.rows.map((user) => [user.id, user]));
+
+  const durationHours = (entry) => {
+    const start = String(entry.shiftStart || '').split(':').map(Number);
+    const end = String(entry.shiftEnd || '').split(':').map(Number);
+    if (!Number.isFinite(start[0]) || !Number.isFinite(end[0])) return 12;
+    const startMinutes = start[0] * 60 + (start[1] || 0);
+    const endMinutes = end[0] * 60 + (end[1] || 0);
+    const minutes = endMinutes <= startMinutes
+      ? (24 * 60 - startMinutes) + endMinutes
+      : endMinutes - startMinutes;
+    return minutes > 0 ? minutes / 60 : 12;
+  };
+
+  const staffById = new Map();
+  entries.forEach((entry) => {
+    if (!entry.userId) return;
+    const user = usersById.get(entry.userId) || {};
+    const current = staffById.get(entry.userId) || {
+      id: entry.userId,
+      role_code: user.role_code || null,
+      shifts: 0,
+      hours: 0,
+    };
+    current.shifts += 1;
+    current.hours += durationHours(entry);
+    staffById.set(entry.userId, current);
+  });
+
+  const replacementResult = await query(
+    `SELECT COUNT(*) AS count
+       FROM replacements
+      WHERE schedule_id = $1
+        AND COALESCE(confirmation_status, 'confirmed') = 'confirmed'
+        AND status NOT IN ('cancelled', 'rejected')`,
     [scheduleId]
   );
 
-  const totalShifts  = parseInt(row.total_shifts) || 0;
-  const totalHours   = parseFloat(row.total_hours) || 0;
-  const staffCount   = parseInt(row.staff_count) || 0;
-  const periodDays   = Math.ceil((new Date(row.end_date) - new Date(row.start_date)) / 86400000) + 1;
+  const totalShifts = entries.length;
+  const totalHours = entries.reduce((total, entry) => total + durationHours(entry), 0);
+  const staffCount = staffById.size;
+  const periodDays = datesBetween(schedule.start_date, schedule.end_date).length;
+  // Le registre ne porte pas d'état d'exécution par garde. Les anciennes lignes
+  // `completed` n'étant plus disponibles dans cette source, le snapshot expose
+  // zéro garde terminée plutôt qu'un agrégat inventé.
+  const completedShifts = 0;
+  const replacementsCount = parseInt(replacementResult.rows[0]?.count, 10) || 0;
 
   const snapshot = {
     version: 1,
     generated_at: new Date().toISOString(),
     period: {
-      from:  row.start_date,
-      to:    row.end_date,
+      from:  schedule.start_date,
+      to:    schedule.end_date,
       type:  row.period_type,
       days:  periodDays,
     },
@@ -596,16 +770,16 @@ const generateNationalSnapshot = async (scheduleId) => {
       total_shifts:       totalShifts,
       total_hours:        totalHours,
       staff_count:        staffCount,
-      coverage_rate:      totalShifts > 0 ? parseFloat(row.completed_shifts) / totalShifts : 0,
-      replacement_rate:   totalShifts > 0 ? parseInt(row.replacements_count) / totalShifts : 0,
+      coverage_rate:      totalShifts > 0 ? completedShifts / totalShifts : 0,
+      replacement_rate:   totalShifts > 0 ? replacementsCount / totalShifts : 0,
       avg_shifts_per_person: staffCount > 0 ? totalShifts / staffCount : 0,
       avg_hours_per_person:  staffCount > 0 ? totalHours / staffCount : 0,
     },
-    staff_summary: staffSummary.rows.map(s => ({
-      user_id:   s.id,
-      role:      s.role_code,
-      shifts:    parseInt(s.shifts),
-      hours:     parseFloat(s.hours),
+    staff_summary: [...staffById.values()].map((staff) => ({
+      user_id: staff.id,
+      role: staff.role_code,
+      shifts: staff.shifts,
+      hours: Number(staff.hours.toFixed(2)),
     })),
   };
 

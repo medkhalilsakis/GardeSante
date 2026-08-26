@@ -1,21 +1,23 @@
 import React, { useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useUIStore, useAuthStore, useNotificationStore } from '../../store';
 import { notificationsAPI } from '../../api';
 import { useTranslation } from '../../utils/helpers';
 import { resolveNotificationTarget } from '../../utils/notificationTarget';
+import { longFrenchDate, frenchWeekday } from '../../utils/frenchDates';
+import GsEmpty from '../gs/GsEmpty';
 import toast from 'react-hot-toast';
 import '../../styles/layout.css';
 
 const BellIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
     <path d="M13.73 21a2 2 0 01-3.46 0"/>
   </svg>
 );
 
 const SunIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <circle cx="12" cy="12" r="5"/>
     <line x1="12" y1="1" x2="12" y2="3"/>
     <line x1="12" y1="21" x2="12" y2="23"/>
@@ -29,19 +31,43 @@ const SunIcon = () => (
 );
 
 const MoonIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
   </svg>
 );
 
-const RefreshIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+const MenuIcon = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
   </svg>
 );
 
-export default function Header({ title, subtitle, actions }) {
+/** La clé du jour, prise sur l'horloge locale — jamais sur une colonne DATE. */
+const todayKey = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+/**
+ * L'âge d'une notification, pas sa date. « il y a 20 min » se lit d'un coup
+ * d'œil dans un volet déroulant ; « 21 août, 14:32 » demande un calcul. La date
+ * exacte reste dans l'infobulle, pour qui en a besoin.
+ */
+const agoLabel = (value) => {
+  const then = new Date(value).getTime();
+  if (!Number.isFinite(then)) return '';
+  const min = Math.round((Date.now() - then) / 60000);
+  if (min < 1) return 'à l\'instant';
+  if (min < 60) return `il y a ${min} min`;
+  const hours = Math.round(min / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  const days = Math.round(hours / 24);
+  if (days < 8) return `il y a ${days} j`;
+  return new Date(then).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+};
+
+export default function Header({ title, subtitle, actions, onOpenNav, navOpen = false }) {
   const { sidebarCollapsed, theme, toggleTheme } = useUIStore();
   const { user } = useAuthStore();
   const { unreadCount, markAllRead, markAsRead } = useNotificationStore();
@@ -60,6 +86,15 @@ export default function Header({ title, subtitle, actions }) {
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
+
+  // Échap referme le volet : il se superpose au contenu, il doit se fermer au
+  // clavier comme au clic à côté.
+  useEffect(() => {
+    if (!showNotif) return;
+    const onKey = (e) => { if (e.key === 'Escape') setShowNotif(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showNotif]);
 
   const openNotifications = async () => {
     setShowNotif(!showNotif);
@@ -80,7 +115,6 @@ export default function Header({ title, subtitle, actions }) {
     } catch {}
   };
 
-  const priorityColors = { urgent: '#EF4444', high: '#F59E0B', normal: '#6366F1', low: '#8BA3C7' };
   const openNotificationAction = async (notif) => {
     if (!notif.is_read) {
       try { await notificationsAPI.markRead(notif.id); markAsRead(notif.id); } catch {}
@@ -98,141 +132,149 @@ export default function Header({ title, subtitle, actions }) {
     toast('Cette notification ne possède pas encore d’action associée.');
   };
 
+  const dayKey = todayKey();
+  const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
+  const isSuperAdmin = user?.roleCode === 'super_admin';
+
   return (
     <header className={`header ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-      {/* Titre */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <h1 className="header-title" style={{ fontSize: 'var(--font-xl)' }}>{title}</h1>
-        {subtitle && <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 2 }}>{subtitle}</p>}
+      {/* Sous 900 px la barre latérale est un tiroir : c'est ici qu'on l'ouvre. */}
+      <button
+        type="button"
+        className="gsh-burger"
+        onClick={onOpenNav}
+        aria-label="Ouvrir le menu"
+        aria-controls="gs-nav"
+        aria-expanded={navOpen}
+      >
+        <MenuIcon />
+      </button>
+
+      <div className="gsh-head-titles">
+        <h1 className="header-title">{title}</h1>
+        {subtitle && <p className="gsh-head-sub">{subtitle}</p>}
       </div>
 
-      {/* Actions custom */}
-      {actions && <div className="header-actions" style={{ flexShrink: 0 }}>{actions}</div>}
+      {actions && <div className="header-actions">{actions}</div>}
 
       <div className="header-actions">
-        {/* Toggle Thème */}
+        {/* Toute cette plateforme parle d'aujourd'hui : le registre se date en
+            tête, une fois, plutôt que dans chaque écran. */}
+        <span className="gsh-today" title={`Nous sommes le ${frenchWeekday(dayKey)} ${longFrenchDate(dayKey)}`}>
+          <span>{frenchWeekday(dayKey)}</span>
+          {longFrenchDate(dayKey)}
+        </span>
+
         <button
-          className="header-btn"
+          type="button"
+          className="header-btn gsh-theme"
           onClick={toggleTheme}
           title={theme === 'light' ? 'Passer en mode sombre' : 'Passer en mode clair'}
-          style={{ position: 'relative', overflow: 'hidden' }}
+          aria-label={theme === 'light' ? 'Passer en mode sombre' : 'Passer en mode clair'}
         >
-          <span style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'transform 0.35s cubic-bezier(0.34,1.56,0.64,1), opacity 0.2s',
-            transform: theme === 'dark' ? 'rotate(0deg) scale(1)' : 'rotate(20deg) scale(0.8)',
-            opacity: theme === 'dark' ? 1 : 0,
-            position: 'absolute',
-          }}>
-            <SunIcon />
-          </span>
-          <span style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'transform 0.35s cubic-bezier(0.34,1.56,0.64,1), opacity 0.2s',
-            transform: theme === 'light' ? 'rotate(0deg) scale(1)' : 'rotate(-20deg) scale(0.8)',
-            opacity: theme === 'light' ? 1 : 0,
-            position: 'absolute',
-          }}>
-            <MoonIcon />
-          </span>
+          <span className="gsh-theme-glyph" data-on={String(theme === 'dark')}><SunIcon /></span>
+          <span className="gsh-theme-glyph" data-on={String(theme !== 'dark')}><MoonIcon /></span>
         </button>
 
-        {/* Notifications */}
-        <div style={{ position: 'relative' }} ref={notifRef}>
-          <button className="header-btn" onClick={openNotifications} title={t('nav.notifications')}>
+        <div className="gsh-notif-anchor" ref={notifRef}>
+          <button
+            type="button"
+            className="header-btn"
+            onClick={openNotifications}
+            title={t('nav.notifications')}
+            aria-label={unreadCount > 0 ? `${t('nav.notifications')} — ${unreadCount} non lue(s)` : t('nav.notifications')}
+            aria-expanded={showNotif}
+          >
             <BellIcon />
             {unreadCount > 0 && <span className="badge-dot" />}
           </button>
 
           {showNotif && (
-            <div style={{
-              position: 'absolute', top: 'calc(100% + 10px)', right: 0,
-              width: 380, maxHeight: 480, overflowY: 'auto',
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--border-radius-lg)',
-              boxShadow: 'var(--shadow-xl)',
-              zIndex: 200,
-              animation: 'slideUp var(--transition-spring)',
-            }}>
-              <div style={{
-                padding: '16px 20px',
-                borderBottom: '1px solid var(--border-subtle)',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                position: 'sticky', top: 0, background: 'var(--bg-card)', zIndex: 1,
-              }}>
-                <span style={{ fontWeight: 700, fontSize: 'var(--font-md)' }}>
-                  {t('nav.notifications')} {unreadCount > 0 && <span style={{ color: 'var(--color-danger)', fontSize: 'var(--font-xs)' }}>({unreadCount})</span>}
-                </span>
+            <div className="gsh-notif" role="dialog" aria-label={t('nav.notifications')}>
+              <div className="gsh-notif-head">
+                <strong>
+                  {t('nav.notifications')}
+                  {unreadCount > 0 && <b>{unreadCount} non lue{unreadCount > 1 ? 's' : ''}</b>}
+                </strong>
                 {unreadCount > 0 && (
-                  <button onClick={handleMarkAllRead} style={{
-                    background: 'none', border: 'none', color: 'var(--color-primary-light)',
-                    fontSize: 'var(--font-xs)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500,
-                  }}>
+                  <button type="button" className="gs-btn is-quiet" onClick={handleMarkAllRead}>
                     Tout marquer lu
                   </button>
                 )}
               </div>
 
               {notifications.length === 0 ? (
-                <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>
-                  Aucune notification
+                <div className="gsh-notif-empty">
+                  <GsEmpty
+                    bare
+                    title="Aucune notification"
+                    hint="Les demandes, alertes et validations qui vous concernent apparaîtront ici."
+                  />
                 </div>
               ) : (
-                notifications.map((notif) => (
-                  <div key={notif.id} onClick={() => openNotificationAction(notif)} style={{
-                    padding: '14px 20px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    background: notif.is_read ? 'transparent' : 'var(--color-primary-10)',
-                    cursor: 'pointer',
-                    transition: 'background var(--transition-fast)',
-                  }}>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                      <div style={{
-                        width: 8, height: 8, borderRadius: '50', marginTop: 6, flexShrink: 0,
-                        background: priorityColors[notif.priority] || '#6366F1',
-                        borderRadius: '50%',
-                      }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
-                          {notif.title}
-                        </p>
-                        <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                          {notif.message}
-                        </p>
-                        <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                          {new Date(notif.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))
+                <ul className="gsh-notif-list">
+                  {notifications.map((notif) => {
+                    const target = resolveNotificationTarget(notif, user?.roleCode);
+                    return (
+                      <li key={notif.id}>
+                        <button
+                          type="button"
+                          className="gsh-notif-item"
+                          data-unread={String(!notif.is_read)}
+                          onClick={() => openNotificationAction(notif)}
+                        >
+                          <span className="gsh-notif-dot" data-priority={notif.priority || 'low'} aria-hidden="true" />
+                          <span className="gsh-notif-lines">
+                            <span className="gsh-notif-title">{notif.title}</span>
+                            <span className="gsh-notif-msg">{notif.message}</span>
+                            <span className="gsh-notif-foot-line">
+                              <span
+                                className="gsh-notif-time"
+                                title={new Date(notif.created_at).toLocaleString('fr-FR')}
+                              >
+                                {agoLabel(notif.created_at)}
+                              </span>
+                              {/* L'action promise est annoncée avant le clic : c'est
+                                  elle qui distingue une notification à traiter
+                                  d'une simple information. */}
+                              {target && <span className="gsh-notif-cta">{target.label}</span>}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
+
+              <div className="gsh-notif-foot">
+                <Link to="/notifications" className="gs-btn is-quiet" onClick={() => setShowNotif(false)}>
+                  Toutes les notifications
+                </Link>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Info utilisateur */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '6px 12px',
-          background: 'var(--bg-elevated)',
-          borderRadius: 'var(--border-radius-sm)',
-          border: '1px solid var(--border-subtle)',
-          cursor: 'default',
-        }}>
-          <div className="avatar avatar-sm" style={{ background: 'var(--color-primary-20)', color: 'var(--color-primary-light)', fontWeight: 700, fontSize: 11 }}>
-            {(user?.firstName?.[0] || '') + (user?.lastName?.[0] || '')}
-          </div>
-          <div style={{ lineHeight: 1.2 }}>
-            <p style={{ fontSize: 'var(--font-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
-              {user?.firstName} {user?.lastName}
-            </p>
-            <p style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-              {user?.establishmentCode}
-            </p>
-          </div>
-        </div>
+        {/* Qui je suis. Le bloc était décoratif — il ouvre maintenant la fiche de
+            profil, sauf pour le Super Admin qui n'en a pas. */}
+        {isSuperAdmin ? (
+          <span className="gsh-me" data-static="true">
+            <span className="gsh-me-initials">{initials}</span>
+            <span className="gsh-me-lines">
+              <span className="gsh-me-name">{user?.firstName} {user?.lastName}</span>
+              <span className="gsh-me-sub">Plateforme</span>
+            </span>
+          </span>
+        ) : (
+          <Link to="/profile" className="gsh-me" title="Ouvrir mon profil">
+            <span className="gsh-me-initials">{initials}</span>
+            <span className="gsh-me-lines">
+              <span className="gsh-me-name">{user?.firstName} {user?.lastName}</span>
+              <span className="gsh-me-sub">{user?.establishmentCode}</span>
+            </span>
+          </Link>
+        )}
       </div>
     </header>
   );

@@ -6,31 +6,36 @@
  * Les descriptions ci-dessous sont locales, purement explicatives.
  */
 import { useState } from 'react';
+import { CalendarRange, PenLine, RefreshCw, Scale, Users, X } from 'lucide-react';
 import { Section, Btn, Field, input, card } from './ui';
 
+/* Les icônes viennent de la même bibliothèque que le reste de la plateforme :
+   les émoji d'origine ne s'affichaient pas deux fois pareil d'un poste à
+   l'autre, et « 🅰️🅱️ » se rendait en deux carrés vides sur la moitié des
+   machines du service. */
 const DESC = {
   manual: {
-    icon: '✍️',
+    Icon: PenLine,
     text: 'Grille vierge, prête à remplir : périodes de présence et congés déjà connus, aucune garde posée.',
     good: 'Vous savez exactement qui va où.',
   },
   rotation: {
-    icon: '🔄',
+    Icon: RefreshCw,
     text: 'Chacun son tour, dans l\'ordre de relais défini à l\'étape précédente, en repartant du moins chargé.',
     good: 'Équipe homogène, gardes interchangeables.',
   },
   ab_rotation: {
-    icon: '🅰️🅱️',
+    Icon: Users,
     text: 'Deux équipes qui alternent par semaine. La première moitié de la liste forme l\'équipe A, la seconde l\'équipe B.',
     good: 'Organisation en binômes ou demi-services.',
   },
   periods: {
-    icon: '📆',
+    Icon: CalendarRange,
     text: 'Chaque agent couvre sa fenêtre de présence, dans l\'ordre de relais : « X les deux premières semaines, puis Y ».',
     good: 'Résidents qui tournent par quinzaine.',
   },
   balanced: {
-    icon: '⚖️',
+    Icon: Scale,
     text: 'À chaque jour, le moins chargé est désigné — senior en premier si le service en exige un. Minimise l\'écart de charge.',
     good: 'Objectif d\'équité avant tout.',
   },
@@ -59,17 +64,19 @@ export default function StepMode({
                 style={{
                   ...card,
                   cursor: 'pointer',
-                  borderColor: active ? 'var(--color-primary)' : 'var(--border-subtle)',
+                  borderColor: active ? 'var(--gs-seal)' : 'var(--gs-rule)',
                   borderWidth: active ? 2 : 1,
-                  background: active ? 'var(--color-primary-soft, rgba(139,92,246,.07))' : 'var(--bg-card)',
+                  background: active ? 'var(--gs-seal-wash)' : 'var(--gs-paper)',
                 }}>
-                <div style={{ fontSize: 22, marginBottom: 6 }}>{meta.icon || '•'}</div>
-                <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--text-primary)', marginBottom: 6 }}>
+                <div style={{ marginBottom: 8, color: active ? 'var(--gs-seal)' : 'var(--gs-ink-faint)' }}>
+                  {meta.Icon ? <meta.Icon size={22} strokeWidth={1.75} /> : null}
+                </div>
+                <div style={{ fontFamily: 'var(--gs-display)', fontWeight: 700, letterSpacing: '-.015em', fontSize: 14, color: 'var(--gs-ink)', marginBottom: 6 }}>
                   {m.label}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>{meta.text}</div>
+                <div style={{ fontSize: 12, color: 'var(--gs-ink-faint)', lineHeight: 1.45 }}>{meta.text}</div>
                 {meta.good && (
-                  <div style={{ fontSize: 11, color: 'var(--color-primary)', marginTop: 8, fontWeight: 700 }}>
+                  <div style={{ fontSize: 11, color: 'var(--gs-seal)', marginTop: 8, fontWeight: 700 }}>
                     → {meta.good}
                   </div>
                 )}
@@ -88,22 +95,24 @@ export default function StepMode({
             {briefs.map((b) => (
               <div key={b.id} style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                borderRadius: 10, border: '1px solid var(--border-subtle)',
+                borderRadius: 10, border: '1px solid var(--gs-rule)',
               }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>{b.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--gs-ink)' }}>{b.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--gs-ink-faint)' }}>
                     {b.mode} · utilisé {b.timesUsed || 0} fois
                     {b.lastUsedAt ? ` · dernier usage ${b.lastUsedAt}` : ''}
                   </div>
                 </div>
                 <Btn variant="ghost" onClick={() => onUseBrief(b)} style={{ padding: '6px 12px' }}>Charger</Btn>
-                <Btn variant="ghost" onClick={() => onDeleteBrief(b)} style={{ padding: '6px 10px', color: '#DC2626' }}>✕</Btn>
+                <Btn variant="ghost" onClick={() => onDeleteBrief(b)} title="Supprimer ce brief" style={{ padding: '6px 10px', color: 'var(--gs-alert-strong)' }}>
+                  <X size={14} strokeWidth={2.5} />
+                </Btn>
               </div>
             ))}
           </div>
         ) : (
-          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 14 }}>
+          <div style={{ fontSize: 12.5, color: 'var(--gs-ink-faint)', marginBottom: 14 }}>
             Aucun brief enregistré pour ce service.
           </div>
         )}

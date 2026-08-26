@@ -5,11 +5,17 @@
  * service, le directeur son hôpital, le Super Admin l'hôpital qu'il cible.
  *
  * CODE COULEUR — chaque case porte UNE BARRE HORIZONTALE PAR PLANNING présent
- * ce jour-là, colorée selon son état (en vigueur / en cours / terminé /
- * brouillon). Plusieurs plannings le même jour ⇒ plusieurs barres empilées :
- * c'est ce qui permet de suivre plusieurs gardes simultanées. Le fond de case
- * conserve une intensité de densité, mais teintée par l'état dominant du jour
- * au lieu d'un indigo uniforme.
+ * ce jour-là. Le filet gauche de la barre donne l'état du planning (en vigueur
+ * / en cours / terminé / brouillon), le corps de la barre donne le service.
+ * Plusieurs plannings le même jour ⇒ plusieurs barres empilées : c'est ce qui
+ * permet de suivre plusieurs gardes simultanées. Le fond de case porte une
+ * intensité de densité, teintée par l'état dominant du jour.
+ *
+ * Les teintes ne sont plus déclarées ici : les états viennent de
+ * `PLANNING_STATE_COLOR` (le badge de planning et cette case doivent parler la
+ * même langue, et une palette recopiée finit par diverger), les services de
+ * l'échelle d'identité (`--gs-id-1` à `--gs-id-10`). Un service n'est pas un
+ * état : il se distingue, il ne signale rien.
  *
  * Conventions d'affichage reprises de VisualCalendar.jsx (grille alignée lundi,
  * libellés fr-FR, marquage du week-end et du jour courant).
@@ -17,7 +23,9 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { hospitalCalendarAPI } from '../../api';
-import PlanningStateBadge from '../planning/PlanningStateBadge';
+import PlanningStateBadge, { PLANNING_STATES, PLANNING_STATE_COLOR } from '../planning/PlanningStateBadge';
+import { frenchRange, fullFrenchDate } from '../../utils/frenchDates';
+import './HospitalGuardCalendar.css';
 
 const DOW_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
@@ -50,25 +58,26 @@ const buildGrid = (year, month) => {
   return cells;
 };
 
-/**
- * Palette des états — reprise à l'identique de `PlanningStateBadge.jsx` pour que
- * la barre du calendrier et le badge du planning parlent la même langue.
- * `rgb` sert aux fonds translucides (la densité module l'alpha).
- */
-const STATE_COLORS = {
-  brouillon: { label: 'Brouillon',  color: '#8B5CF6', rgb: '139, 92, 246' },
-  soumis:    { label: 'En vigueur', color: '#3B82F6', rgb: '59, 130, 246' },
-  en_cours:  { label: 'En cours',   color: '#10B981', rgb: '16, 185, 129' },
-  termine:   { label: 'Terminé',    color: '#6B7280', rgb: '107, 114, 128' },
-  suspendu:  { label: 'Suspendu',   color: '#EF4444', rgb: '239, 68, 68' },
-};
+/** Ordre de lecture des états : le service en cours d'abord, l'archive en dernier. */
 const STATE_ORDER = ['en_cours', 'soumis', 'suspendu', 'brouillon', 'termine'];
 
-const DEPARTMENT_COLORS = ['#2563EB','#7C3AED','#DB2777','#EA580C','#059669','#0891B2','#4F46E5','#65A30D'];
-const departmentColor = (id, departments) => {
+const stateLabel = (state) => (PLANNING_STATES[state] || PLANNING_STATES.brouillon).label;
+const stateTone = (state) => PLANNING_STATE_COLOR[state] || PLANNING_STATE_COLOR.brouillon;
+
+/**
+ * Couleur d'un service, prise sur l'échelle d'identité de la plateforme. Dix
+ * teintes conçues pour se distinguer entre elles sans signifier quoi que ce
+ * soit : un hôpital qui aligne douze services voit les deux derniers reprendre
+ * les premières, ce qui reste préférable à une teinte inventée.
+ */
+const DEPARTMENT_TONES = [
+  'var(--gs-id-1)', 'var(--gs-id-2)', 'var(--gs-id-3)', 'var(--gs-id-4)', 'var(--gs-id-5)',
+  'var(--gs-id-6)', 'var(--gs-id-7)', 'var(--gs-id-8)', 'var(--gs-id-9)', 'var(--gs-id-10)',
+];
+const departmentTone = (id, departments) => {
   const found = departments.findIndex((d) => d.id === id);
   const index = found >= 0 ? found : 0;
-  return DEPARTMENT_COLORS[index % DEPARTMENT_COLORS.length];
+  return DEPARTMENT_TONES[index % DEPARTMENT_TONES.length];
 };
 
 /**
@@ -100,9 +109,8 @@ const daySegments = (info) => {
 };
 
 /**
- * Couleur de fond : intensité par densité (comme avant), teinte par l'état
- * dominant du jour — celui qui porte le plus de gardes, `STATE_ORDER` tranchant
- * les égalités.
+ * État dominant du jour — celui qui porte le plus de gardes, `STATE_ORDER`
+ * tranchant les égalités. C'est lui qui teinte le fond de la case.
  */
 const dominantSegment = (segments) => (segments || []).reduce((best, s) => {
   if (!best) return s;
@@ -110,15 +118,15 @@ const dominantSegment = (segments) => (segments || []).reduce((best, s) => {
   return STATE_ORDER.indexOf(s.state) < STATE_ORDER.indexOf(best.state) ? s : best;
 }, null);
 
-const densityStyle = (count, peak, segments) => {
-  if (!count) return { background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' };
-  const rgb = (STATE_COLORS[dominantSegment(segments)?.state] || STATE_COLORS.brouillon).rgb;
+/**
+ * Densité du jour, en pourcentage de teinte à mélanger au papier : 10 % pour un
+ * jour à peine occupé, 40 % pour le jour de pic du mois. Le mélange se fait en
+ * CSS — ici on ne calcule qu'un nombre.
+ */
+const densityFill = (count, peak) => {
+  if (!count) return 0;
   const ratio = peak > 0 ? count / peak : 0;
-  const alpha = 0.10 + ratio * 0.30;
-  return {
-    background: `rgba(${rgb}, ${alpha.toFixed(2)})`,
-    border: `1px solid rgba(${rgb}, 0.45)`,
-  };
+  return Math.round(10 + ratio * 30);
 };
 
 const todayStr = () => {
@@ -183,6 +191,8 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
   }, [days]);
 
   // États réellement présents dans la fenêtre : la légende ne montre que ceux-là.
+  // Elle en listait trois en dur, y compris ceux qu'aucune case ne portait — un
+  // mois de brouillons annonçait « en vigueur, en cours, suspendu ».
   const statesPresent = useMemo(() => {
     const seen = new Set();
     (schedules || []).forEach((s) => { if (s.state) seen.add(s.state); });
@@ -205,33 +215,25 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
   const detail = selectedDay ? byDate[selectedDay] : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <style>{`@keyframes holidayGlow { 0%,100% { box-shadow: inset 0 0 0 1px rgba(245,158,11,.35); } 50% { box-shadow: inset 0 0 0 2px rgba(245,158,11,.8), 0 0 8px rgba(245,158,11,.22); } }`}</style>
+    <div className="gsc">
       {/* Barre de navigation et filtres */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <h3 style={{ fontSize: 'var(--font-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</h3>
-          <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
-            Consultation seule — aucune modification depuis cet écran
-          </p>
+      <div className="gsc-bar">
+        <div className="gsc-bar__id">
+          <h3 className="gsc-bar__title">{title}</h3>
+          <p className="gsc-bar__sub">Consultation seule — aucune modification depuis cet écran</p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button onClick={() => shiftMonth(-1)} className="btn btn-secondary btn-sm" title="Mois précédent">‹</button>
-          <span style={{
-            minWidth: 150, textAlign: 'center', fontWeight: 700,
-            fontSize: 'var(--font-sm)', color: 'var(--text-primary)', textTransform: 'capitalize',
-          }}>
-            {monthLabel}
-          </span>
-          <button onClick={() => shiftMonth(1)} className="btn btn-secondary btn-sm" title="Mois suivant">›</button>
+        <div className="gsc-nav">
+          <button type="button" onClick={() => shiftMonth(-1)} className="gs-btn" title="Mois précédent">‹</button>
+          <span className="gsc-nav__month">{monthLabel}</span>
+          <button type="button" onClick={() => shiftMonth(1)} className="gs-btn" title="Mois suivant">›</button>
         </div>
 
         <select
           value={deptFilter}
           onChange={(e) => { setDeptFilter(e.target.value); setSelectedDay(null); }}
-          className="input"
-          style={{ maxWidth: 200, fontSize: 'var(--font-xs)' }}
+          className="gsc-select"
+          aria-label="Filtrer par service"
         >
           <option value="">Tous les services</option>
           {departments.map((d) => (
@@ -242,15 +244,15 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
         <select
           value={stateFilter}
           onChange={(e) => { setStateFilter(e.target.value); setSelectedDay(null); }}
-          className="input"
-          style={{ maxWidth: 170, fontSize: 'var(--font-xs)' }}
+          className="gsc-select is-narrow"
+          aria-label="Filtrer par état de planning"
         >
           {STATE_FILTERS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
       </div>
 
       {/* Indicateurs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
+      <div className="gsc-kpis">
         {[
           { label: 'Gardes', value: summary.totalGuards ?? 0 },
           { label: 'Jours couverts', value: summary.daysCovered ?? 0 },
@@ -258,43 +260,27 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
           { label: 'Plannings', value: summary.schedulesCount ?? 0 },
           { label: 'Pic / jour', value: summary.peakPerDay ?? 0 },
         ].map((k) => (
-          <div key={k.label} style={{
-            background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--border-radius-sm)', padding: '10px 12px',
-          }}>
-            <p style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{k.label}</p>
-            <p style={{ fontSize: 'var(--font-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>{k.value}</p>
+          <div key={k.label} className="gsc-kpi">
+            <p className="gsc-kpi__label">{k.label}</p>
+            <p className="gsc-kpi__value">{k.value}</p>
           </div>
         ))}
       </div>
 
       {isError ? (
-        <div style={{ padding: 32, textAlign: 'center', color: 'var(--color-danger)', fontSize: 'var(--font-sm)' }}>
-          Le calendrier n'a pas pu être chargé.
-        </div>
+        <div className="gsc-state is-error">Le calendrier n'a pas pu être chargé.</div>
       ) : isLoading ? (
-        <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>
-          Chargement du calendrier…
-        </div>
+        <div className="gsc-state">Chargement du calendrier…</div>
       ) : (
         <>
           {/* Grille du mois */}
-          <div style={{
-            background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--border-radius-lg)', padding: 12,
-          }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 6 }}>
+          <div className="gs-card gsc-panel">
+            <div className="gsc-dow">
               {DOW_LABELS.map((d, i) => (
-                <div key={d} style={{
-                  textAlign: 'center', fontSize: 10, fontWeight: 700,
-                  color: i >= 5 ? 'var(--color-danger)' : 'var(--text-muted)',
-                  textTransform: 'uppercase', letterSpacing: '.04em', padding: '4px 0',
-                }}>
-                  {d}
-                </div>
+                <div key={d} className={`gsc-dow__cell${i >= 5 ? ' is-weekend' : ''}`}>{d}</div>
               ))}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+            <div className="gsc-grid">
               {grid.map((cell, i) => {
                 if (!cell) return <div key={`empty-${i}`} />;
                 const info = byDate[cell.date];
@@ -304,76 +290,59 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
                 const isSelected = cell.date === selectedDay;
                 const isWeekend = cell.dow >= 5;
                 const holiday = holidaysByDate[cell.date];
+                const dominant = dominantSegment(segments);
                 // Une ligne par planning : « nom — état · n garde(s) ».
-                const title = count
+                const hint = count
                   ? segments
-                      .map((s) => `${s.name}${s.departmentName ? ` (${s.departmentName})` : ''} — ${(STATE_COLORS[s.state] || STATE_COLORS.brouillon).label} · ${s.count} garde(s)`)
+                      .map((s) => `${s.name}${s.departmentName ? ` (${s.departmentName})` : ''} — ${stateLabel(s.state)} · ${s.count} garde(s)`)
                       .join('\n')
                   : 'Aucune garde';
+                const cellClass = [
+                  'gsc-cell',
+                  count ? 'is-filled' : '',
+                  isWeekend ? 'is-weekend' : '',
+                  holiday ? 'is-holiday' : '',
+                  isToday ? 'is-today' : '',
+                  isSelected ? 'is-selected' : '',
+                ].filter(Boolean).join(' ');
                 return (
                   <button
+                    type="button"
                     key={cell.date}
                     onClick={() => setSelectedDay(count ? (isSelected ? null : cell.date) : null)}
-                    title={title}
+                    title={hint}
+                    className={cellClass}
                     style={{
-                      minHeight: 74, padding: 6, textAlign: 'left',
-                      borderRadius: 'var(--border-radius-sm)',
-                      cursor: count ? 'pointer' : 'default',
-                      fontFamily: 'inherit',
-                      outline: isSelected ? '2px solid var(--color-primary-light)' : 'none',
-                      ...densityStyle(count, peak, segments),
-                      ...(isWeekend ? {
-                        backgroundImage: 'repeating-linear-gradient(135deg, rgba(239,68,68,.08) 0 5px, transparent 5px 10px)',
-                      } : {}),
-                      ...(holiday ? { animation: 'holidayGlow 2.4s ease-in-out infinite', backgroundImage: 'linear-gradient(135deg, rgba(245,158,11,.14), transparent)' } : {}),
-                      ...(isToday ? { borderColor: 'var(--color-primary-light)', borderWidth: 2 } : {}),
+                      '--gsc-tone': stateTone(dominant?.state),
+                      '--gsc-fill': densityFill(count, peak),
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{
-                        fontSize: 'var(--font-xs)', fontWeight: isToday ? 800 : 600,
-                        color: cell.dow >= 5 ? 'var(--color-danger)' : 'var(--text-primary)',
-                      }}>
+                    <div className="gsc-cell__head">
+                      <span className={`gsc-cell__day${isWeekend ? ' is-weekend' : ''}${isToday ? ' is-today' : ''}`}>
                         {cell.day}
                       </span>
-                      {holiday && <span title={holiday.name} style={{ fontSize: 10 }}>★</span>}
-                      {count > 0 && (
-                        <span style={{
-                          fontSize: 10, fontWeight: 700, color: '#fff',
-                          background: (STATE_COLORS[dominantSegment(segments)?.state] || STATE_COLORS.brouillon).color,
-                          borderRadius: 10, padding: '1px 6px',
-                        }}>
-                          {count}
-                        </span>
-                      )}
+                      {holiday && <span className="gsc-cell__holiday" title={holiday.name}>Férié</span>}
+                      {count > 0 && <span className="gsc-cell__count">{count}</span>}
                     </div>
                     {/* Une barre par planning : deux plannings le même jour ⇒
                         deux barres de couleurs différentes, empilées. */}
                     {count > 0 && (
-                      <div style={{ marginTop: 5, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <div className="gsc-bars">
                         {segments.slice(0, 3).map((s) => {
-                          const c = STATE_COLORS[s.state] || STATE_COLORS.brouillon;
                           const dept = info?.guards?.find((g) => (g.scheduleId || g.scheduleName) === s.key)?.departmentId;
-                          const deptColor = departmentColor(dept, departments);
+                          const rowTones = {
+                            '--gsc-state': stateTone(s.state),
+                            '--gsc-id': departmentTone(dept, departments),
+                          };
                           return (
-                            <span key={s.key} style={{
-                              display: 'flex', alignItems: 'center', gap: 3,
-                            }}>
-                              <span style={{
-                                flex: 1, height: 4, borderRadius: 2,
-                                background: deptColor, minWidth: 0,
-                                borderLeft: `4px solid ${c.color}`,
-                              }} />
-                              <span style={{ fontSize: 8, fontWeight: 700, color: deptColor }}>
-                                {s.count}
-                              </span>
+                            <span key={s.key} className="gsc-bar-row" style={rowTones}>
+                              <span className="gsc-bar-line" />
+                              <span className="gsc-bar-count">{s.count}</span>
                             </span>
                           );
                         })}
                         {segments.length > 3 && (
-                          <span style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 600 }}>
-                            +{segments.length - 3} planning(s)
-                          </span>
+                          <span className="gsc-bar-more">+{segments.length - 3} planning(s)</span>
                         )}
                       </div>
                     )}
@@ -384,71 +353,59 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
 
             {/* Légende — n'affiche que les états réellement présents. */}
             {(statesPresent.length > 0 || departments.length > 0) && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-                marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-subtle)',
-              }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>
-                  État des plannings
-                </span>
-                {['soumis','en_cours','suspendu'].map((s) => (
-                  <span key={s} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ width: 18, height: 4, borderRadius: 2, background: STATE_COLORS[s].color }} />
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{STATE_COLORS[s].label}</span>
-                  </span>
-                ))}
-                <span style={{ width: 1, height: 18, background: 'var(--border-default)' }} />
+              <div className="gsc-legend">
+                {statesPresent.length > 0 && (
+                  <>
+                    <span className="gsc-legend__label">État des plannings</span>
+                    {statesPresent.map((s) => (
+                      <span key={s} className="gsc-legend__item" style={{ '--gsc-tone': stateTone(s) }}>
+                        <span className="gsc-legend__bar" />
+                        <span className="gsc-legend__text">{stateLabel(s)}</span>
+                      </span>
+                    ))}
+                  </>
+                )}
+                {statesPresent.length > 0 && departments.length > 0 && <span className="gsc-legend__sep" />}
                 {departments.map((d) => (
-                  <span key={d.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ width: 9, height: 9, transform: 'rotate(45deg)', background: departmentColor(d.id, departments) }} />
-                    <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{d.name}</span>
+                  <span key={d.id} className="gsc-legend__item" style={{ '--gsc-id': departmentTone(d.id, departments) }}>
+                    <span className="gsc-legend__diamond" />
+                    <span className="gsc-legend__text is-small">{d.name}</span>
                   </span>
                 ))}
-                <span style={{ fontSize: 10, color: '#D97706' }}>★ Jour férié</span>
-                <span style={{ fontSize: 10, color: 'var(--color-danger)' }}>Hachuré : week-end</span>
+                <span className="gsc-legend__note">Bordure double : jour férié</span>
+                <span className="gsc-legend__note">Bordure interrompue : week-end</span>
               </div>
             )}
           </div>
 
           {/* Détail du jour sélectionné */}
           {detail && (
-            <div style={{
-              background: 'var(--bg-card)', border: '1px solid var(--border-default)',
-              borderRadius: 'var(--border-radius-lg)', padding: 16,
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h4 style={{ fontSize: 'var(--font-md)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {detail.guards.length} garde(s) — {detail.date}
+            <div className="gs-card gsc-detail">
+              <div className="gsc-detail__head">
+                <h4 className="gsc-detail__title">
+                  {/* Le titre affichait la clé du jour telle quelle
+                      (« 2026-08-24 ») : c'était la dernière date ISO visible
+                      dans cet écran. */}
+                  {detail.guards.length} garde(s) — {fullFrenchDate(detail.date)}
                 </h4>
-                <button onClick={() => setSelectedDay(null)} className="btn btn-secondary btn-sm">Fermer</button>
+                <button type="button" onClick={() => setSelectedDay(null)} className="gs-btn">Fermer</button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div className="gsc-list">
                 {detail.guards.map((g, i) => (
-                  <div key={i} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-                    padding: '8px 10px', background: 'var(--bg-elevated)',
-                    borderRadius: 'var(--border-radius-sm)', border: '1px solid var(--border-subtle)',
-                  }}>
-                    <span style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 140 }}>
-                      {g.name}
-                    </span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{g.label}</span>
-                    {g.scheduleName && (
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>· {g.scheduleName}</span>
-                    )}
-                    {g.roleName && (
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{g.roleName}</span>
-                    )}
+                  <div key={i} className="gsc-guard">
+                    <span className="gsc-guard__name">{g.name}</span>
+                    {g.scheduleName && <span className="gsc-guard__meta">· {g.scheduleName}</span>}
+                    {g.roleName && <span className="gsc-guard__meta">{g.roleName}</span>}
                     {g.departmentName && (
-                      <span style={{
-                        fontSize: 10, fontWeight: 600, color: 'var(--color-primary-light)',
-                        background: 'var(--color-primary-10)', borderRadius: 6, padding: '2px 8px',
-                      }}>
+                      <span className="gsc-guard__dept" style={{ '--gsc-id': departmentTone(g.departmentId, departments) }}>
                         {g.departmentName}
                       </span>
                     )}
-                    <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>{g.code}</span>
-                    {g.state && <PlanningStateBadge state={g.state} />}
+                    {/* La ligne affichait `g.label` deux fois — « Selima Selima
+                        De service · Planning août 2026 … De service ». Une seule
+                        mention subsiste, celle qui porte le repli. */}
+                    <span className="gsc-guard__label">{g.label || 'De service'}</span>
+                    {g.state && <PlanningStateBadge state={g.state} size="sm" />}
                   </div>
                 ))}
               </div>
@@ -457,24 +414,19 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
 
           {/* Plannings représentés dans la fenêtre */}
           {schedules.length > 0 && (
-            <div style={{
-              background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--border-radius-lg)', padding: 16,
-            }}>
-              <h4 style={{ fontSize: 'var(--font-sm)', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 10 }}>
-                Plannings couvrant la période ({schedules.length})
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="gs-card gsc-plans">
+              <h4 className="gsc-plans__title">Plannings couvrant la période ({schedules.length})</h4>
+              <div className="gsc-list">
                 {schedules.map((s) => (
-                  <div key={s.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-                    fontSize: 'var(--font-xs)', color: 'var(--text-secondary)',
-                  }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.name}</span>
+                  <div key={s.id} className="gsc-plan">
+                    <span className="gsc-plan__name">{s.name}</span>
                     {s.departmentName && <span>· {s.departmentName}</span>}
-                    <span>· {s.startDate} → {s.endDate}</span>
-                    <PlanningStateBadge state={s.state} />
-                    <span style={{ color: 'var(--text-muted)' }}>{s.guards} garde(s)</span>
+                    {/* La période était affichée telle qu'elle arrive du serveur
+                        (« 2026-08-24 → 2026-08-31 ») : la seule date ISO qui
+                        restait visible dans le calendrier. */}
+                    <span>· {frenchRange(s.startDate, s.endDate)}</span>
+                    <PlanningStateBadge state={s.state} size="sm" />
+                    <span className="gsc-plan__count">{s.guards} garde(s)</span>
                   </div>
                 ))}
               </div>
@@ -482,13 +434,7 @@ export default function HospitalGuardCalendar({ establishmentId, title = 'Calend
           )}
 
           {days.length === 0 && (
-            <div style={{
-              padding: 40, textAlign: 'center', color: 'var(--text-muted)',
-              fontSize: 'var(--font-sm)', background: 'var(--bg-card)',
-              border: '1px dashed var(--border-default)', borderRadius: 'var(--border-radius-lg)',
-            }}>
-              📅 Aucune garde sur cette période avec les filtres actuels
-            </div>
+            <div className="gsc-empty">Aucune garde sur cette période avec les filtres actuels</div>
           )}
         </>
       )}

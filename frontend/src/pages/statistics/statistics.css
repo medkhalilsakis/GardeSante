@@ -1,0 +1,3 @@
+.gss-wrap { display: grid; gap: 16px; min-width: 0; }
+.gss-readonly { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 7px 10px; border: 1px solid var(--gs-rule-strong); border-radius: 8px; color: var(--gs-ink-faint); font: 11.5px var(--gs-body); }
+.gss-readonly svg { color: var(--gs-seal); }

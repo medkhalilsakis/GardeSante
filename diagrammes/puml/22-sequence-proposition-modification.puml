@@ -1,0 +1,175 @@
+' ============================================================================
+' GardeSanté — Diagramme de séquence : modifier un planning déjà en vigueur
+'
+' Suite de la figure 21. Le tableur en vigueur n'est jamais réécrit
+' directement : toute évolution passe par une proposition soumise à
+' l'arbitrage du chef de service.
+'
+' Sources vérifiées :
+'   backend/src/modules/schedules/schedule-builder.routes.js
+'     POST /:scheduleId/change-proposals             -> createChangeProposal
+'     POST /:scheduleId/change-proposals/:id/decision -> decideChangeProposal
+'     POST /:scheduleId/change-proposals/decide-all   -> decideAllChangeProposals
+'   backend/src/modules/schedules/schedule-builder.controller.js
+'     :873-878   canProposeScheduleChange — exclut department_head
+'     createChangeProposal   : SCHEDULE_IN_FORCE, INSERT, notification, emit
+'     decideChangeProposal   : réservé au chef `is_head` du service ;
+'                              branche acceptée -> replaceRosterAssignments,
+'                              DELETE FROM shifts, fusion de metadata.spreadsheet
+'   backend/src/config/constants.js  SCHEDULE_IN_FORCE = submitted | active
+'   backend/src/modules/notifications/notifications.controller.js:106-117
+'     createNotification n'insère qu'une ligne : aucune diffusion socket.
+'   frontend/src/hooks/useRealtime.js  schedule:change-proposal
+' ============================================================================
+@startuml 22-sequence-proposition-modification
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 260
+skinparam ParticipantPadding 12
+skinparam BoxPadding 14
+skinparam actor {
+  BackgroundColor #E6F4F1
+  BorderColor #0F766E
+}
+skinparam participant {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontStyle bold
+}
+skinparam database {
+  BackgroundColor #F3E8FF
+  BorderColor #7A3E9D
+}
+skinparam sequence {
+  LifeLineBorderColor #94A3B8
+  LifeLineBackgroundColor #F8FAFC
+  GroupBackgroundColor #EEF2FF
+  GroupBorderColor #1B4FCA
+  GroupHeaderFontColor #1B4FCA
+  DividerBackgroundColor #E6F4F1
+  DividerBorderColor #0F766E
+  DividerFontColor #0F766E
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Séquence — Modifier un planning déjà en vigueur : proposition et arbitrage
+
+actor "Surveillant\n(service ou général)" as SS
+actor "Chef de service" as CS
+participant "Tableur\n(SmartSpreadsheet)" as TAB
+participant "API\nschedule-builder" as API
+database "PostgreSQL" as DB
+participant "socket.io" as WS
+
+== Dépôt de la proposition ==
+
+SS -> TAB : ouvre le planning en vigueur
+TAB -> API : GET /schedule-builder/:id/detail
+API --> TAB : grille en lecture seule
+SS -> TAB : corrige la grille et justifie sa demande
+TAB -> API : POST /schedule-builder/:id/change-proposals
+API -> DB : SELECT statut et service du planning
+
+alt statut hors « envoyé » et « en cours »
+  API --> TAB : 400 « ouvertes une fois le planning envoyé »
+  note right of API
+    Un brouillon se corrige directement :
+    la proposition n'a de sens que sur un
+    document qui fait déjà foi.
+  end note
+else planning en vigueur
+  API -> API : canProposeScheduleChange(acteur, service)
+
+  alt acteur non habilité
+    API --> TAB : 403 « seuls les surveillants concernés »
+    note right of API
+      Surveillant général : autorisé sans condition.
+      Surveillant de service : autorisé s'il est
+      rattaché au service. **Chef de service : refusé**
+      — il arbitre les propositions mais n'en formule
+      pas, alors qu'il détient un sur-ensemble
+      d'habilitations. Cette rupture d'héritage est
+      portée au diagramme de cas d'utilisation.
+    end note
+  else acteur habilité
+    API -> DB : INSERT schedule_change_proposals\nproposition JSONB, statut « en attente »
+    API -> DB : INSERT notifications (chef du service)
+    API -> DB : INSERT activity_logs (auteur, IP, agent)
+    API -> WS : emit schedule:change-proposal\nsalon department:
+    WS --> CS : la proposition apparaît sans rechargement
+    note over WS
+      `createNotification` insère la notification mais
+      ne diffuse rien. La remontée temps réel n'existe
+      que là où le contrôleur appelle explicitement une
+      émission ; à défaut l'écran ne découvre l'événement
+      qu'au rafraîchissement périodique de 60 secondes.
+    end note
+    API --> TAB : 201 proposition transmise au chef
+  end
+end
+
+== Arbitrage du chef de service ==
+
+CS -> TAB : ouvre les propositions en attente
+TAB -> API : GET /schedule-builder/:id/change-proposals
+API --> TAB : liste avec le différentiel de chaque grille
+CS -> TAB : décide, avec commentaire
+TAB -> API : POST /change-proposals/:id/decision
+API -> DB : SELECT proposition + planning
+API -> DB : SELECT is_head sur user_departments
+
+alt l'acteur n'est pas le chef de ce service
+  API --> TAB : 403 « seul le chef de ce service peut décider »
+else proposition déjà traitée
+  API --> TAB : 400 « cette proposition a déjà été traitée »
+else décision recevable
+
+  alt refusée
+    API -> DB : UPDATE statut = « refusée »\n+ commentaire de décision
+    note right of DB
+      La grille en vigueur n'est pas touchée.
+      La proposition refusée reste consultable :
+      la trace de ce qui a été demandé, et du
+      motif du refus, subsiste.
+    end note
+  else acceptée
+    group transaction unique
+      API -> DB : réécriture de schedule_staff_assignments\net schedule_staff_periods
+      API -> DB : DELETE FROM shifts du planning\npurge des lignes héritées
+      API -> DB : fusion de la grille proposée\ndans schedules.metadata.spreadsheet
+      API -> DB : UPDATE statut = « acceptée »\n+ auteur et horodatage de la décision
+    end
+    note right of DB
+      Les quatre écritures sont atomiques : un
+      planning ne peut pas se retrouver avec une
+      grille à jour et une proposition encore en
+      attente, ni l'inverse.
+    end note
+  end
+
+  API -> DB : INSERT notifications\n(auteur de la proposition)
+  API -> DB : INSERT activity_logs
+  API -> WS : emit schedule:change-proposal\n+ schedule:updated si acceptée
+  WS --> SS : décision reçue sans rechargement
+  API --> TAB : 200 décision enregistrée
+end
+
+note over SS, WS
+  Le chef peut aussi trancher en une fois toutes les propositions
+  d'un planning : même contrôle d'habilitation, même journalisation,
+  une seule décision appliquée à la liste entière.
+end note
+
+legend right
+  Trait plein : appel. Trait pointillé : réponse.
+  Le tableur en vigueur n'est modifié que par une proposition acceptée par le chef de service.
+  Substituer un agent absent relève du remplacement : figure 23.
+endlegend
+
+@enduml

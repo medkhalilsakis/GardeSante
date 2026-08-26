@@ -3,6 +3,13 @@
 // peuvent pas être rattachés à un service. Voir hospital-wide-roles.js.
 const { checkDepartmentMembership, REFUSAL: NO_DEPT_REFUSAL } = require('./hospital-wide-roles');
 
+// Les routes de détail et de rattachement reçoivent un UUID de service dans
+// l'URL. Pour un acteur normal, la portée est toujours son établissement ; le
+// super admin conserve sa portée plateforme. Les contrôles ci-dessous utilisent
+// ensuite l'établissement réellement porté par le service, jamais un UUID
+// fourni librement par le client.
+const scopedEstablishmentId = (req) => (req.user.isSuperAdmin ? null : req.user.establishmentId);
+
 // GET /api/departments
 // `?head=<userId>` restreint la liste aux services dont cet utilisateur est chef.
 // Sans ce filtre le chef de service pouvait se retrouver positionné par défaut
@@ -82,11 +89,19 @@ const getDepartments = async (req, res) => {
 
 // GET /api/departments/:id
 const getDepartment = async (req, res) => {
+  // `member_count` ne compte que les agents **actifs**, comme la liste le fait
+  // déjà plus haut (`:21`). Sans le filtre, un service dont un agent a été
+  // archivé annonçait un effectif supérieur à la liste `members` affichée juste
+  // à côté — et le KPI « Personnel » du tableau de bord du chef, qui lit ce
+  // champ, dépassait le nombre de lignes réellement présentes.
+  const scopeId = scopedEstablishmentId(req);
   const result = await query(
-    `SELECT d.*, COUNT(DISTINCT ud.user_id) AS member_count
-     FROM departments d LEFT JOIN user_departments ud ON d.id = ud.department_id
-     WHERE d.id = $1 GROUP BY d.id`,
-    [req.params.id]
+    `SELECT d.*, COUNT(DISTINCT ud.user_id) FILTER (WHERE u.is_active = TRUE) AS member_count
+      FROM departments d
+      LEFT JOIN user_departments ud ON d.id = ud.department_id
+      LEFT JOIN users u ON u.id = ud.user_id
+      WHERE d.id = $1 ${scopeId ? 'AND d.establishment_id = $2' : ''} GROUP BY d.id`,
+    scopeId ? [req.params.id, scopeId] : [req.params.id]
   );
   if (!result.rows[0]) return res.status(404).json({ success: false, message: 'Service introuvable' });
 
@@ -383,6 +398,23 @@ const addMember = async (req, res) => {
   const membership = await checkDepartmentMembership(userId);
   if (!membership.allowed) return res.status(400).json(NO_DEPT_REFUSAL);
 
+  const target = await query(
+    `SELECT d.establishment_id AS department_establishment_id,
+            u.establishment_id AS user_establishment_id
+       FROM departments d
+       LEFT JOIN users u ON u.id = $2
+      WHERE d.id = $1`,
+    [req.params.id, userId]
+  );
+  if (!target.rows[0]) return res.status(404).json({ success: false, message: 'Service introuvable' });
+  if (!target.rows[0].user_establishment_id) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+  if (target.rows[0].department_establishment_id !== target.rows[0].user_establishment_id) {
+    return res.status(400).json({ success: false, message: 'Le personnel doit appartenir au même établissement que le service.' });
+  }
+  if (!req.user.isSuperAdmin && target.rows[0].department_establishment_id !== req.user.establishmentId) {
+    return res.status(403).json({ success: false, message: 'Accès refusé' });
+  }
+
   await query(
     `INSERT INTO user_departments (user_id, department_id, is_head, is_primary)
      VALUES ($1,$2,$3,$4)
@@ -394,6 +426,22 @@ const addMember = async (req, res) => {
 
 // DELETE /api/departments/:id/members/:userId
 const removeMember = async (req, res) => {
+  const target = await query(
+    `SELECT d.establishment_id AS department_establishment_id,
+            u.establishment_id AS user_establishment_id
+       FROM departments d
+       LEFT JOIN users u ON u.id = $2
+      WHERE d.id = $1`,
+    [req.params.id, req.params.userId]
+  );
+  if (!target.rows[0]) return res.status(404).json({ success: false, message: 'Service introuvable' });
+  if (!target.rows[0].user_establishment_id) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+  if (target.rows[0].department_establishment_id !== target.rows[0].user_establishment_id) {
+    return res.status(400).json({ success: false, message: 'Le personnel doit appartenir au même établissement que le service.' });
+  }
+  if (!req.user.isSuperAdmin && target.rows[0].department_establishment_id !== req.user.establishmentId) {
+    return res.status(403).json({ success: false, message: 'Accès refusé' });
+  }
   await query('DELETE FROM user_departments WHERE user_id = $1 AND department_id = $2', [req.params.userId, req.params.id]);
   return res.json({ success: true, message: 'Membre retire du service' });
 };

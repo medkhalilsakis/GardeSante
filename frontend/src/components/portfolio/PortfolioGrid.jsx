@@ -1,32 +1,15 @@
 import React from 'react';
+import { UsersRound } from 'lucide-react';
+import { GsEmpty } from '../gs';
 import StaffPortfolioCard from './StaffPortfolioCard';
 
-/**
- * Grille portfolio responsive
- * @param {object[]} agents - Liste des agents
- * @param {Function} onCardClick - Callback quand une carte est cliquée (reçoit l'agent)
- * @param {string} emptyMessage - Message si la grille est vide
- */
 export default function PortfolioGrid({ agents, onCardClick, emptyMessage = 'Aucun personnel trouvé.' }) {
   if (!agents || agents.length === 0) {
-    return (
-      <div style={{
-        textAlign: 'center',
-        padding: '40px 20px',
-        color: 'var(--text-muted)',
-        fontSize: 'var(--font-sm)'
-      }}>
-        👤 {emptyMessage}
-      </div>
-    );
+    return <GsEmpty icon={<UsersRound size={26} strokeWidth={1.6} />} title={emptyMessage} hint="Aucun membre ne correspond aux critères actuels." />;
   }
 
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
-      gap: '12px'
-    }}>
+    <div className="gsport-grid" aria-label="Personnel du service">
       {agents.map((agent) => (
         <StaffPortfolioCard
           key={agent.id}

@@ -1,0 +1,117 @@
+.fixed-roster-panel {
+  margin: 12px 14px 0;
+  border: 1px solid color-mix(in srgb, var(--gs-seal) 22%, var(--gs-rule));
+  border-radius: 10px;
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-card);
+  overflow: hidden;
+}
+
+.fixed-roster-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px 13px;
+  border-bottom: 1px solid var(--gs-rule);
+  /* Le dégradé d'origine mélangeait deux teintes qui ne disent pas la même chose,
+     le cachet et un vert émeraude. Un aplat de cachet dilué suffit à marquer
+     l'en-tête, et il s'inverse avec le thème. */
+  background: var(--gs-seal-wash);
+  transition: padding .25s ease, border-color .25s ease;
+}
+
+.fixed-roster-panel.is-collapsed .fixed-roster-panel__header { padding-top: 10px; padding-bottom: 10px; border-bottom-color: transparent; }
+
+.fixed-roster-panel__title { display: flex; min-width: 0; align-items: flex-start; gap: 11px; }
+.fixed-roster-panel__icon { display: inline-grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border-radius: 8px; background: var(--gs-seal); color: var(--gs-on-tone); }
+.fixed-roster-panel__eyebrow { color: var(--gs-seal); font-family: var(--gs-display); font-size: 10px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
+.fixed-roster-panel h2 { margin: 2px 0 2px; color: var(--gs-ink); font-family: var(--gs-display); font-size: 17px; font-weight: 700; letter-spacing: -.015em; }
+.fixed-roster-panel__title p { color: var(--gs-ink-soft); font-size: 10px; }
+.fixed-roster-panel.is-collapsed .fixed-roster-panel__title p { display: none; }
+
+.fixed-roster-panel__header-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 8px; }
+
+.fixed-roster-panel__stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.fixed-roster-panel__stats > span { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border: 1px solid var(--gs-rule); border-radius: 6px; background: var(--gs-paper); color: var(--gs-ink-soft); font-size: 9px; white-space: nowrap; }
+.fixed-roster-panel__stats strong { color: var(--gs-ink); font-size: 13px; }
+.fixed-roster-panel__stats .is-constant { color: var(--gs-duty); }
+
+.fixed-roster-panel__collapse { display: inline-flex; min-width: 82px; height: 32px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid var(--gs-rule); border-radius: 6px; background: var(--gs-paper); color: var(--gs-ink-soft); font-size: 10px; font-weight: 800; cursor: pointer; transition: border-color .18s ease, color .18s ease, background .18s ease; }
+.fixed-roster-panel__collapse:hover { border-color: var(--gs-seal); background: var(--gs-seal-wash); color: var(--gs-seal); }
+
+.fixed-roster-panel__content { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows .32s ease, opacity .22s ease; }
+.fixed-roster-panel__content-inner { min-height: 0; overflow: hidden; }
+.fixed-roster-panel.is-collapsed .fixed-roster-panel__content { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+
+.fixed-roster-panel__notice { display: flex; align-items: flex-start; gap: 8px; padding: 9px 18px; border-bottom: 1px solid color-mix(in srgb, var(--gs-seal) 14%, transparent); background: var(--gs-seal-wash); color: var(--gs-ink-soft); font-size: 10px; line-height: 1.45; }
+.fixed-roster-panel__notice svg { flex: 0 0 auto; margin-top: 1px; color: var(--gs-seal); }
+.fixed-roster-panel__notice strong { color: var(--gs-seal); }
+
+.fixed-roster-panel__toolbar { display: flex; align-items: center; gap: 7px; padding: 10px 18px; border-bottom: 1px solid var(--gs-rule); }
+.fixed-roster-panel__search { display: flex; min-width: 160px; flex: 1; height: 34px; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--gs-rule); border-radius: 6px; color: var(--gs-ink-faint); transition: border-color .18s ease, box-shadow .18s ease; }
+.fixed-roster-panel__search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--gs-ink); font-size: 10px; }
+/* Le champ n'a pas de bord à lui : il éteint son anneau et c'est la coque qui le
+   porte, comme `.cf-search`. Sans cette règle le champ était le seul de la
+   plateforme à ne rien montrer au clavier. */
+.fixed-roster-panel__search:focus-within { border-color: var(--gs-seal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gs-seal) 14%, transparent); }
+.fixed-roster-panel__toolbar button { display: inline-flex; height: 34px; flex: 0 0 auto; align-items: center; gap: 5px; padding: 0 10px; border-radius: 6px; font-size: 10px; font-weight: 800; }
+.fixed-roster-panel__add { border: 1px dashed color-mix(in srgb, var(--gs-seal) 20%, transparent); background: var(--gs-seal-wash); color: var(--gs-seal); }
+/* « Enregistrer les constantes » est l'action principale du panneau : elle prend
+   le cachet plein, comme tout bouton principal de la plateforme. Le vert
+   émeraude d'origine ne disait rien de plus, et il ne s'inversait pas. Le voisin
+   « Ajouter » reste en pointillé sur aplat dilué, ce qui suffit à les séparer. */
+.fixed-roster-panel__save { border: 1px solid var(--gs-seal); background: var(--gs-seal); color: var(--gs-on-tone); }
+.fixed-roster-panel__save:hover:not(:disabled) { background: color-mix(in srgb, var(--gs-seal) 86%, #000); border-color: color-mix(in srgb, var(--gs-seal) 86%, #000); }
+.fixed-roster-panel__toolbar button:disabled, .fixed-roster-row button:disabled, .fixed-roster-row input:disabled, .fixed-roster-row select:disabled { cursor: not-allowed; opacity: .55; }
+
+.fixed-roster-panel__rows { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; background: var(--gs-paper-alt); }
+.fixed-roster-row { display: grid; grid-template-columns: 18px 24px minmax(190px,1fr) 72px 100px 30px; align-items: center; gap: 8px; min-height: 54px; padding: 7px 8px; border: 1px solid var(--gs-rule); border-radius: 8px; background: var(--gs-paper); }
+.fixed-roster-row.is-dragging { opacity: .55; border-color: var(--gs-seal); }
+.fixed-roster-row__drag { color: var(--gs-ink-faint); cursor: grab; }
+.fixed-roster-row__index { display: inline-grid; width: 23px; height: 23px; place-items: center; border-radius: 6px; background: var(--gs-paper-alt); color: var(--gs-ink-faint); font-size: 9px; font-weight: 800; }
+.fixed-roster-row__function { display: grid; grid-template-columns: minmax(0,1fr) minmax(120px,1fr); gap: 6px; min-width: 0; }
+.fixed-roster-row select, .fixed-roster-row__function input, .fixed-roster-row__quantity input { width: 100%; height: 31px; min-width: 0; padding: 0 7px; border: 1px solid var(--gs-rule); border-radius: 5px; outline: 0; background: var(--gs-paper-alt); color: var(--gs-ink); font-size: 10px; }
+.fixed-roster-row select:focus, .fixed-roster-row__function input:focus, .fixed-roster-row__quantity input:focus { border-color: var(--gs-seal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gs-seal) 14%, transparent); }
+.fixed-roster-row__quantity { display: flex; flex-direction: column; gap: 2px; color: var(--gs-ink-faint); font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.fixed-roster-row__constant { display: inline-flex; align-items: center; gap: 5px; color: var(--gs-ink-faint); font-size: 9px; font-weight: 800; white-space: nowrap; }
+.fixed-roster-row__constant input { position: absolute; opacity: 0; pointer-events: none; }
+.fixed-roster-row__constant span { display: inline-flex; align-items: center; gap: 4px; padding: 6px 7px; border: 1px solid var(--gs-rule); border-radius: 5px; background: var(--gs-paper-alt); }
+.fixed-roster-row__constant.is-checked span { border-color: color-mix(in srgb, var(--gs-duty) 40%, transparent); background: var(--gs-duty-wash); color: var(--gs-duty); }
+/* Aucun jeton rouge n'existe : le retrait prend l'alerte appuyée, qui est le
+   degré le plus haut du système. */
+.fixed-roster-row__remove { display: inline-grid; width: 30px; height: 30px; place-items: center; border-radius: 5px; color: var(--gs-alert-strong); }
+.fixed-roster-row__remove:hover { background: color-mix(in srgb, var(--gs-alert-strong) 10%, transparent); }
+
+.fixed-roster-panel__empty { display: flex; min-height: 110px; align-items: center; justify-content: center; flex-direction: column; gap: 5px; color: var(--gs-ink-faint); font-size: 10px; text-align: center; }
+.fixed-roster-panel__empty svg { color: var(--gs-seal); }
+.fixed-roster-panel__empty strong { color: var(--gs-ink); font-size: 12px; }
+.fixed-roster-panel__footer { display: flex; justify-content: space-between; gap: 10px; padding: 9px 18px; color: var(--gs-ink-faint); font-size: 9px; }
+.fixed-roster__legend, .fixed-roster-panel__legend { display: inline-flex; align-items: center; gap: 5px; }
+.fixed-roster-panel .dot { width: 7px; height: 7px; border-radius: 50%; }
+.fixed-roster-panel .dot--constant { background: var(--gs-duty); }
+.fixed-roster-panel .dot--local { background: var(--gs-ink-faint); }
+
+@media (max-width: 800px) {
+  .fixed-roster-panel__header { flex-direction: column; }
+  .fixed-roster-panel__header-actions { width: 100%; justify-content: space-between; }
+  .fixed-roster-panel__stats { justify-content: flex-start; }
+  .fixed-roster-row { grid-template-columns: 18px 24px minmax(0,1fr) 64px 30px; }
+  .fixed-roster-row__constant { grid-column: 3 / 5; grid-row: 2; }
+  .fixed-roster-row__remove { grid-column: 5; grid-row: 1 / span 2; }
+  .fixed-roster-row__function { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 520px) {
+  .fixed-roster-panel { margin: 10px 8px 0; }
+  .fixed-roster-panel__header, .fixed-roster-panel__notice, .fixed-roster-panel__toolbar, .fixed-roster-panel__footer { padding-left: 12px; padding-right: 12px; }
+  .fixed-roster-panel__toolbar { flex-wrap: wrap; }
+  .fixed-roster-panel__header-actions { align-items: flex-end; }
+  .fixed-roster-panel__stats { gap: 4px; }
+  .fixed-roster-panel__stats > span { padding: 4px 6px; }
+  .fixed-roster-panel__collapse { min-width: 34px; width: 34px; padding: 0; }
+  .fixed-roster-panel__collapse span { display: none; }
+  .fixed-roster-panel__search { flex-basis: 100%; }
+  .fixed-roster-panel__footer { flex-direction: column; }
+  .fixed-roster-panel__legend { flex-wrap: wrap; }
+}

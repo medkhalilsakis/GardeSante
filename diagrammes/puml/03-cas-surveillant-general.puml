@@ -1,0 +1,175 @@
+' ============================================================================
+' GardeSanté — Cas d'utilisation : Surveillant Général (niveau 3, 20 perm.)
+'
+' Sources vérifiées :
+'   - role_permissions de `general_supervisor` : absences.approve/read,
+'     departments.read, establishments.read, remarks.create/read,
+'     replacements.approve/create/read/update,
+'     schedules.approve/read/reject, shifts.confirm/create/read/update,
+'     stats.export/read, users.read.
+'   - Ce rôle n'hérite PAS du Chef de Service : les deux ensembles sont
+'     disjoints. Le SG ne détient ni schedules.create, ni schedules.generate,
+'     ni schedules.submit ; le chef ne détient ni schedules.approve, ni
+'     schedules.reject. Séparation nette entre élaborer et valider.
+'   - Validation : ATTENTION, il n'existe aucune route d'approbation ni de
+'     refus. schedules.routes.js:18-22 le documente : « Il n'y a plus
+'     d'approbation ni de refus : l'envoi met le planning en marche. […] Les
+'     permissions `schedules.approve` / `schedules.reject` restent en base mais
+'     ne sont plus rattachées à aucune route. » Vérifié par balayage : aucune
+'     route POST/PUT/PATCH portant approve ou reject sur un planning.
+'   - `POST /schedule-builder/:id/validate` n'approuve rien : il exécute le
+'     moteur de règles et renvoie l'évaluation (schedule-builder.controller.js
+'     :359-370). C'est un contrôle à blanc, pas un visa.
+'   - absences.approve : accordée au SG, consommée par aucune route non plus.
+'     Absences (absences.controller.js:198-211) et congés (leaves.controller.js
+'     :278-282) sont insérés directement à l'état 'approved'.
+'   - Supervision : SUPERVISION_ROLES = general_supervisor, director,
+'     hospital_admin.
+'   - shifts.confirm est bien exposée : POST /api/shifts/:id/confirm et
+'     POST /api/shifts/:id/absent (shifts.routes.js:13-14).
+'   - Portée : le SG n'appartient à aucun service (`departmentId` nul) ;
+'     `readsAllDepartments` lui donne la lecture de tous les services de
+'     son établissement.
+' ============================================================================
+@startuml 03-cas-surveillant-general
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ActorBorderColor #0F766E
+skinparam ActorBackgroundColor #E6F4F1
+skinparam ActorFontStyle bold
+skinparam UsecaseBorderColor #1B4FCA
+skinparam UsecaseBackgroundColor #EEF2FF
+skinparam usecase {
+BackgroundColor<<hérité>> #F1F5F9
+BorderColor<<hérité>> #94A3B8
+FontColor<<hérité>> #475569
+}
+skinparam usecase {
+BackgroundColor<<hérité>> #F1F5F9
+BorderColor<<hérité>> #94A3B8
+FontColor<<hérité>> #475569
+BackgroundColor<<non implémenté>> #FEF3C7
+BorderColor<<non implémenté>> #B4530A
+FontColor<<non implémenté>> #7C2D12
+}
+skinparam PackageBorderColor #94A3B8
+skinparam PackageBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Cas d'utilisation — Surveillant Général\nniveau 3 · 20 permissions · périmètre : tout l'établissement
+
+left to right direction
+
+actor "Utilisateur\nauthentifié" as U
+actor "Surveillant\nGénéral" as SG
+U <|-- SG
+
+package "Socle commun\n(hérité)" as P0 {
+  usecase "S'authentifier et gérer\nson compte" as UC_CPT <<hérité>>
+  usecase "Consulter ses notifications" as UC_NOTIF <<hérité>>
+  usecase "Consulter son propre\nhistorique" as UC_HIST <<hérité>>
+}
+
+package "Plannings : consulter et proposer" as P1 {
+  usecase "Traiter la boîte des\nplannings à consulter" as UC_INBOX
+  usecase "Examiner un planning\nen vigueur" as UC_EXAMINER
+  usecase "Valider un planning" as UC_VALIDER <<non implémenté>>
+  usecase "Rejeter avec motif" as UC_REJETER <<non implémenté>>
+  usecase "Contrôler une garde\navant saisie" as UC_VALID_SHIFT
+  usecase "Proposer une modification\nsur planning en vigueur" as UC_PROPOSER
+}
+
+package "Supervision de l'hôpital" as P2 {
+  usecase "Superviser tous\nles services" as UC_SUPERV
+  usecase "Consulter les statistiques\nde l'établissement" as UC_STAT
+  usecase "Exporter les statistiques" as UC_STAT_EXP
+  usecase "Consulter la configuration\nde l'établissement" as UC_ETAB
+  usecase "Consulter le portfolio\nde tous les services" as UC_PORTFOLIO
+  usecase "Consulter l'annuaire\ndu personnel" as UC_ANNUAIRE
+  usecase "Suivre les prêts\nde personnel" as UC_PRET_SUIVI
+}
+
+package "Gardes et absences" as P3 {
+  usecase "Approuver une absence" as UC_ABS_VALID <<non implémenté>>
+  usecase "Créer un remplacement\nen surcouche" as UC_REMP_CREER
+  usecase "Approuver un remplacement" as UC_REMP_APP
+  usecase "Confirmer la présence\nsur une garde" as UC_GARDE
+  usecase "Prendre en compte\nune alerte de service" as UC_ALERTE
+  usecase "Faire l'appel du jour" as UC_APPEL
+}
+
+package "Communication" as P4 {
+  usecase "Publier une note\nà l'hôpital" as UC_NOTE_PUB
+}
+
+U --> UC_CPT
+U --> UC_NOTIF
+U --> UC_HIST
+
+SG --> UC_INBOX
+SG --> UC_VALIDER
+SG --> UC_VALID_SHIFT
+SG --> UC_PROPOSER
+SG --> UC_SUPERV
+SG --> UC_STAT
+SG --> UC_STAT_EXP
+SG --> UC_ETAB
+SG --> UC_PORTFOLIO
+SG --> UC_ANNUAIRE
+SG --> UC_PRET_SUIVI
+SG --> UC_ABS_VALID
+SG --> UC_REMP_CREER
+SG --> UC_REMP_APP
+SG --> UC_GARDE
+SG --> UC_ALERTE
+SG --> UC_APPEL
+SG --> UC_NOTE_PUB
+
+UC_INBOX ..> UC_EXAMINER : <<include>>
+UC_VALIDER ..> UC_EXAMINER : <<include>>
+UC_VALIDER <.. UC_REJETER : <<extend>>
+
+note as N1
+Le Surveillant Général est le validateur du circuit :
+il ne détient ni schedules.create, ni .generate, ni
+.submit. Il ne peut donc pas élaborer le planning
+qu'il contrôle — séparation des responsabilités
+inscrite dans le modèle de permissions.
+end note
+
+note as N2
+Le SG n'est rattaché à aucun service : son
+`departmentId` est nul et sa portée de lecture est
+l'établissement entier. Une portée « service »
+publierait dans le vide.
+end note
+
+note as N3
+**Trois cas déclarés, aucun exposé.** Le SG détient
+schedules.approve, schedules.reject et
+absences.approve, mais aucune route ne les consomme :
+le code note lui-même que « ces permissions restent
+en base mais ne sont plus rattachées à aucune route ».
+L'envoi met le planning en marche sans approbation, et
+absences comme congés sont écrits d'emblée à l'état
+accordé. Le contrôle du SG s'exerce donc par la
+proposition de modification, non par un veto.
+end note
+
+legend right
+Bleu : cas propres à ce rôle.
+Gris : capacités héritées du socle authentifié.
+Ambre : permission accordée en base, mais aucune route ne l'implémente.
+endlegend
+
+' Ancrage des notes flottantes
+N1 .. UC_INBOX
+N2 .. UC_SUPERV
+N3 .. UC_VALIDER
+
+@enduml

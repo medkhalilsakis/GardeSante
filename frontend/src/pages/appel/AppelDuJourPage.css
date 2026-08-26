@@ -1,33 +1,85 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   APPEL DU JOUR — harmonisation couleurs et typographie
+   La structure et les sélecteurs ne changent pas. Côté balisage, une seule
+   retouche : la pastille « Garde » recevait ses deux couleurs par attribut
+   `style` depuis une constante JS, alors qu'il n'y a plus qu'une nature de
+   garde depuis la suppression des codes. L'indirection est retirée, la
+   couleur revient dans la feuille.
+
+   L'écran arrivait avec sa propre palette de six teintes inventées, doublée
+   d'un bloc sombre qui recopiait six fonds translucides à la main. Or six
+   teintes disaient trois choses différentes :
+
+     • un état          présent · en retard · absent · à pointer
+     • une activité     l'appel tourne-t-il en direct ou en pause
+     • une catégorie    de quel service, de quel planning vient la garde
+
+   La plate-forme n'accorde que trois tons sémantiques — sceau (engagement),
+   service (en cours), alerte (à traiter) — et réserve l'échelle d'identité
+   aux catégories. La palette locale reste donc en place, mais chacune de ses
+   entrées est redéfinie sur un jeton, si bien que le thème sombre s'obtient
+   sans une seule règle de plus.
+
+   Trois arbitrages méritent d'être écrits :
+
+   1. « Absent » et « en retard » appellent tous deux à agir : même ton, mais
+      l'absence descend d'un cran — teinte assombrie par l'encre, fond deux
+      fois plus dense — parce que c'est l'intensité, non la couleur, qui doit
+      porter la gravité.
+   2. Le rouge servait aussi de témoin d'enregistrement pour « appel en
+      direct ». Un appel qui tourne n'est pas une anomalie : il passe au ton
+      du service, et la pause garde son repli neutre déjà présent.
+   3. « À pointer » ne décrit rien d'établi. Plus de teinte : papier de
+      second plan et encre atténuée, comme partout ailleurs pour ce qui
+      n'est pas encore tranché. Le liséré de la carte non pointée suit, en
+      trait de règle appuyé — de sorte que les quatre états de garde se
+      lisent maintenant présent, retard, absent, ou rien.
+
+   Retirés au passage : le contour de focus local, dont l'opacité au cinquième
+   le rendait quasi invisible sur fond clair et qui, par sa spécificité de
+   descendance, désactivait l'anneau franc du calque de jetons sur toute la
+   page ; et la remise à zéro de l'interlettrage par sélecteur universel, qui
+   écrasait le suivi des primitives partagées. L'intention est conservée, en
+   héritage cette fois, ce qui laisse chaque descendant régler le sien.
+   Le surtitre reprend au passage la fonte de titrage et son suivi.
+
+   Jetons employés : gs-ink, gs-ink-soft, gs-ink-faint, gs-paper,
+   gs-paper-alt, gs-rule, gs-rule-strong, gs-seal, gs-seal-wash, gs-duty,
+   gs-duty-wash, gs-alert, gs-alert-wash, gs-id-3, gs-id-8, gs-id-9,
+   gs-display, gs-shadow-card, gs-shadow-lift.
+   ══════════════════════════════════════════════════════════════════════════ */
+
 .appel-page {
-  --appel-blue: #2563eb;
-  --appel-blue-soft: #eff6ff;
-  --appel-green: #059669;
-  --appel-green-soft: #ecfdf5;
-  --appel-amber: #d97706;
-  --appel-amber-soft: #fffbeb;
-  --appel-red: #dc2626;
-  --appel-red-soft: #fef2f2;
-  --appel-violet: #7c3aed;
-  --appel-violet-soft: #f5f3ff;
-  --appel-cyan: #0891b2;
-  --appel-cyan-soft: #ecfeff;
+  /* Les trois tons de la plate-forme. */
+  --appel-blue: var(--gs-seal);
+  --appel-blue-soft: var(--gs-seal-wash);
+  --appel-green: var(--gs-duty);
+  --appel-green-soft: var(--gs-duty-wash);
+  --appel-amber: var(--gs-alert);
+  --appel-amber-soft: var(--gs-alert-wash);
+
+  /* L'absence : le ton de l'alerte, un cran plus bas. Le mélange part de
+     l'encre, donc il s'éclaircit tout seul en thème sombre au lieu de
+     s'enfoncer dans le fond. */
+  --appel-red: color-mix(in srgb, var(--gs-alert) 82%, var(--gs-ink));
+  --appel-red-soft: color-mix(in srgb, var(--gs-alert) 20%, transparent);
+
+  /* « À pointer » n'est pas une teinte mais une absence de décision : encre
+     adoucie sur papier de second plan. Le nom de la variable reste, sa
+     couleur non. */
+  --appel-violet: var(--gs-ink-soft);
+  --appel-violet-soft: var(--gs-paper-alt);
+
+  /* La seule pastille de métadonnée qui nomme vraiment une provenance : de
+     quel service vient l'agent. Échelle d'identité, jamais un ton d'état. */
+  --appel-cyan: var(--gs-id-8);
+  --appel-cyan-soft: color-mix(in srgb, var(--gs-id-8) 12%, transparent);
+
   display: grid;
   min-width: 0;
   gap: 18px;
   padding-bottom: 24px;
-}
-
-.appel-page,
-.appel-page * {
   letter-spacing: 0;
-}
-
-.appel-page button:focus-visible,
-.appel-page input:focus-visible,
-.appel-page select:focus-visible,
-.appel-page textarea:focus-visible {
-  outline: 3px solid var(--color-primary-20);
-  outline-offset: 2px;
 }
 
 .appel-command-header {
@@ -39,7 +91,7 @@
   gap: 24px;
   overflow: hidden;
   padding: 4px 0 20px;
-  border-bottom: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--gs-rule);
 }
 
 .appel-command-header::after {
@@ -49,7 +101,7 @@
   width: 120px;
   height: 74px;
   border-top: 2px solid var(--appel-blue);
-  border-inline-end: 2px solid var(--appel-red);
+  border-inline-end: 2px solid var(--appel-blue);
   opacity: 0.12;
   transform: skewX(-18deg);
   content: '';
@@ -67,9 +119,11 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-display);
   font-size: 10px;
   font-weight: 800;
+  letter-spacing: .16em;
   line-height: 1.25;
   text-transform: uppercase;
 }
@@ -77,7 +131,7 @@
 .appel-eyebrow > span {
   width: 8px;
   height: 8px;
-  border: 2px solid var(--appel-cyan);
+  border: 2px solid var(--appel-blue);
   border-radius: 2px;
   transform: rotate(45deg);
 }
@@ -97,14 +151,14 @@
   height: 44px;
   flex: 0 0 44px;
   place-items: center;
-  border: 1px solid rgba(37, 99, 235, 0.24);
+  border: 1px solid color-mix(in srgb, var(--appel-blue) 26%, transparent);
   border-radius: 8px;
   background: var(--appel-blue-soft);
   color: var(--appel-blue);
 }
 
 .appel-title-row h1 {
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 25px;
   font-weight: 850;
   line-height: 1.15;
@@ -112,7 +166,7 @@
 
 .appel-title-row p {
   margin-top: 4px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -126,13 +180,13 @@
 }
 
 .appel-context-badge .ctx-hospital {
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 11px;
 }
 
 .appel-context-badge .ctx-chip {
   border-radius: 6px;
-  background: var(--bg-elevated);
+  background: var(--gs-paper-alt);
 }
 
 .appel-live-control {
@@ -141,14 +195,14 @@
   width: min(100%, 288px);
   flex: 0 0 288px;
   overflow: hidden;
-  border: 1px solid rgba(220, 38, 38, 0.25);
+  border: 1px solid color-mix(in srgb, var(--appel-green) 26%, transparent);
   border-radius: 8px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-sm);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-card);
 }
 
 .appel-live-control.is-paused {
-  border-color: var(--border-default);
+  border-color: var(--gs-rule);
 }
 
 .appel-live-toggle {
@@ -160,25 +214,25 @@
   gap: 10px;
   padding: 10px 12px;
   border: 0;
-  border-bottom: 1px solid rgba(220, 38, 38, 0.12);
-  background: var(--appel-red-soft);
-  color: var(--appel-red);
+  border-bottom: 1px solid color-mix(in srgb, var(--appel-green) 14%, transparent);
+  background: var(--appel-green-soft);
+  color: var(--appel-green);
   text-align: start;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .appel-live-control.is-paused .appel-live-toggle {
-  border-bottom-color: var(--border-subtle);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
+  border-bottom-color: var(--gs-rule);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
 }
 
 .appel-live-toggle:hover {
-  background: rgba(220, 38, 38, 0.12);
+  background: color-mix(in srgb, var(--appel-green) 14%, transparent);
 }
 
 .appel-live-control.is-paused .appel-live-toggle:hover {
-  background: var(--bg-card-hover);
+  background: var(--gs-paper-alt);
 }
 
 .appel-live-signal {
@@ -200,22 +254,22 @@
 .appel-live-signal::before {
   width: 26px;
   height: 26px;
-  border: 1px solid rgba(220, 38, 38, 0.26);
+  border: 1px solid color-mix(in srgb, var(--appel-green) 28%, transparent);
   animation: appel-live-ring 2s ease-out infinite;
 }
 
 .appel-live-signal::after {
   width: 16px;
   height: 16px;
-  background: rgba(220, 38, 38, 0.12);
+  background: color-mix(in srgb, var(--appel-green) 14%, transparent);
 }
 
 .appel-live-signal > span {
   z-index: 1;
   width: 8px;
   height: 8px;
-  background: var(--appel-red);
-  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+  background: var(--appel-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--appel-green) 12%, transparent);
 }
 
 .appel-live-control.is-paused .appel-live-signal::before {
@@ -225,8 +279,8 @@
 .appel-live-control.is-paused .appel-live-signal::before,
 .appel-live-control.is-paused .appel-live-signal::after,
 .appel-live-control.is-paused .appel-live-signal > span {
-  border-color: var(--border-default);
-  background: var(--text-muted);
+  border-color: var(--gs-rule);
+  background: var(--gs-ink-faint);
   box-shadow: none;
 }
 
@@ -246,7 +300,7 @@
 }
 
 .appel-live-copy small {
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 10px;
   line-height: 1.2;
 }
@@ -258,7 +312,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 7px 10px;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 9px;
 }
 
@@ -278,7 +332,7 @@
 
 .appel-live-meta b {
   flex: 0 0 auto;
-  color: var(--appel-red);
+  color: var(--appel-green);
   font-weight: 800;
 }
 
@@ -299,9 +353,9 @@
   min-width: 0;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-elevated);
+  background: var(--gs-paper-alt);
 }
 
 .appel-tabs button {
@@ -313,21 +367,21 @@
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 12px;
   font-weight: 750;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .appel-tabs button:hover {
-  color: var(--text-primary);
+  color: var(--gs-ink);
 }
 
 .appel-tabs button.is-active {
-  border-color: var(--border-default);
-  background: var(--bg-card);
-  color: var(--color-primary);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--gs-rule);
+  background: var(--gs-paper);
+  color: var(--gs-seal);
+  box-shadow: var(--gs-shadow-card);
 }
 
 .appel-tabs button > span {
@@ -350,19 +404,19 @@
   justify-content: center;
   gap: 7px;
   padding: 0 12px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-card);
-  color: var(--text-secondary);
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
   font-size: 11px;
   font-weight: 750;
   transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
 }
 
 .appel-refresh-button:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
+  border-color: var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
 }
 
 .appel-refresh-button:disabled {
@@ -385,10 +439,10 @@
   gap: 10px;
   overflow: hidden;
   padding: 13px 13px 15px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-sm);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-card);
 }
 
 .appel-metric::before {
@@ -418,14 +472,14 @@
 }
 
 .appel-metric-copy > span {
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 10px;
   font-weight: 750;
   line-height: 1.25;
 }
 
 .appel-metric-copy strong {
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 25px;
   font-weight: 850;
   line-height: 1.05;
@@ -433,7 +487,7 @@
 
 .appel-metric-copy small {
   overflow: hidden;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 9px;
   line-height: 1.3;
   text-overflow: ellipsis;
@@ -447,7 +501,7 @@
   height: 4px;
   overflow: hidden;
   border-radius: 2px;
-  background: var(--bg-elevated);
+  background: var(--gs-paper-alt);
 }
 
 .appel-metric-progress > span {
@@ -472,10 +526,10 @@
   justify-content: space-between;
   gap: 14px;
   padding: 9px 12px;
-  border: 1px solid var(--border-default);
-  border-inline-start: 3px solid var(--appel-red);
+  border: 1px solid var(--gs-rule);
+  border-inline-start: 3px solid var(--appel-green);
   border-radius: 8px;
-  background: var(--bg-card);
+  background: var(--gs-paper);
 }
 
 .appel-live-strip > div {
@@ -490,17 +544,17 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--text-muted);
+  background: var(--gs-ink-faint);
 }
 
 .appel-live-strip-dot.is-active {
-  background: var(--appel-red);
-  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.1);
+  background: var(--appel-green);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--appel-green) 12%, transparent);
   animation: appel-live-dot 1.8s ease-in-out infinite;
 }
 
 .appel-live-strip strong {
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
@@ -508,7 +562,7 @@
 
 .appel-live-strip p {
   overflow: hidden;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 10px;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -527,8 +581,8 @@
 
 .appel-filter-panel {
   padding: 15px 0;
-  border-top: 1px solid var(--border-default);
-  border-bottom: 1px solid var(--border-default);
+  border-top: 1px solid var(--gs-rule);
+  border-bottom: 1px solid var(--gs-rule);
 }
 
 .appel-filter-heading,
@@ -542,7 +596,7 @@
 .appel-filter-heading h2,
 .appel-section-heading h2 {
   margin-top: 2px;
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 17px;
   font-weight: 850;
   line-height: 1.2;
@@ -550,7 +604,7 @@
 
 .appel-section-heading p {
   margin-top: 4px;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 11px;
   line-height: 1.45;
 }
@@ -558,8 +612,8 @@
 .appel-result-count {
   padding: 4px 8px;
   border-radius: 6px;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
   font-size: 10px;
   font-weight: 750;
   white-space: nowrap;
@@ -586,7 +640,7 @@
   inset-inline-start: 11px;
   top: 13px;
   z-index: 1;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   pointer-events: none;
 }
 
@@ -596,11 +650,11 @@
   min-width: 0;
   min-height: 42px;
   padding: 0 11px 0 35px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
   outline: 0;
-  background: var(--bg-input);
-  color: var(--text-primary);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
   font-family: inherit;
   font-size: 11px;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
@@ -613,12 +667,12 @@
 
 .appel-search-control input:focus,
 .appel-select-control select:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-10);
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
 }
 
 .appel-search-control input::placeholder {
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
 }
 
 .appel-status-filters {
@@ -627,9 +681,9 @@
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 3px;
   padding: 3px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-elevated);
+  background: var(--gs-paper-alt);
 }
 
 .appel-status-filters button {
@@ -637,7 +691,7 @@
   padding: 0 7px;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 9px;
   font-weight: 750;
   white-space: nowrap;
@@ -645,14 +699,14 @@
 }
 
 .appel-status-filters button:hover {
-  color: var(--text-primary);
+  color: var(--gs-ink);
 }
 
 .appel-status-filters button.is-active {
-  border-color: var(--border-default);
-  background: var(--bg-card);
-  color: var(--color-primary);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--gs-rule);
+  background: var(--gs-paper);
+  color: var(--gs-seal);
+  box-shadow: var(--gs-shadow-card);
 }
 
 .appel-clear-filters {
@@ -662,18 +716,18 @@
   justify-content: center;
   gap: 5px;
   padding: 0 9px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 10px;
   font-weight: 750;
   white-space: nowrap;
 }
 
 .appel-clear-filters:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
+  border-color: var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
 }
 
 .appel-guards-grid,
@@ -690,17 +744,17 @@
   gap: 12px;
   overflow: hidden;
   padding: 14px;
-  border: 1px solid var(--border-default);
-  border-inline-start: 4px solid var(--appel-violet);
+  border: 1px solid var(--gs-rule);
+  border-inline-start: 4px solid var(--gs-rule-strong);
   border-radius: 8px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-sm);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-card);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .appel-guard-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
+  border-color: var(--gs-rule-strong);
+  box-shadow: var(--gs-shadow-lift);
   transform: translateY(-1px);
 }
 
@@ -721,8 +775,8 @@
   gap: 4px;
   padding: 4px 7px;
   border-end-start-radius: 7px;
-  background: var(--appel-red);
-  color: #fff;
+  background: var(--appel-green);
+  color: var(--gs-on-tone);
   font-size: 8px;
   font-weight: 850;
   text-transform: uppercase;
@@ -750,7 +804,7 @@
   height: 40px;
   flex: 0 0 40px;
   place-items: center;
-  border: 1px solid rgba(37, 99, 235, 0.2);
+  border: 1px solid color-mix(in srgb, var(--appel-blue) 22%, transparent);
   border-radius: 8px;
   background: var(--appel-blue-soft);
   color: var(--appel-blue);
@@ -764,7 +818,7 @@
 
 .appel-agent-identity h3 {
   overflow-wrap: anywhere;
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 13px;
   font-weight: 850;
   line-height: 1.3;
@@ -773,7 +827,7 @@
 .appel-agent-identity p {
   margin-top: 2px;
   overflow-wrap: anywhere;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 10px;
   line-height: 1.3;
 }
@@ -817,9 +871,9 @@
   align-items: flex-start;
   gap: 7px;
   padding: 8px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-elevated);
+  background: var(--gs-paper-alt);
 }
 
 .appel-detail-icon {
@@ -831,9 +885,12 @@
   border-radius: 7px;
 }
 
+/* Les trois pastilles de la carte nomment une provenance — service, garde,
+   planning. Elles se distinguent l'une de l'autre, jamais d'un état : trois
+   familles de l'échelle d'identité qui ne croisent aucun des trois tons. */
 .appel-detail-service { background: var(--appel-cyan-soft); color: var(--appel-cyan); }
-.appel-detail-shift { background: var(--shift-soft); color: var(--shift-color); }
-.appel-detail-planning { background: var(--appel-violet-soft); color: var(--appel-violet); }
+.appel-detail-shift { background: color-mix(in srgb, var(--gs-id-9) 12%, transparent); color: var(--gs-id-9); }
+.appel-detail-planning { background: color-mix(in srgb, var(--gs-id-3) 12%, transparent); color: var(--gs-id-3); }
 
 .appel-guard-details > div > div {
   display: grid;
@@ -843,7 +900,7 @@
 }
 
 .appel-guard-details small {
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 8px;
   font-weight: 700;
   line-height: 1.2;
@@ -852,7 +909,7 @@
 
 .appel-guard-details strong {
   overflow: hidden;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 9px;
   font-weight: 750;
   line-height: 1.3;
@@ -861,7 +918,7 @@
 }
 
 .appel-guard-details em {
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 8px;
   font-style: normal;
   line-height: 1.2;
@@ -904,7 +961,7 @@
 .appel-declaration-summary > small {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -928,9 +985,9 @@
   justify-content: center;
   gap: 6px;
   padding: 0 8px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-input);
+  background: var(--gs-paper-alt);
   font-size: 10px;
   font-weight: 800;
   transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
@@ -938,7 +995,7 @@
 
 .appel-mark-action:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--gs-shadow-card);
 }
 
 .appel-mark-success { color: var(--appel-green); }
@@ -969,9 +1026,9 @@
   justify-items: center;
   gap: 9px;
   padding: 28px;
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed var(--gs-rule-strong);
   border-radius: 8px;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   text-align: center;
 }
 
@@ -981,18 +1038,18 @@
   height: 44px;
   place-items: center;
   border-radius: 8px;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
 }
 
 .appel-state-panel strong {
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 13px;
 }
 
 .appel-state-panel p {
   max-width: 520px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -1008,9 +1065,9 @@
 
 .appel-guard-skeleton {
   min-height: 250px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-elevated) 50%, var(--bg-card) 75%);
+  background: linear-gradient(90deg, var(--gs-paper) 25%, var(--gs-paper-alt) 50%, var(--gs-paper) 75%);
   background-size: 240% 100%;
   animation: appel-skeleton 1.4s ease-in-out infinite;
 }
@@ -1020,13 +1077,13 @@
   align-items: flex-start;
   gap: 8px;
   padding: 10px 0 0;
-  border-top: 1px solid var(--border-subtle);
-  color: var(--text-muted);
+  border-top: 1px solid var(--gs-rule);
+  color: var(--gs-ink-faint);
 }
 
 .appel-usage-note svg {
   flex: 0 0 auto;
-  color: var(--color-primary);
+  color: var(--gs-seal);
 }
 
 .appel-usage-note p {
@@ -1047,24 +1104,24 @@
 
 .appel-section-heading {
   padding-bottom: 14px;
-  border-bottom: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--gs-rule);
 }
 
 .appel-history-stage .input {
   width: 100%;
   min-height: 38px;
   padding: 0 10px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
   outline: none;
-  background: var(--bg-input);
-  color: var(--text-primary);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
   font-family: inherit;
 }
 
 .appel-history-stage .input:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-10);
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
 }
 
 .appel-modal-overlay {
@@ -1075,11 +1132,11 @@
   width: min(100%, 620px);
   max-width: 620px !important;
   overflow: hidden;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-top: 3px solid var(--appel-amber);
   border-radius: 8px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-xl);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-lift);
 }
 
 .appel-reason-danger { border-top-color: var(--appel-red); }
@@ -1090,7 +1147,7 @@
   align-items: start;
   gap: 11px;
   padding: 16px 17px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--gs-rule);
 }
 
 .appel-reason-title-icon {
@@ -1113,7 +1170,7 @@
 }
 
 .appel-reason-header > div:nth-child(2) > span {
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 9px;
   font-weight: 800;
   text-transform: uppercase;
@@ -1121,7 +1178,7 @@
 
 .appel-reason-header h2 {
   margin-top: 2px;
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 17px;
   font-weight: 850;
 }
@@ -1129,7 +1186,7 @@
 .appel-reason-header p {
   margin-top: 3px;
   overflow-wrap: anywhere;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 10px;
   line-height: 1.4;
 }
@@ -1139,15 +1196,15 @@
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
 }
 
 .appel-modal-close:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
+  border-color: var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
 }
 
 .appel-reason-body {
@@ -1168,7 +1225,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
 }
 
 .appel-field-heading > div {
@@ -1183,7 +1240,7 @@
 }
 
 .appel-field-heading small {
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 9px;
 }
 
@@ -1199,14 +1256,14 @@
   min-height: 42px;
   align-items: center;
   overflow: hidden;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-input);
+  background: var(--gs-paper-alt);
 }
 
 .appel-duration-input:focus-within {
   border-color: var(--appel-amber);
-  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.12);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--appel-amber) 14%, transparent);
 }
 
 .appel-duration-input input {
@@ -1216,7 +1273,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font: inherit;
   font-size: 13px;
   font-weight: 800;
@@ -1224,7 +1281,7 @@
 
 .appel-duration-input span {
   padding-inline-end: 10px;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 9px;
 }
 
@@ -1237,10 +1294,10 @@
 .appel-duration-presets button {
   min-height: 38px;
   padding: 0 10px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
   font-size: 10px;
   font-weight: 750;
 }
@@ -1256,31 +1313,31 @@
   width: 100%;
   min-height: 108px;
   padding: 10px 11px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
   outline: 0;
   resize: vertical;
-  background: var(--bg-input);
-  color: var(--text-primary);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
   font-family: inherit;
   font-size: 12px;
   line-height: 1.5;
 }
 
 .appel-reason-textarea:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-10);
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
 }
 
 .appel-reason-textarea::placeholder {
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
 }
 
 .appel-justification-shell {
   padding: 12px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-elevated);
+  background: var(--gs-paper-alt);
 }
 
 .appel-notification-note {
@@ -1288,10 +1345,10 @@
   align-items: flex-start;
   gap: 7px;
   padding: 9px 10px;
-  border: 1px solid rgba(37, 99, 235, 0.16);
+  border: 1px solid color-mix(in srgb, var(--appel-blue) 18%, transparent);
   border-radius: 8px;
   background: var(--appel-blue-soft);
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
 }
 
 .appel-notification-note svg {
@@ -1310,8 +1367,8 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 13px 17px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  border-top: 1px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
 }
 
 .appel-confirm-button {
@@ -1324,7 +1381,7 @@
   border: 1px solid var(--appel-amber);
   border-radius: 8px;
   background: var(--appel-amber);
-  color: #fff;
+  color: var(--gs-on-tone);
   font-size: 11px;
   font-weight: 800;
 }
@@ -1345,8 +1402,8 @@
 }
 
 @keyframes appel-live-dot {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1); }
-  50% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.03); }
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--appel-green) 12%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--appel-green) 4%, transparent); }
 }
 
 @keyframes appel-pending-pulse {
@@ -1355,9 +1412,9 @@
 }
 
 @keyframes appel-live-arrival {
-  0% { border-color: var(--appel-red); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.24); opacity: 0.4; transform: translateY(-8px); }
-  45% { box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.08); opacity: 1; }
-  100% { box-shadow: var(--shadow-sm); transform: translateY(0); }
+  0% { border-color: var(--appel-green); box-shadow: 0 0 0 0 color-mix(in srgb, var(--appel-green) 26%, transparent); opacity: 0.4; transform: translateY(-8px); }
+  45% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--appel-green) 10%, transparent); opacity: 1; }
+  100% { box-shadow: var(--gs-shadow-card); transform: translateY(0); }
 }
 
 @keyframes appel-spin {
@@ -1576,39 +1633,7 @@
     transition: none;
   }
 }
-
-[data-theme='dark'] .appel-page {
-  --appel-blue-soft: rgba(37, 99, 235, 0.17);
-  --appel-green-soft: rgba(5, 150, 105, 0.18);
-  --appel-amber-soft: rgba(217, 119, 6, 0.18);
-  --appel-red-soft: rgba(220, 38, 38, 0.17);
-  --appel-violet-soft: rgba(124, 58, 237, 0.18);
-  --appel-cyan-soft: rgba(8, 145, 178, 0.18);
-}
-
-[data-theme='dark'] .appel-status-success,
-[data-theme='dark'] .appel-mark-success,
-[data-theme='dark'] .appel-declaration-success {
-  color: #6ee7b7;
-}
-
-[data-theme='dark'] .appel-status-warning,
-[data-theme='dark'] .appel-mark-warning,
-[data-theme='dark'] .appel-declaration-warning {
-  color: #fbbf24;
-}
-
-[data-theme='dark'] .appel-status-danger,
-[data-theme='dark'] .appel-mark-danger,
-[data-theme='dark'] .appel-declaration-danger {
-  color: #fca5a5;
-}
-
-[data-theme='dark'] .appel-status-pending {
-  color: #c4b5fd;
-}
-
-[data-theme='dark'] .appel-detail-shift {
-  background: rgba(99, 102, 241, 0.17);
-  color: #a5b4fc;
-}
+/* Aucun bloc [data-theme='dark'] ici : les onze entrées de la palette locale
+   pointent sur des jetons, et les jetons s'inversent d'eux-mêmes. Ce qui se
+   trouvait à cet endroit — six fonds translucides et cinq teintes de texte
+   recopiés à la main pour le thème sombre — n'a plus d'objet. */

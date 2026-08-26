@@ -1,0 +1,147 @@
+' ============================================================================
+' GardeSanté — Cas d'utilisation : Super Administrateur (niveau 0, 39 perm.)
+'
+' Sources vérifiées :
+'   - role_permissions de `super_admin` : les 36 permissions du Directeur plus
+'     establishments.create, establishments.update et establishments.delete —
+'     soit la totalité des 39 permissions déclarées dans la table.
+'   - Il appartient au compte plateforme (établissement 00000000-…) : son
+'     `establishmentId` est vide, ce qui lui donne un périmètre inter-hôpitaux.
+'   - Routes : backend/src/modules/admin/admin.routes.js — governorates, stats,
+'     online-users, platform-activity, activation d'établissement, mot de passe
+'     et statut du directeur, jours fériés (dont seed-tunisia), référentiels
+'     (aperçu, permissions, amorçage, types de garde, types d'absence),
+'     conformité (+ réparation), annuaire (+ facettes).
+'   - Arbitrage des profils : profile.controller.js, routes admin/requests.
+'   - Publication de note : `resolveScope` lui attribue la portée
+'     'platform_directors'.
+' ============================================================================
+@startuml 01-cas-super-administrateur
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ActorBorderColor #0F766E
+skinparam ActorBackgroundColor #E6F4F1
+skinparam ActorFontStyle bold
+skinparam UsecaseBorderColor #1B4FCA
+skinparam UsecaseBackgroundColor #EEF2FF
+skinparam usecase {
+BackgroundColor<<hérité>> #F1F5F9
+BorderColor<<hérité>> #94A3B8
+FontColor<<hérité>> #475569
+}
+skinparam PackageBorderColor #94A3B8
+skinparam PackageBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Cas d'utilisation — Super Administrateur\nniveau 0 · 39 permissions · périmètre : toute la plateforme
+
+left to right direction
+
+actor "Directeur" as DIR
+actor "Super\nAdministrateur" as SA
+DIR <|-- SA
+
+package "Hérité du Directeur" as P0 {
+  usecase "Administrer un établissement\net son personnel" as UC_ETAB <<hérité>>
+  usecase "Élaborer, valider et\nsuperviser les plannings" as UC_PLAN <<hérité>>
+  usecase "Consulter le journal\nd'audit" as UC_AUDIT <<hérité>>
+}
+
+package "Cycle de vie des établissements" as P1 {
+  usecase "Créer un établissement" as UC_ETAB_CREER
+  usecase "Géolocaliser un établissement" as UC_GEO
+  usecase "Activer ou désactiver\nun établissement" as UC_ETAB_ACT
+  usecase "Supprimer un établissement" as UC_ETAB_SUPPR
+  usecase "Consulter la carte\ndes établissements" as UC_CARTE
+  usecase "Contrôler la conformité\ndes établissements" as UC_CONFORM
+  usecase "Réparer un écart\nde conformité" as UC_REPARER
+}
+
+package "Comptes de direction" as P2 {
+  usecase "Créer le directeur\nd'un établissement" as UC_DIR_CREER
+  usecase "Réinitialiser le mot de passe\nd'un directeur" as UC_DIR_PWD
+  usecase "Activer ou suspendre\nun directeur" as UC_DIR_STATUT
+  usecase "Arbitrer les demandes de\nmodification de profil" as UC_PROF_ARB
+}
+
+package "Référentiels de la plateforme" as P3 {
+  usecase "Gérer les types de garde" as UC_REF_SHIFT
+  usecase "Gérer les types d'absence" as UC_REF_ABS
+  usecase "Consulter la matrice\ndes permissions" as UC_REF_PERM
+  usecase "Amorcer les référentiels\nd'un établissement" as UC_REF_SEED
+  usecase "Gérer les jours fériés" as UC_FERIES
+  usecase "Amorcer les jours fériés\ntunisiens" as UC_FERIES_TN
+}
+
+package "Observation de la plateforme" as P4 {
+  usecase "Consulter les statistiques\nplateforme" as UC_STAT
+  usecase "Consulter la répartition\npar gouvernorat" as UC_GOUV
+  usecase "Suivre les utilisateurs\nconnectés" as UC_ONLINE
+  usecase "Suivre l'activité\nde la plateforme" as UC_ACTIVITE
+  usecase "Consulter l'annuaire\ninter-hôpitaux" as UC_ANNUAIRE
+  usecase "Publier une note\naux directeurs" as UC_NOTE_DIR
+}
+
+DIR --> UC_ETAB
+DIR --> UC_PLAN
+DIR --> UC_AUDIT
+
+SA --> UC_ETAB_CREER
+SA --> UC_ETAB_ACT
+SA --> UC_ETAB_SUPPR
+SA --> UC_CARTE
+SA --> UC_CONFORM
+SA --> UC_DIR_CREER
+SA --> UC_DIR_PWD
+SA --> UC_DIR_STATUT
+SA --> UC_PROF_ARB
+SA --> UC_REF_SHIFT
+SA --> UC_REF_ABS
+SA --> UC_REF_PERM
+SA --> UC_REF_SEED
+SA --> UC_FERIES
+SA --> UC_STAT
+SA --> UC_GOUV
+SA --> UC_ONLINE
+SA --> UC_ACTIVITE
+SA --> UC_ANNUAIRE
+SA --> UC_NOTE_DIR
+
+UC_ETAB_CREER ..> UC_GEO : <<include>>
+UC_ETAB_CREER ..> UC_DIR_CREER : <<include>>
+UC_ETAB_CREER ..> UC_REF_SEED : <<include>>
+UC_CONFORM <.. UC_REPARER : <<extend>>
+UC_FERIES <.. UC_FERIES_TN : <<extend>>
+
+note as N1
+Le Super Administrateur appartient au compte
+plateforme 00000000-… : son `establishmentId` est
+vide. Toute requête qui borne sur
+`req.user.establishmentId` lui renvoie donc un
+périmètre nul — les contrôleurs doivent traiter son
+cas explicitement, sans quoi ses écrans se vident.
+end note
+
+note as N2
+L'amorçage crée pour un nouvel établissement ses
+types de garde, ses types d'absence et ses rôles :
+chaque hôpital reçoit sa propre copie des
+référentiels, ce qui explique la duplication de la
+table `roles` par établissement.
+end note
+
+legend right
+Bleu : cas propres à ce rôle.
+Gris : capacités héritées du Directeur.
+endlegend
+
+' Ancrage des notes flottantes
+N1 .. UC_ETAB_CREER
+N2 .. UC_REF_SHIFT
+
+@enduml

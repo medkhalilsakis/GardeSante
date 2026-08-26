@@ -1,0 +1,188 @@
+' ============================================================================
+' GardeSanté — Diagramme de séquence : remplacer un agent sur un planning
+'                                      en vigueur (couche de superposition)
+'
+' Le tableur en vigueur n'est jamais réécrit. Le remplacement vit dans une
+' table voisine et s'applique à la lecture : c'est la réponse à la contrainte
+' « ne plus modifier un tableur déjà soumis ».
+'
+' Sources vérifiées :
+'   backend/src/modules/replacements/replacements.routes.js
+'     GET  /overlay, POST /overlay
+'     POST /overlay/:id/confirm, POST /overlay/:id/reject, DELETE /overlay/:id
+'   backend/src/modules/replacements/replacements-overlay.controller.js
+'     en-tête : « ce module n'écrit JAMAIS dans `shifts` »
+'     SCOPES = full_period | date_range | single_day | time_slot
+'     createOverlayReplacement  : refus brouillon, bornes, doublons, 409 chevauchement
+'                                 statut selon l'auteur (chef ⇒ confirmé d'office)
+'                                 avertissements NON bloquants (loadDutyUserIds)
+'                                 transaction : replacements + replacement_items
+'     confirmOverlayReplacement : réservé au chef `is_head`, exige 'pending_chef'
+'     rejectOverlayReplacement  : notifie AVANT de supprimer, puis DELETE
+'     deleteOverlayReplacement  : chef, ou auteur tant que 'pending_chef'
+'   backend/src/modules/history/history.controller.js  log(), getIp()
+'   frontend/src/hooks/useRealtime.js  replacement:created|confirmed|rejected
+' ============================================================================
+@startuml 23-sequence-remplacement-surcouche
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 260
+skinparam ParticipantPadding 12
+skinparam BoxPadding 14
+skinparam actor {
+  BackgroundColor #E6F4F1
+  BorderColor #0F766E
+}
+skinparam participant {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontStyle bold
+}
+skinparam database {
+  BackgroundColor #F3E8FF
+  BorderColor #7A3E9D
+}
+skinparam sequence {
+  LifeLineBorderColor #94A3B8
+  LifeLineBackgroundColor #F8FAFC
+  GroupBackgroundColor #EEF2FF
+  GroupBorderColor #1B4FCA
+  GroupHeaderFontColor #1B4FCA
+  DividerBackgroundColor #E6F4F1
+  DividerBorderColor #0F766E
+  DividerFontColor #0F766E
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Séquence — Remplacer un agent sans toucher au tableur : la couche de superposition
+
+actor "Surveillant\n(service ou général)" as SS
+actor "Chef de service" as CS
+participant "Écran\nRemplacements" as UI
+participant "API\nreplacements/overlay" as API
+database "PostgreSQL" as DB
+participant "socket.io" as WS
+
+== Dépôt du remplacement ==
+
+SS -> UI : choisit un planning en vigueur
+UI -> API : GET /replacements/eligible-schedules
+API --> UI : plannings envoyés ou en cours
+SS -> UI : désigne l'absent, son remplaçant, et la portée :\ntoute la période, un intervalle, un jour, ou une plage horaire
+UI -> API : POST /replacements/overlay
+
+group contrôles de recevabilité
+  API -> DB : SELECT planning + service
+  alt une condition n'est pas remplie
+    API --> UI : 400 avec le motif précis
+    note right of API
+      Sept refus en **400** : planning encore
+      en brouillon — « modifiez directement le
+      tableur » ; période hors des bornes ;
+      absent sans remplaçant ; agent cité deux
+      fois ; agent se remplaçant lui-même ;
+      absent non affecté à ce planning ;
+      remplaçant d'un autre hôpital ou désactivé.
+    end note
+  else chevauchement avec un remplacement existant
+    API --> UI : 409 « fait déjà l'objet d'un remplacement\nsur cette période »
+    note right of API
+      Seul refus en **409** : la demande est
+      recevable en soi, c'est l'état du service
+      qui s'y oppose. Deux remplaçants sur le
+      même absent rendraient la garde
+      effective indéterminable.
+    end note
+  else demande recevable
+    API -> DB : le remplaçant est-il déjà de garde ?
+    DB --> API : conflits éventuels
+    note right of API
+      **Avertissements**, renvoyés sans bloquer :
+      doubler une garde peut être le seul choix
+      d'une nuit. La décision reste au chef.
+    end note
+  end
+end
+
+API -> API : statut selon l'auteur
+
+alt l'auteur est le chef de service
+  API -> API : confirmé d'office
+else l'auteur est un surveillant
+  API -> API : en attente du chef de service
+end
+
+group transaction unique
+  API -> DB : INSERT replacements\nportée, période, statut, auteur
+  API -> DB : INSERT replacement_items — un par binôme,\nmarqué `is_cross_department` si le remplaçant vient d'ailleurs
+end
+
+API -> DB : INSERT notifications (chef et surveillants)
+API -> DB : INSERT activity_logs (auteur, IP, agent)
+API -> WS : emit replacement:created\nsalon department:
+WS --> CS : la demande apparaît sans rechargement
+API --> UI : 201 remplacement enregistré\n+ avertissements éventuels
+
+== Arbitrage du chef de service ==
+
+CS -> UI : ouvre les remplacements à confirmer
+UI -> API : GET /replacements/overlay
+API --> UI : liste avec binômes et portées
+CS -> UI : confirme ou refuse
+
+alt l'acteur n'est pas le chef de ce service
+  API --> UI : 403 « seul le chef de ce service peut décider »
+else remplacement déjà confirmé
+  API --> UI : 400 « ce remplacement est déjà confirmé »
+else décision recevable
+
+  alt confirmé
+    UI -> API : POST /overlay/:id/confirm
+    API -> DB : UPDATE statut confirmé\n+ auteur et horodatage
+    API -> DB : INSERT notifications (auteur de la demande)
+    API -> DB : INSERT activity_logs
+    API -> WS : emit replacement:confirmed
+    WS --> SS : décision reçue sans rechargement
+    API --> UI : 200 remplacement confirmé
+
+  else refusé
+    UI -> API : POST /overlay/:id/reject + motif
+    API -> DB : INSERT notifications **avant** suppression
+    API -> DB : SELECT des binômes, pour le journal
+    API -> DB : DELETE FROM replacements\nles binômes partent en cascade
+    API -> DB : INSERT activity_logs\nportée, binômes et motif du refus
+    note right of DB
+      Un refus **efface** la demande : aucune ligne
+      « refusée » ne subsiste. Le journal d'activité
+      est donc le seul endroit où l'on retrouve ce
+      qui avait été proposé, par qui, et pourquoi
+      cela a été écarté.
+    end note
+    API -> WS : emit replacement:rejected
+    WS --> SS : la ligne disparaît des écrans du service
+    API --> UI : 200 remplacement refusé et supprimé
+  end
+end
+
+== Lecture de la garde effective ==
+
+note over SS, WS
+  La garde effective n'est pas relue ici : la grille validée et les
+  remplacements sont deux lectures distinctes, assemblées à l'affichage.
+  Ce montage fait l'objet de la figure 24.
+end note
+
+legend right
+  Trait plein : appel. Trait pointillé : réponse.
+  Le chef confirme d'office ce qu'il dépose lui-même ; un surveillant propose, le chef tranche.
+  Un refus supprime la demande : le journal d'activité en est la seule trace durable.
+  Le remplaçant venu d'un autre service relève du prêt de personnel : figure 25.
+endlegend
+
+@enduml

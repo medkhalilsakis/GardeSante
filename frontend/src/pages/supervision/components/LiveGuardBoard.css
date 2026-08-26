@@ -1,0 +1,668 @@
+/**
+ * « Garde en direct » (Supervision générale) — styles partagés par
+ * `LiveGuardsPanel` (la liste des gardes en cours) et `LiveGuardBoard`
+ * (le tableau de bord direct d'une garde).
+ *
+ * ── Harmonisation couleurs et typographie ──
+ * La structure ne change pas. Toutes les couleurs passent par les jetons de la
+ * plate-forme, y compris la palette de statut d'appel : elle reste identique à
+ * celle d'« Appel du jour » parce que les deux écrans lisent désormais les mêmes
+ * jetons, non plus parce qu'on y recopiait les mêmes valeurs à la main.
+ *
+ * Les surtitres prennent la fonte d'affichage et le suivi de la plate-forme ;
+ * les chiffres et les heures passent à la fonte de données, qui aligne les
+ * colonnes de la chronologie.
+ */
+
+/* ═══════════════ Bandeau « en direct » ═══════════════ */
+
+.lgp-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.lgp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.lgp-toolbar-copy {
+  flex: 1;
+  min-width: 200px;
+}
+
+.lgp-toolbar-copy h3 {
+  margin: 0;
+  font-size: var(--font-lg);
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.lgp-toolbar-copy p {
+  margin: 2px 0 0;
+  font-size: var(--font-xs);
+  color: var(--gs-ink-faint);
+}
+
+.lgp-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 12px;
+  border: 1px solid var(--gs-rule);
+  border-radius: var(--border-radius-full);
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.lgp-live:hover { border-color: var(--gs-rule-strong); }
+
+.lgp-live.is-live { color: var(--gs-duty); border-color: color-mix(in srgb, var(--gs-duty) 22%, transparent); }
+
+.lgp-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--border-radius-full);
+  background: var(--gs-ink-faint);
+  flex: 0 0 auto;
+}
+
+.lgp-live.is-live .lgp-live-dot {
+  background: var(--gs-duty);
+  animation: lgp-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes lgp-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gs-duty) 22%, transparent); }
+  50%      { box-shadow: 0 0 0 6px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lgp-live.is-live .lgp-live-dot { animation: none; }
+}
+
+.lgp-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+  white-space: nowrap;
+}
+
+/* ═══════════════ Filtres ═══════════════ */
+
+.lgp-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.lgp-search {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.lgp-search svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--gs-ink-faint);
+  pointer-events: none;
+}
+
+.lgp-search input {
+  width: 100%;
+  padding: 8px 10px 8px 32px;
+  border: 1px solid var(--gs-rule);
+  border-radius: var(--border-radius-sm);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
+  font-size: var(--font-sm);
+  font-family: inherit;
+}
+
+/* Le champ marque le focus par sa bordure. L'anneau du calque de jetons n'est
+   pas annulé pour autant : lui seul est visible au clavier, et un panneau de
+   recherche sans anneau laisse l'utilisateur au clavier sans repère. */
+.lgp-search input:focus {
+  border-color: var(--gs-seal);
+}
+
+.lgp-select {
+  padding: 8px 10px;
+  border: 1px solid var(--gs-rule);
+  border-radius: var(--border-radius-sm);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
+  font-size: var(--font-sm);
+  font-family: inherit;
+  max-width: 240px;
+}
+
+/* ═══════════════ Cartes de garde ═══════════════ */
+
+.lgp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-3);
+}
+
+.lgp-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 14px 16px;
+  border: 1px solid var(--gs-rule);
+  border-left: 3px solid var(--lgp-accent, var(--gs-seal));
+  border-radius: var(--border-radius);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-card);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.lgp-card:hover {
+  box-shadow: var(--gs-shadow-lift);
+  transform: translateY(-1px);
+}
+
+.lgp-card:focus-visible {
+  outline: 2px solid var(--gs-seal);
+  outline-offset: 2px;
+}
+
+.lgp-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.lgp-card-head h4 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.lgp-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--font-xs);
+  color: var(--gs-ink-soft);
+}
+
+.lgp-card-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lgp-card-meta svg { color: var(--gs-ink-faint); flex: 0 0 auto; }
+
+.lgp-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--gs-rule);
+}
+
+.lgp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--border-radius-full);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.lgp-chip.is-strong { background: var(--gs-seal-wash); color: var(--gs-seal); }
+.lgp-chip.is-warn   { background: var(--gs-alert-wash); color: var(--gs-alert); }
+.lgp-chip.is-ok     { background: var(--gs-duty-wash); color: var(--gs-duty); }
+.lgp-chip.is-muted  { background: var(--gs-paper-alt); color: var(--gs-ink-faint); }
+
+.lgp-card-open {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--gs-seal);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Avancement du pointage, en pied de carte. */
+.lgp-progress {
+  height: 4px;
+  border-radius: var(--border-radius-full);
+  background: var(--gs-paper-alt);
+  overflow: hidden;
+}
+
+.lgp-progress span {
+  display: block;
+  height: 100%;
+  width: var(--lgp-progress, 0%);
+  border-radius: inherit;
+  background: var(--lgp-accent, var(--gs-seal));
+  transition: width var(--transition-base);
+}
+
+/* ═══════════════ États et bandeaux ═══════════════ */
+
+.lgp-empty,
+.lgp-loading {
+  padding: var(--space-10) var(--space-4);
+  text-align: center;
+  font-size: var(--font-sm);
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper);
+  border: 1px dashed var(--gs-rule);
+  border-radius: var(--border-radius-lg);
+}
+
+.lgp-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 10px 14px;
+  border: 1px solid var(--gs-rule);
+  border-left: 3px solid var(--gs-alert);
+  border-radius: var(--border-radius-sm);
+  background: var(--gs-alert-wash);
+  color: var(--gs-ink-soft);
+  font-size: var(--font-xs);
+}
+
+.lgp-notice svg { color: var(--gs-alert); flex: 0 0 auto; margin-top: 1px; }
+
+.lgp-error {
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+  font-size: var(--font-sm);
+  color: var(--gs-alert);
+}
+
+/* ═══════════════ Fil d'Ariane ═══════════════ */
+
+.lgb-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: var(--font-xs);
+  color: var(--gs-ink-faint);
+}
+
+.lgb-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--gs-rule);
+  border-radius: var(--border-radius-sm);
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.lgb-back:hover { border-color: var(--gs-rule-strong); color: var(--gs-ink); }
+
+/* ═══════════════ Tableau de bord d'une garde ═══════════════ */
+
+.lgb-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.lgb-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: 16px 18px;
+  border: 1px solid var(--gs-rule);
+  border-top: 3px solid var(--gs-seal);
+  border-radius: var(--border-radius-lg);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-card);
+}
+
+.lgb-header-copy { flex: 1; min-width: 240px; }
+
+.lgb-header-copy h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: 0;
+  font-family: var(--gs-display);
+  font-size: var(--font-xl);
+  font-weight: 800;
+  letter-spacing: -.015em;
+  color: var(--gs-ink);
+}
+
+.lgb-header-copy p {
+  margin: 6px 0 0;
+  font-size: var(--font-xs);
+  color: var(--gs-ink-soft);
+}
+
+.lgb-header-facts {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.lgb-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-2);
+}
+
+.lgb-metric {
+  padding: 12px 14px;
+  border: 1px solid var(--gs-rule);
+  border-top: 3px solid var(--lgb-tone, var(--gs-seal));
+  border-radius: var(--border-radius-sm);
+  background: var(--gs-paper);
+}
+
+.lgb-metric span {
+  display: block;
+  font-family: var(--gs-display);
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--gs-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: .16em;
+}
+
+.lgb-metric strong {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--gs-data);
+  font-size: var(--font-3xl);
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--lgb-tone, var(--gs-ink));
+}
+
+.lgb-metric small {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Sections ── */
+
+.lgb-section {
+  border: 1px solid var(--gs-rule);
+  border-radius: var(--border-radius-lg);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-card);
+  overflow: hidden;
+}
+
+.lgb-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
+}
+
+.lgb-section-head svg { color: var(--gs-seal); flex: 0 0 auto; }
+
+.lgb-section-head h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--gs-display);
+  font-size: var(--font-sm);
+  font-weight: 700;
+  letter-spacing: -.01em;
+  color: var(--gs-ink);
+}
+
+.lgb-section-head small {
+  font-family: var(--gs-data);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gs-ink-faint);
+  white-space: nowrap;
+}
+
+.lgb-section-body { padding: var(--space-3) var(--space-4) var(--space-4); }
+
+.lgb-section-empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  font-size: var(--font-xs);
+  color: var(--gs-ink-faint);
+}
+
+/* ── Lignes d'agent ── */
+
+.lgb-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lgb-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--gs-rule);
+  border-left: 3px solid var(--lgb-tone, var(--gs-ink-faint));
+  border-radius: var(--border-radius-sm);
+  background: var(--gs-paper);
+}
+
+.lgb-row-identity { flex: 1; min-width: 180px; }
+
+.lgb-row-identity strong {
+  display: block;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.lgb-row-identity small {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+}
+
+.lgb-row-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 110px;
+  font-size: var(--font-xs);
+  color: var(--gs-ink-soft);
+}
+
+.lgb-row-slot em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+}
+
+.lgb-row-side {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* ── Badges de statut d'appel (même palette qu'Appel du jour) ── */
+
+.lgb-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--border-radius-full);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--lgb-mark-soft, var(--gs-paper-alt));
+  color: var(--lgb-mark-color, var(--gs-ink-faint));
+}
+
+.lgb-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--border-radius-full);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── Frise de l'historique ── */
+
+.lgb-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.lgb-day {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lgb-day-label {
+  font-family: var(--gs-display);
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--gs-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: .16em;
+}
+
+.lgb-event {
+  display: flex;
+  gap: var(--space-3);
+  padding: 9px 12px;
+  border: 1px solid var(--gs-rule);
+  border-left: 3px solid var(--lgb-tone, var(--gs-seal));
+  border-radius: var(--border-radius-sm);
+  background: var(--gs-paper-alt);
+}
+
+.lgb-event-hour {
+  flex: 0 0 44px;
+  font-family: var(--gs-data);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.lgb-event-body { flex: 1; min-width: 0; }
+
+.lgb-event-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.lgb-event-title strong {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.lgb-event-body p {
+  margin: 3px 0 0;
+  font-size: var(--font-xs);
+  color: var(--gs-ink-soft);
+  white-space: pre-wrap;
+}
+
+.lgb-event-body footer {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Encart (prêts de personnel) ── */
+
+.lgb-inset {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border: 1px dashed var(--gs-rule);
+  border-radius: var(--border-radius-sm);
+  background: var(--gs-paper-alt);
+}
+
+.lgb-inset h4 {
+  margin: 0 0 var(--space-2);
+  font-family: var(--gs-display);
+  font-size: var(--font-xs);
+  font-weight: 800;
+  color: var(--gs-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: .16em;
+}
+
+/* ── Groupes d'alertes ── */
+
+.lgb-group + .lgb-group { margin-top: var(--space-4); }
+
+.lgb-group-label {
+  margin: 0 0 6px;
+  font-family: var(--gs-display);
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--gs-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: .16em;
+}
+
+@media (max-width: 640px) {
+  .lgb-row-side { margin-left: 0; width: 100%; }
+  .lgb-metric strong { font-size: var(--font-2xl); }
+}

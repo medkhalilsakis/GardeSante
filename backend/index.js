@@ -10,10 +10,23 @@ const PORT = process.env.PORT || 5000;
 // Créer le serveur HTTP
 const server = http.createServer(app);
 
-// Socket.io pour les notifications temps réel
+// Socket.io pour les notifications temps réel.
+//
+// `CORS_ORIGIN` peut contenir plusieurs origines séparées par des virgules —
+// c'est ce que `src/app.js` accepte et documente. Cette chaîne était passée
+// telle quelle à socket.io, qui la renvoyait en un seul en-tête
+// `Access-Control-Allow-Origin: http://a,http://b` : un en-tête que tous les
+// navigateurs refusent. Le temps réel tombait alors pour *toutes* les origines,
+// y compris la première, dès qu'une seconde était déclarée. Même découpage
+// qu'ailleurs, donc même comportement.
+const SOCKET_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: SOCKET_ORIGINS.length === 1 ? SOCKET_ORIGINS[0] : SOCKET_ORIGINS,
     methods: ['GET', 'POST'],
     credentials: true,
   },

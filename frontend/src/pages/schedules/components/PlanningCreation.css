@@ -1,0 +1,373 @@
+/**
+ * Créer un planning — habillage des deux étapes
+ * ═════════════════════════════════════════════
+ *
+ * Fichier neuf, classes préfixées `.gs-new-`. Il couvre la porte d'entrée du
+ * planning de garde : définir la période, puis choisir la méthode de saisie.
+ *
+ * Ce qu'il remplace : deux pastilles rondes colorées en guise de fil d'étapes,
+ * quatre tuiles à dégradé violet / cyan / vert coiffées d'un émoji, et quatre
+ * boutons « Commencer » identiques en dégradé — soit quatre appels à l'action de
+ * même poids sur un écran qui n'en demande qu'un.
+ *
+ * Ici : le fil d'étapes est une réglure numérotée (la numérotation dit quelque
+ * chose de vrai — c'est une séquence de deux temps), et chaque méthode est une
+ * carte entière cliquable, au clavier comme à la souris. Une seule méthode porte
+ * le bleu d'autorité : celle qui est recommandée.
+ */
+
+/* ── Le fil d'étapes ──────────────────────────────────────────────────
+   Deux temps, dans l'ordre. Le numéro est une donnée de registre, le nom est en
+   clair, et l'étape courante pose son filet — la même signalétique que les
+   onglets du tableau de bord. */
+
+.gs-new-steps {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--gs-rule);
+}
+
+.gs-new-step {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0 16px 9px 0;
+  margin-right: 16px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--gs-ink-faint);
+}
+
+.gs-new-step > i {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.gs-new-step > span {
+  font-family: var(--gs-display);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.gs-new-step[data-state='done'] { color: var(--gs-ink-soft); }
+
+.gs-new-step[aria-current='step'] {
+  color: var(--gs-seal);
+  border-bottom-color: var(--gs-seal);
+}
+
+/* ── L'étape « période » ──────────────────────────────────────────── */
+
+.gs-new-panel { padding: 22px 24px 24px; }
+
+.gs-new-panel h3 {
+  margin: 0;
+  font-family: var(--gs-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gs-new-panel > p {
+  margin: 3px 0 18px;
+  font-size: 12px;
+  color: var(--gs-ink-faint);
+}
+
+.gs-new-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gs-new-field > span {
+  font-family: var(--gs-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gs-new-field > span > em {
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.gs-new-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 8px;
+  background: var(--gs-paper);
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition-fast, .15s), box-shadow var(--transition-fast, .15s);
+}
+
+.gs-new-input:focus {
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
+}
+
+/* Les dates se saisissent au format du registre. */
+.gs-new-input[type='date'] {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+}
+
+.gs-new-dates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+/* La mesure de la période : un chiffre, pas une bannière colorée. */
+.gs-new-span {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 9px 0 0;
+  margin-bottom: 14px;
+  border-top: 1px solid var(--gs-rule);
+  font-size: 11.5px;
+  color: var(--gs-ink-soft);
+}
+
+.gs-new-span b {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gs-ink);
+  margin-right: 4px;
+}
+
+/* ── Avis ─────────────────────────────────────────────────────────────
+   Deux tons seulement : ce qui informe, et ce qui bloque. Rien de vert : une
+   information n'est pas une réussite. */
+
+.gs-new-note {
+  padding: 9px 12px;
+  border-radius: 9px;
+  margin-bottom: 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.gs-new-note.is-info {
+  background: var(--gs-paper-alt);
+  border: 1px dashed var(--gs-rule-strong);
+  color: var(--gs-ink-soft);
+}
+
+.gs-new-note.is-alert {
+  background: var(--gs-alert-wash);
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 30%, transparent);
+  color: var(--gs-alert);
+}
+
+/* La nature du planning, pas une alerte — mais c'est le ton que porte déjà le
+   cartouche « Week-ends & jours fériés » dans l'en-tête du tableur, alors la
+   case qui le décide emploie le même. */
+.gs-new-kind {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 18px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color var(--transition-fast, .15s), background var(--transition-fast, .15s);
+}
+
+.gs-new-kind:hover { border-color: var(--gs-ink-faint); }
+
+.gs-new-kind.is-on {
+  border-color: color-mix(in srgb, var(--gs-alert) 40%, transparent);
+  background: var(--gs-alert-wash);
+}
+
+.gs-new-kind input { margin: 2px 0 0; accent-color: var(--gs-alert); }
+
+.gs-new-kind strong {
+  display: block;
+  font-family: var(--gs-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gs-new-kind small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--gs-ink-faint);
+}
+
+.gs-new-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* ── Le choix de la méthode ───────────────────────────────────────────
+   La carte entière est le bouton. Une seule porte le bleu — celle qui est
+   recommandée ; les autres se contentent du filet, et c'est le survol ou le
+   focus qui les lève. */
+
+.gs-new-lede { margin-bottom: 20px; }
+
+.gs-new-lede h3 {
+  margin: 0;
+  font-family: var(--gs-display);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gs-new-lede p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--gs-ink-faint);
+}
+
+.gs-new-methods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
+  gap: 14px;
+}
+
+.gs-new-method {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 16px 17px 15px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 14px;
+  background: var(--gs-paper);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast, .15s), box-shadow var(--transition-fast, .15s),
+              transform var(--transition-fast, .15s);
+}
+
+.gs-new-method:hover {
+  border-color: var(--gs-rule-strong);
+  box-shadow: var(--gs-shadow-card);
+  transform: translateY(-2px);
+}
+
+.gs-new-method.is-lead { border-color: color-mix(in srgb, var(--gs-seal) 40%, transparent); }
+.gs-new-method.is-lead:hover { border-color: var(--gs-seal); }
+
+.gs-new-method-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 9px;
+}
+
+.gs-new-method-head > strong {
+  font-family: var(--gs-display);
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gs-new-tag {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 5px;
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.gs-new-tag.is-lead {
+  border-color: color-mix(in srgb, var(--gs-seal) 34%, transparent);
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+}
+
+.gs-new-method > p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--gs-ink-soft);
+}
+
+.gs-new-method ul {
+  list-style: none;
+  padding: 10px 0 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--gs-rule);
+}
+
+.gs-new-method li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--gs-ink-faint);
+}
+
+.gs-new-method li > i {
+  flex: 0 0 auto;
+  width: 4px;
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--gs-rule-strong);
+}
+
+/* L'affordance, une fois par carte, en toutes lettres. */
+.gs-new-method-go {
+  margin-top: auto;
+  padding-top: 4px;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gs-ink-faint);
+}
+
+.gs-new-method:hover .gs-new-method-go,
+.gs-new-method.is-lead .gs-new-method-go { color: var(--gs-seal); }
+
+@media (max-width: 620px) {
+  .gs-new-panel { padding: 16px 15px 18px; }
+  .gs-new-steps { overflow-x: auto; scrollbar-width: thin; }
+  .gs-new-step { flex: 0 0 auto; }
+  .gs-new-actions { justify-content: stretch; }
+  .gs-new-actions > * { flex: 1; }
+}

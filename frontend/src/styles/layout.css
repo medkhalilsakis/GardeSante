@@ -5,8 +5,8 @@
   left: 0;
   width: var(--sidebar-width);
   height: 100vh;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border-subtle);
+  background: var(--gs-paper);
+  border-right: 1px solid var(--gs-rule);
   z-index: var(--z-sidebar);
   display: flex;
   flex-direction: column;
@@ -22,7 +22,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--gs-rule);
   flex-shrink: 0;
 }
 
@@ -30,12 +30,11 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  background: var(--gs-seal);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(27, 79, 202, 0.4);
 }
 
 .logo-text {
@@ -44,21 +43,24 @@
   overflow: hidden;
 }
 
+/* Le nom était peint par un dégradé découpé sur le texte. Les deux bornes du
+   dégradé étaient la même couleur d'autorité, donc l'effet ne produisait qu'un
+   aplat — mais il coûtait la couleur du texte, que `-webkit-text-fill-color`
+   remplaçait par du transparent. Le nom se lit à l'encre, comme tout titre ;
+   le cachet reste sur le pictogramme, qui est le seul à en avoir besoin. */
 .logo-name {
+  font-family: var(--gs-display);
   font-size: var(--font-md);
   font-weight: 800;
-  color: var(--text-primary);
+  letter-spacing: -.015em;
+  color: var(--gs-ink);
   white-space: nowrap;
   line-height: 1.2;
-  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 .logo-sub {
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   white-space: nowrap;
 }
 
@@ -73,11 +75,12 @@
 }
 
 .nav-section-title {
-  font-size: var(--font-xs);
+  font-family: var(--gs-display);
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
+  letter-spacing: .16em;
+  color: var(--gs-ink-faint);
   padding: var(--space-3) var(--space-3) var(--space-2);
   white-space: nowrap;
   overflow: hidden;
@@ -89,7 +92,7 @@
   gap: var(--space-3);
   padding: 10px var(--space-3);
   border-radius: var(--border-radius-sm);
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   cursor: pointer;
   transition: all var(--transition-fast);
   text-decoration: none;
@@ -101,14 +104,18 @@
 }
 
 .nav-item:hover {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
 }
 
+/* L'entrée courante portait `--color-primary-light`, un bleu éclairci prévu
+   pour un fond sombre. Sur le lavis clair de cette même couleur, il tombait
+   sous le seuil de lecture. Le cachet plein s'y lit, et c'est la seule entrée
+   de la barre qui a le droit de le porter. */
 .nav-item.active {
-  background: var(--color-primary-10);
-  color: var(--color-primary-light);
-  border: 1px solid var(--border-primary);
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+  border: 1px solid var(--gs-seal);
 }
 
 .nav-item.active::before {
@@ -116,7 +123,7 @@
   position: absolute;
   left: 0; top: 25%; bottom: 25%;
   width: 3px;
-  background: var(--color-primary);
+  background: var(--gs-seal);
   border-radius: 0 2px 2px 0;
 }
 
@@ -128,8 +135,8 @@
 
 .nav-item .nav-badge {
   margin-left: auto;
-  background: var(--color-danger);
-  color: #fff;
+  background: var(--gs-alert-strong);
+  color: var(--gs-on-tone);
   font-size: 10px;
   font-weight: 700;
   padding: 1px 6px;
@@ -164,14 +171,14 @@
 
 .ctx-badge-sidebar {
   padding: var(--space-3) var(--space-5);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--gs-rule);
   flex-shrink: 0;
 }
 
 .ctx-hospital {
   font-size: var(--font-xs);
   font-weight: 700;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   line-height: 1.35;
   /* Un nom d'hôpital long ne doit ni déborder ni élargir la barre :
      on le coupe à deux lignes avec des points de suspension. */
@@ -184,7 +191,7 @@
 
 .ctx-hospital-lg {
   font-size: var(--font-sm);
-  color: var(--text-primary);
+  color: var(--gs-ink);
   -webkit-line-clamp: 1;
   white-space: nowrap;
 }
@@ -198,20 +205,21 @@
 }
 
 .ctx-depts-label {
+  font-family: var(--gs-display);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
+  letter-spacing: .16em;
+  color: var(--gs-ink-faint);
 }
 
 .ctx-chip {
   max-width: 100%;
   padding: 1px 8px;
   border-radius: var(--border-radius-full);
-  background: var(--bg-card);
-  border: 1px solid var(--border-default);
-  color: var(--text-secondary);
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  color: var(--gs-ink-soft);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.6;
@@ -222,9 +230,9 @@
 
 /* Chef de service (`is_head`) — même code couleur que la page Profil. */
 .ctx-chip-head {
-  background: var(--color-primary-10);
-  border-color: var(--color-primary);
-  color: var(--color-primary-light);
+  background: var(--gs-seal-wash);
+  border-color: var(--gs-seal);
+  color: var(--gs-seal);
 }
 
 .ctx-badge-header {
@@ -234,14 +242,14 @@
   gap: var(--space-3);
   padding: 8px 12px;
   margin-bottom: var(--space-4);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
   border-radius: var(--border-radius-sm);
 }
 
 .sidebar-footer {
   padding: var(--space-4);
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--gs-rule);
   flex-shrink: 0;
 }
 
@@ -256,13 +264,13 @@
   overflow: hidden;
 }
 
-.user-info:hover { background: var(--bg-elevated); }
+.user-info:hover { background: var(--gs-paper-alt); }
 
 .user-details { overflow: hidden; flex: 1; }
 .user-name {
   font-size: var(--font-sm);
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--gs-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -270,7 +278,7 @@
 
 .user-role {
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   white-space: nowrap;
 }
 
@@ -283,9 +291,9 @@
   left: var(--sidebar-width);
   right: 0;
   height: var(--header-height);
-  background: var(--bg-header);
+  background: var(--gs-paper);
   backdrop-filter: var(--glass-blur);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--gs-rule);
   z-index: var(--z-header);
   display: flex;
   align-items: center;
@@ -299,7 +307,7 @@
 .header-title {
   font-size: var(--font-lg);
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--gs-ink);
   flex: 1;
 }
 
@@ -316,17 +324,17 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--border-radius-sm);
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   cursor: pointer;
   transition: all var(--transition-fast);
   position: relative;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  border: 1px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
 }
 
 .header-btn:hover {
-  color: var(--text-primary);
-  border-color: var(--border-default);
+  color: var(--gs-ink);
+  border-color: var(--gs-rule);
 }
 
 .header-btn .badge-dot {
@@ -335,9 +343,9 @@
   right: 6px;
   width: 8px;
   height: 8px;
-  background: var(--color-danger);
+  background: var(--gs-alert-strong);
   border-radius: 50%;
-  border: 2px solid var(--bg-surface);
+  border: 2px solid var(--gs-paper-alt);
 }
 
 /* Breadcrumb */
@@ -346,12 +354,12 @@
   align-items: center;
   gap: var(--space-2);
   font-size: var(--font-sm);
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
 }
 
-.breadcrumb-item { color: var(--text-secondary); }
-.breadcrumb-item.active { color: var(--text-primary); font-weight: 500; }
-.breadcrumb-sep { color: var(--text-muted); font-size: var(--font-xs); }
+.breadcrumb-item { color: var(--gs-ink-soft); }
+.breadcrumb-item.active { color: var(--gs-ink); font-weight: 500; }
+.breadcrumb-sep { color: var(--gs-ink-faint); font-size: var(--font-xs); }
 
 /* Page header */
 .page-header {
@@ -364,15 +372,17 @@
 }
 
 .page-title {
+  font-family: var(--gs-display);
   font-size: var(--font-3xl);
   font-weight: 800;
-  color: var(--text-primary);
+  letter-spacing: -.015em;
+  color: var(--gs-ink);
   line-height: 1.2;
 }
 
 .page-subtitle {
   font-size: var(--font-sm);
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   margin-top: var(--space-1);
 }
 

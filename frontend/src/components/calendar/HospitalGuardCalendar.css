@@ -1,0 +1,490 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Calendrier des gardes de l'hôpital
+   ──────────────────────────────────────────────────────────────────────────
+   Une case de ce calendrier doit répondre à quatre questions en un coup
+   d'œil, et elle n'a que quelques pixels pour le faire. Le partage est donc
+   explicite, chaque signal sur un support distinct :
+
+     combien de gardes  → l'intensité du fond (densité relative au pic du mois)
+     dans quel état     → la teinte de ce fond, celle de l'état dominant du jour
+     quels services     → une barre par planning, sur l'échelle d'identité
+     quel genre de jour → la forme du filet : pointillé le week-end, double un
+                          jour férié, épais et scellé aujourd'hui
+
+   Le fond des cases portait des `rgba()` recopiés depuis une palette locale.
+   La teinte vient maintenant de `PLANNING_STATE_COLOR` — le badge d'état et la
+   case du calendrier ne peuvent plus diverger — et arrive par la propriété
+   `--gsc-tone`, l'intensité par `--gsc-fill` (un pourcentage). Le CSS fait le
+   mélange : aucune couleur ne se calcule plus en JavaScript.
+
+   Le week-end et le jour férié ne repeignent plus le fond quand la case porte
+   des gardes : ils tenaient la teinte d'état et la densité — soit deux
+   informations sur quatre effacées les jours où l'on regarde justement le
+   calendrier de plus près. Le filet dit le genre de jour, l'aplat dit la
+   charge, et les deux tiennent ensemble.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.gsc {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Barre de tête : titre, navigation du mois, filtres ─────────────────── */
+
+.gsc-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.gsc-bar__id {
+  flex: 1;
+  min-width: 200px;
+}
+
+.gsc-bar__title {
+  font-family: var(--gs-display);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  color: var(--gs-ink);
+}
+
+.gsc-bar__sub {
+  margin-top: 2px;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  color: var(--gs-ink-faint);
+}
+
+.gsc-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gsc-nav__month {
+  min-width: 150px;
+  text-align: center;
+  font-family: var(--gs-body);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gs-ink);
+  text-transform: capitalize;
+}
+
+.gsc-select {
+  max-width: 200px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 8px;
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.gsc-select:focus-visible {
+  outline: 2px solid var(--gs-seal);
+  outline-offset: 1px;
+}
+
+.gsc-select.is-narrow { max-width: 170px; }
+
+/* ── Indicateurs du mois ────────────────────────────────────────────────── */
+
+.gsc-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.gsc-kpi {
+  padding: 10px 12px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 10px;
+  background: var(--gs-paper);
+}
+
+.gsc-kpi__label {
+  font-family: var(--gs-body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsc-kpi__value {
+  font-family: var(--gs-data);
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--gs-ink);
+}
+
+/* ── États de chargement ────────────────────────────────────────────────── */
+
+.gsc-state {
+  padding: 32px;
+  text-align: center;
+  font-family: var(--gs-body);
+  font-size: 13px;
+  color: var(--gs-ink-faint);
+}
+
+/* Un chargement qui échoue attend une reprise : c'est de l'ambre, pas du
+   rouge — la plateforme n'a pas de rouge. */
+.gsc-state.is-error { color: var(--gs-alert); }
+
+/* ── Grille du mois ─────────────────────────────────────────────────────── */
+
+.gsc-panel { padding: 12px; }
+
+/* L'en-tête des jours et la grille partagent la même géométrie : `minmax(0, 1fr)`
+   empêche le contenu d'une case (le numéro, la mention « Férié », le compte) de
+   gonfler sa colonne, et le minimum commun garantit que les deux rangées
+   défilent ensemble et restent alignées sur un écran étroit — sinon les libellés
+   « Lun … Dim » se décalent des colonnes qu'ils nomment. */
+.gsc-dow,
+.gsc-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 504px;
+  gap: 6px;
+}
+
+.gsc-dow { margin-bottom: 6px; }
+
+.gsc-dow__cell {
+  padding: 4px 0;
+  text-align: center;
+  font-family: var(--gs-body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsc-dow__cell.is-weekend { color: var(--gs-alert); }
+
+.gsc-cell {
+  min-height: 74px;
+  padding: 6px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 10px;
+  background: var(--gs-paper-alt);
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+/* Fond des cases portant des gardes : la teinte de l'état dominant, diluée
+   dans le papier à hauteur de la densité du jour. */
+.gsc-cell.is-filled {
+  border-color: color-mix(in srgb, var(--gsc-tone) 45%, transparent);
+  background: color-mix(in srgb, var(--gsc-tone) calc(var(--gsc-fill, 10) * 1%), var(--gs-paper));
+  cursor: pointer;
+}
+
+/* Le genre de jour passe par la forme du filet, jamais par l'aplat. */
+.gsc-cell.is-weekend { border-style: dashed; border-color: var(--gs-alert); }
+
+.gsc-cell.is-holiday {
+  border-style: double;
+  border-width: 3px;
+  border-color: var(--gs-alert);
+}
+
+/* Sans garde, l'aplat est libre : le week-end et le férié le prennent. */
+.gsc-cell.is-weekend:not(.is-filled),
+.gsc-cell.is-holiday:not(.is-filled) { background: var(--gs-alert-wash); }
+
+/* Aujourd'hui l'emporte sur le reste : c'est la case que l'on cherche. */
+.gsc-cell.is-today {
+  border-color: var(--gs-seal);
+  border-width: 2px;
+}
+
+.gsc-cell.is-selected {
+  outline: 2px solid var(--gs-seal);
+  outline-offset: 1px;
+}
+
+.gsc-cell:focus-visible {
+  outline: 2px solid var(--gs-seal);
+  outline-offset: 1px;
+}
+
+/* Sur une colonne étroite, un jour férié qui porte aussi des gardes aligne trois
+   éléments dans 55 px : on laisse la rangée passer à la ligne plutôt que de
+   rogner la mention « Férié ». La case grandit — `min-height`, pas `height`. */
+.gsc-cell__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.gsc-cell__day {
+  font-family: var(--gs-data);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--gs-ink);
+}
+
+.gsc-cell__day.is-weekend { color: var(--gs-alert); }
+.gsc-cell__day.is-today { font-weight: 700; }
+
+.gsc-cell__holiday {
+  font-family: var(--gs-body);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--gs-alert);
+}
+
+/* Le compte du jour sur l'aplat de l'état dominant : texte sur teinte pleine,
+   donc en papier. */
+.gsc-cell__count {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--gsc-tone, var(--gs-ink-faint));
+  color: var(--gs-paper);
+  font-family: var(--gs-data);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Une barre par planning présent : le filet de gauche donne l'état, le corps
+   de la barre donne le service.
+
+   Les deux teintes peuvent coïncider — l'échelle d'identité comprend, à dessein,
+   le sceau, le service et l'alerte — et une barre d'une seule couleur ne dirait
+   plus rien. D'où l'interstice : `background-clip: content-box` laisse le padding
+   gauche transparent, si bien que le filet d'état et le corps de service restent
+   deux segments lisibles même quand ils sont de la même encre. */
+.gsc-bars {
+  margin-top: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gsc-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.gsc-bar-line {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  padding-left: 2px;
+  border-radius: 2px;
+  border-left: 4px solid var(--gsc-state, var(--gs-ink-faint));
+  background: var(--gsc-id, var(--gs-ink-faint));
+  background-clip: content-box;
+}
+
+.gsc-bar-count {
+  font-family: var(--gs-data);
+  font-size: 8px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--gsc-id, var(--gs-ink-faint));
+}
+
+.gsc-bar-more {
+  font-family: var(--gs-body);
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Légende ────────────────────────────────────────────────────────────── */
+
+.gsc-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--gs-rule);
+}
+
+.gsc-legend__label {
+  font-family: var(--gs-body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsc-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.gsc-legend__bar {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--gsc-tone, var(--gs-ink-faint));
+}
+
+.gsc-legend__diamond {
+  width: 9px;
+  height: 9px;
+  transform: rotate(45deg);
+  background: var(--gsc-id, var(--gs-ink-faint));
+}
+
+.gsc-legend__text {
+  font-family: var(--gs-body);
+  font-size: 11px;
+  color: var(--gs-ink-soft);
+}
+
+.gsc-legend__text.is-small { font-size: 10px; }
+
+.gsc-legend__sep {
+  width: 1px;
+  height: 18px;
+  background: var(--gs-rule-strong);
+}
+
+.gsc-legend__note {
+  font-family: var(--gs-body);
+  font-size: 10px;
+  color: var(--gs-alert);
+}
+
+/* ── Détail du jour, plannings de la période ────────────────────────────── */
+
+.gsc-detail { padding: 16px; }
+
+.gsc-detail__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.gsc-detail__title {
+  font-family: var(--gs-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gsc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gsc-guard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  background: var(--gs-paper-alt);
+}
+
+.gsc-guard__name {
+  flex: 1;
+  min-width: 140px;
+  font-family: var(--gs-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gsc-guard__meta {
+  font-family: var(--gs-body);
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+}
+
+.gsc-guard__label {
+  font-family: var(--gs-body);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+}
+
+/* Le service est une identité, pas un état : il porte sa couleur d'échelle. */
+.gsc-guard__dept {
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--gsc-id, var(--gs-ink-faint)) 34%, transparent);
+  background: color-mix(in srgb, var(--gsc-id, var(--gs-ink-faint)) 10%, transparent);
+  color: var(--gsc-id, var(--gs-ink-soft));
+  font-family: var(--gs-body);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.gsc-plans { padding: 16px; }
+
+.gsc-plans__title {
+  margin-bottom: 10px;
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsc-plan {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  color: var(--gs-ink-soft);
+}
+
+.gsc-plan__name {
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gsc-plan__count { color: var(--gs-ink-faint); }
+
+.gsc-empty {
+  padding: 40px;
+  border: 1px dashed var(--gs-rule-strong);
+  border-radius: 14px;
+  background: var(--gs-paper);
+  text-align: center;
+  font-family: var(--gs-body);
+  font-size: 13px;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Étroit ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .gsc-cell { min-height: 60px; padding: 4px; }
+  .gsc-select, .gsc-select.is-narrow { max-width: none; flex: 1; }
+  .gsc-nav__month { min-width: 110px; font-size: 12px; }
+}

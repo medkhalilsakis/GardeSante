@@ -11,15 +11,19 @@ const SIZE_MAP = {
   '2xl': { px: 96,  font: 28, icon: 40 },
 };
 
-// Palette déterministe selon les initiales
-const COLORS = [
-  { bg: '#EFF3FF', fg: '#1B4FCA' },
-  { bg: '#ECFDF5', fg: '#059669' },
-  { bg: '#FFFBEB', fg: '#D97706' },
-  { bg: '#EEF2FF', fg: '#6366F1' },
-  { bg: '#FDF2F8', fg: '#DB2777' },
-  { bg: '#ECFEFF', fg: '#0891B2' },
-  { bg: '#F5F3FF', fg: '#7C3AED' },
+/* La teinte d'un avatar est une identité, pas un état : elle ne dit rien de la
+   personne, elle la distingue seulement de la suivante. C'est exactement ce que
+   porte l'échelle `--gs-id-*`, qui s'inverse avec le thème — les sept paires
+   figées d'origine restaient claires en thème sombre, où les initiales
+   s'effaçaient sur leur pastille. Dix créneaux au lieu de sept : deux initiales
+   voisines se ressemblent moins souvent.
+
+   Les noms de jetons sont écrits en entier, jamais construits par gabarit : la
+   garde `check-tokens.sh` lit le source, et un nom assemblé lui apparaîtrait
+   comme un jeton inconnu. */
+const ID_TONES = [
+  'var(--gs-id-1)', 'var(--gs-id-2)', 'var(--gs-id-3)', 'var(--gs-id-4)', 'var(--gs-id-5)',
+  'var(--gs-id-6)', 'var(--gs-id-7)', 'var(--gs-id-8)', 'var(--gs-id-9)', 'var(--gs-id-10)',
 ];
 
 // Icône personne SVG par défaut (quand même pas d'initiales)
@@ -34,7 +38,8 @@ const PersonIcon = ({ size }) => (
 function pickColor(firstName, lastName) {
   const code = ((firstName?.[0] || '').charCodeAt(0) || 0)
              + ((lastName?.[0]  || '').charCodeAt(0) || 0);
-  return COLORS[code % COLORS.length];
+  const tone = ID_TONES[code % ID_TONES.length];
+  return { bg: `color-mix(in srgb, ${tone} 14%, var(--gs-paper))`, fg: tone };
 }
 
 /**
@@ -113,7 +118,7 @@ export default function Avatar({
 
   // ── Cas 3 : Aucune info — icône personne générique ────────
   return (
-    <div style={{ ...base, background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}
+    <div style={{ ...base, background: 'var(--gs-paper-alt)', color: 'var(--gs-ink-faint)' }}
       className={className} onClick={onClick}>
       <PersonIcon size={icon} />
     </div>

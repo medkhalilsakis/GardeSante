@@ -1,6 +1,14 @@
 const { query } = require('../../config/database');
 const { ROLES } = require('../../config/constants');
 const { ensureDefaultAbsenceTypes } = require('./absence-types.service');
+// Temps réel : ce contrôleur n'émettait RIEN, alors que ses deux voisins du même
+// module le font (`absences-shift.controller.js:332-340`, `leaves.controller.js:319`)
+// et que le client écoute `absence:reported` et `absence:updated` depuis le Lot 0.
+// Une absence déclarée ou annulée depuis la page « Absences » ne changeait donc
+// aucun écran avant le rafraîchissement périodique de 60 s : ni le KPI
+// « Absentéisme du jour » du surveillant général, ni la vue d'ensemble du chef,
+// ni la liste du service. Les helpers prennent `app`, d'où `req.app`.
+const { emitToUser, emitToDepartment, emitToEstablishment } = require('../../realtime/emit');
 
 const DEPARTMENT_SCOPED_ROLES = [ROLES.DEPARTMENT_HEAD, ROLES.SERVICE_SUPERVISOR];
 const SELF_ONLY_ROLES = [ROLES.SENIOR_DOCTOR, ROLES.RESIDENT];
@@ -210,6 +218,15 @@ const createAbsence = async (req, res) => {
       );
     }
 
+    // Même charge utile que `absences-shift.controller.js` (`absenceId`,
+    // `scheduleId`, `userId`) : `handleAbsence` s'en sert pour cibler le
+    // planning et le portfolio concernés.
+    const created = result.rows[0];
+    const payload = { absenceId: created.id, scheduleId: null, userId: targetUserId };
+    emitToUser(req.app, targetUserId, 'absence:reported', payload);
+    emitToDepartment(req.app, target.department_id, 'absence:reported', payload);
+    emitToEstablishment(req.app, eid, 'absence:reported', payload);
+
     return res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error('createAbsence error:', err);
@@ -225,6 +242,16 @@ const cancelAbsence = async (req, res) => {
     [req.params.id, req.user.id]
   );
   if (!result.rows[0]) return res.status(403).json({ success: false, message: 'Non autorisé' });
+
+  // `absence:updated` : une absence retirée fait remonter l'effectif disponible
+  // et redescendre le compteur de signalements. `RETURNING *` fournit le service
+  // et l'établissement, on n'a donc pas de requête supplémentaire à faire.
+  const cancelled = result.rows[0];
+  const payload = { absenceId: cancelled.id, scheduleId: null, userId: cancelled.user_id };
+  emitToUser(req.app, cancelled.user_id, 'absence:updated', payload);
+  emitToDepartment(req.app, cancelled.department_id, 'absence:updated', payload);
+  emitToEstablishment(req.app, cancelled.establishment_id, 'absence:updated', payload);
+
   return res.json({ success: true, message: 'Absence annulée' });
 };
 

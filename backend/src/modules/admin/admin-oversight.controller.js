@@ -12,9 +12,9 @@
 
 const { query } = require('../../config/database');
 const {
-  guardEntries,
-  countGuards,
-  distinctStaff,
+  rosterOnDate,
+  countDuty,
+  distinctDutyStaff,
   dateKey,
 } = require('../schedules/spreadsheet-reader');
 
@@ -80,7 +80,7 @@ const listEstablishments = async (req, res) => {
       if (bucket[s.state] != null) bucket[s.state] += 1;
       byState.set(s.establishment_id, bucket);
       if (s.state !== 'en_cours') continue;
-      const n = guardEntries(s).filter((e) => e.isGuard && e.date === today).length;
+      const n = rosterOnDate(s, today).length;
       if (n) guardsToday.set(s.establishment_id, (guardsToday.get(s.establishment_id) || 0) + n);
     }
 
@@ -198,8 +198,8 @@ const listSchedules = async (req, res) => {
         establishmentId: row.establishment_id,
         establishmentName: row.establishment_name,
         establishmentCode: row.establishment_code,
-        guardCount: countGuards(row),
-        staffCount: distinctStaff(row).size,
+        guardCount: countDuty(row),
+        staffCount: distinctDutyStaff(row).size,
       }));
 
     return res.json({ success: true, data: { schedules, total: schedules.length } });

@@ -1,0 +1,688 @@
+/* ============================================================
+   Référentiels nationaux — Super Admin (Lot X4)
+   Toutes les classes sont préfixées `.rf-` : ce fichier ne peut
+   pas déteindre sur le reste du tableau de bord.
+   ============================================================ */
+
+.rf-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+}
+
+/* ── En-tête ───────────────────────────────────────────────── */
+.rf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3, 12px);
+  padding: 14px 18px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 14px;
+}
+
+.rf-head-title {
+  margin: 0;
+  font-size: var(--font-base, 14px);
+  font-weight: 800;
+  color: var(--gs-ink);
+  letter-spacing: -0.01em;
+}
+
+.rf-head-sub {
+  margin: 3px 0 0;
+  font-size: var(--font-xs, 11px);
+  color: var(--gs-ink-faint);
+}
+
+/* ── Onglets internes ──────────────────────────────────────── */
+.rf-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px;
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-radius: 12px;
+}
+
+.rf-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.rf-tab:hover { color: var(--gs-seal); }
+
+.rf-tab-on {
+  color: var(--gs-on-tone);
+  background: var(--gs-seal);
+  border-color: var(--gs-seal);
+}
+
+/* Le survol n'existe que pour reprendre la main sur `.rf-tab:hover`, qui
+   passerait le libellé au cachet — illisible sur un fond de cachet. */
+.rf-tab-on:hover { color: var(--gs-on-tone); }
+
+.rf-tab-badge {
+  min-width: 17px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+  color: var(--gs-on-tone);
+  background: var(--gs-alert-strong);
+  border-radius: 999px;
+}
+
+/* ── Boutons ───────────────────────────────────────────────── */
+.rf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-radius: 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.rf-btn:hover:not(:disabled) { color: var(--gs-seal); border-color: var(--gs-seal); }
+.rf-btn:disabled { opacity: 0.5; cursor: default; }
+
+.rf-btn-primary {
+  color: var(--gs-on-tone);
+  background: var(--gs-seal);
+  border-color: var(--gs-seal);
+}
+
+/* `brightness(1.08)` éclaircit, ce qui n'est un enfoncement qu'en thème clair :
+   en thème sombre le cachet est déjà un ton clair, et le survol le délavait au
+   lieu de l'appuyer. Le mélange à l'encre noire fonce dans les deux thèmes,
+   comme sur `.gs-btn.is-primary`. */
+.rf-btn-primary:hover:not(:disabled) {
+  color: var(--gs-on-tone);
+  background: color-mix(in srgb, var(--gs-seal) 86%, #000);
+  border-color: color-mix(in srgb, var(--gs-seal) 86%, #000);
+}
+
+.rf-btn-ghost { background: transparent; }
+
+.rf-btn-mini { padding: 5px 10px; font-size: 10px; border-radius: 7px; }
+
+.rf-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  color: var(--gs-ink-faint);
+  background: transparent;
+  border: 1px solid var(--gs-rule);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.rf-icon-btn:hover:not(:disabled) { color: var(--gs-seal); border-color: var(--gs-seal); }
+.rf-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.rf-icon-danger:hover:not(:disabled) { color: var(--gs-alert-strong); border-color: var(--gs-alert-strong); }
+
+.rf-spin { animation: rf-rotate 0.9s linear infinite; }
+@keyframes rf-rotate { to { transform: rotate(360deg); } }
+
+.rf-link {
+  padding: 0;
+  font-size: var(--font-sm, 12px);
+  font-weight: 700;
+  color: var(--gs-seal);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.rf-link:hover { text-decoration: underline; }
+
+/* ── Cartes de synthèse ────────────────────────────────────── */
+.rf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.rf-card {
+  position: relative;
+  padding: 14px 16px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.rf-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--rf-accent, var(--gs-seal));
+}
+
+.rf-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+  color: var(--rf-accent, var(--gs-seal));
+}
+
+.rf-card-label {
+  font-size: var(--font-xs, 11px);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--gs-ink-faint);
+}
+
+.rf-card-value {
+  font-size: var(--font-3xl, 24px);
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--gs-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.rf-card-sub {
+  margin-top: 5px;
+  font-size: var(--font-xs, 11px);
+  color: var(--gs-ink-faint);
+  line-height: 1.45;
+}
+
+/* ── Bandeaux d'information ────────────────────────────────── */
+.rf-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 14px;
+  font-size: var(--font-xs, 11px);
+  line-height: 1.6;
+  border-radius: 10px;
+}
+
+.rf-note code {
+  padding: 1px 5px;
+  font-size: 10px;
+  background: var(--gs-paper-alt);
+  border-radius: 4px;
+}
+
+.rf-note-warn {
+  color: var(--gs-alert);
+  background: color-mix(in srgb, var(--gs-alert) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 28%, transparent);
+}
+
+.rf-note-ok {
+  color: var(--gs-duty);
+  background: color-mix(in srgb, var(--gs-duty) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gs-duty) 26%, transparent);
+}
+
+.rf-note-info {
+  color: var(--gs-ink-soft);
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+}
+
+.rf-note-info strong { color: var(--gs-ink); }
+
+.rf-fix {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rf-fix .rf-note { flex: 1 1 340px; }
+
+/* ── Barre d'outils ────────────────────────────────────────── */
+.rf-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.rf-picker { display: flex; flex-direction: column; gap: 5px; }
+
+.rf-picker-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gs-ink-faint);
+}
+
+.rf-select,
+.rf-input {
+  padding: 8px 11px;
+  font-size: var(--font-sm, 12px);
+  font-family: inherit;
+  color: var(--gs-ink);
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 9px;
+  transition: var(--transition-fast, 0.15s ease);
+}
+
+.rf-select-wide { min-width: 280px; }
+
+.rf-select:focus,
+.rf-input:focus {
+  outline: none;
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gs-seal) 14%, transparent);
+}
+
+.rf-input:disabled {
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper-alt);
+  cursor: not-allowed;
+}
+
+/* ── Formulaire d'édition ──────────────────────────────────── */
+.rf-form {
+  padding: 16px 18px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-seal);
+  border-radius: 12px;
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--gs-seal) 10%, transparent);
+}
+
+.rf-form-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-size: var(--font-sm, 12px);
+  color: var(--gs-ink);
+}
+
+.rf-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 12px;
+}
+
+.rf-field { display: flex; flex-direction: column; gap: 5px; }
+
+.rf-field-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gs-ink-faint);
+}
+
+.rf-field-hint {
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+  line-height: 1.45;
+}
+
+.rf-color {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.rf-color input[type='color'] {
+  width: 40px;
+  height: 34px;
+  padding: 2px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.rf-color span {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+}
+
+.rf-form-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--gs-rule);
+}
+
+.rf-check {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--font-xs, 11px);
+  font-weight: 600;
+  color: var(--gs-ink-soft);
+  cursor: pointer;
+}
+
+.rf-check input { margin-top: 1px; accent-color: var(--gs-seal); cursor: pointer; }
+.rf-check em { font-style: normal; font-weight: 500; color: var(--gs-ink-faint); }
+.rf-check-off { opacity: 0.65; cursor: not-allowed; }
+.rf-check-off input { cursor: not-allowed; }
+
+.rf-form-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gs-rule);
+}
+
+.rf-form-actions { display: flex; gap: 8px; }
+
+/* ── Tableaux ──────────────────────────────────────────────── */
+.rf-table-wrap {
+  overflow-x: auto;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 12px;
+}
+
+.rf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-sm, 12px);
+}
+
+.rf-table th {
+  padding: 10px 14px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper-alt);
+  border-bottom: 1px solid var(--gs-rule);
+}
+
+.rf-table td {
+  padding: 11px 14px;
+  color: var(--gs-ink-soft);
+  border-bottom: 1px solid var(--gs-rule);
+  vertical-align: middle;
+}
+
+.rf-table tbody tr:last-child td { border-bottom: none; }
+.rf-table tbody tr:hover { background: color-mix(in srgb, var(--gs-seal) 4%, transparent); }
+
+.rf-num { text-align: right; font-variant-numeric: tabular-nums; }
+.rf-mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: 11px; }
+
+.rf-cell-sub {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+}
+
+.rf-row-warn { background: color-mix(in srgb, var(--gs-alert) 6%, transparent); }
+.rf-row-off { opacity: 0.6; }
+
+.rf-group-row td {
+  padding: 7px 14px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper-alt);
+}
+
+.rf-group-row:hover td { background: var(--gs-paper-alt); }
+
+.rf-actions-cell {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.rf-count { font-weight: 700; color: var(--gs-ink); }
+
+.rf-missing {
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gs-alert-strong);
+}
+
+.rf-footnote {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Pastilles ─────────────────────────────────────────────── */
+.rf-code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  border-radius: 6px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.rf-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 3px;
+  vertical-align: 0;
+}
+
+.rf-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-radius: 5px;
+}
+
+.rf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.rf-badge-ok {
+  color: var(--gs-duty);
+  background: color-mix(in srgb, var(--gs-duty) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gs-duty) 28%, transparent);
+}
+
+.rf-badge-warn {
+  color: var(--gs-alert);
+  background: color-mix(in srgb, var(--gs-alert) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 30%, transparent);
+}
+
+.rf-badge-off {
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+}
+
+/* ── Matrice des droits ────────────────────────────────────── */
+.rf-matrix-wrap { max-height: 620px; overflow: auto; }
+
+.rf-matrix th,
+.rf-matrix td { border-right: 1px solid var(--gs-rule); }
+
+.rf-matrix th:last-child,
+.rf-matrix td:last-child { border-right: none; }
+
+.rf-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.rf-matrix-head {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 210px;
+  background: var(--gs-paper);
+}
+
+.rf-matrix thead .rf-matrix-head { z-index: 3; background: var(--gs-paper-alt); }
+.rf-matrix .rf-group-row td { position: sticky; left: 0; }
+
+.rf-matrix-role {
+  text-align: center;
+  vertical-align: bottom;
+  min-width: 84px;
+}
+
+.rf-matrix-role span { display: block; }
+
+.rf-matrix-role em {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--gs-ink-faint);
+}
+
+.rf-matrix-cell { text-align: center; }
+
+.rf-matrix-total {
+  font-weight: 800;
+  color: var(--gs-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.rf-matrix-total em {
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gs-alert);
+}
+
+.rf-matrix tfoot td {
+  border-top: 2px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
+}
+
+.rf-sq {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  vertical-align: -2px;
+}
+
+.rf-sq-all { background: var(--gs-duty); }
+.rf-sq-partial { background: var(--gs-alert); }
+
+.rf-sq-none {
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+}
+
+.rf-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.rf-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-xs, 11px);
+  color: var(--gs-ink-soft);
+}
+
+/* ── États ─────────────────────────────────────────────────── */
+.rf-state {
+  padding: 40px 20px;
+  text-align: center;
+  font-size: var(--font-sm, 12px);
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper);
+  border: 1px dashed var(--gs-rule);
+  border-radius: 12px;
+}
+
+.rf-state-hint {
+  max-width: 520px;
+  margin: 8px auto 0;
+  font-size: var(--font-xs, 11px);
+  line-height: 1.6;
+  color: var(--gs-ink-faint);
+}
+
+@media (max-width: 720px) {
+  .rf-select-wide { min-width: 0; width: 100%; }
+  .rf-toolbar { align-items: stretch; }
+  .rf-picker { flex: 1 1 100%; }
+  .rf-card-value { font-size: var(--font-2xl, 20px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-spin { animation: none; }
+}

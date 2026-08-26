@@ -1,0 +1,21 @@
+.gsnfp-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.gsnf-field { display: grid; gap: 4px; min-width: 150px; flex: 1 1 170px; }
+.gsnf-field > span { font: 600 9.5px var(--gs-display); letter-spacing: .1em; text-transform: uppercase; color: var(--gs-ink-faint); }
+.gsnf-field .form-control { height: 34px; font-size: 12px; }
+.gsnfp-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font: 12px/1.5 var(--gs-body); color: var(--gs-ink-soft); }
+.gsnfp-confirm p { margin: 0; max-width: 70ch; }
+.gsnfp-list { display: grid; gap: 9px; }
+.gsnfp-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 13px 14px; border: 1px solid var(--gs-rule); border-left: 3px solid var(--gs-rule-strong); border-radius: 8px; background: var(--gs-paper); min-width: 0; }
+.gsnfp-item.is-unread { border-left-color: var(--gs-seal); background: var(--gs-seal-wash); }
+.gsnfp-item-body { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.gsnfp-item-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.gsnfp-item-head h3 { margin: 0; font: 600 13px var(--gs-body); color: var(--gs-ink); }
+.gsnfp-item-body p { margin: 0; font: 12px/1.45 var(--gs-body); color: var(--gs-ink-soft); }
+.gsnfp-item-body small { font: 10.5px var(--gs-body); color: var(--gs-ink-faint); }
+.gsnfp-unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gs-seal); flex-shrink: 0; }
+.gsnfp-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.gsnfp-actions .gs-btn { min-height: 30px; padding: 6px 10px; font-size: 11px; }
+.gsnfp-pagination { display: flex; align-items: center; justify-content: center; gap: 10px; padding-top: 13px; font: 11.5px var(--gs-body); color: var(--gs-ink-faint); }
+.gsnfp-page { display: inline-flex; align-items: center; justify-content: center; width: 29px; height: 29px; border: 1px solid var(--gs-rule-strong); border-radius: 7px; background: var(--gs-paper); color: var(--gs-ink-soft); cursor: pointer; }
+.gsnfp-page:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 700px) { .gsnfp-item { flex-direction: column; } .gsnfp-actions { justify-content: flex-start; } }

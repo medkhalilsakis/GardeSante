@@ -7,7 +7,7 @@ const { requirePermission, injectEstablishment } = require('../../middleware/rba
 router.use(authenticate, injectEstablishment);
 router.get('/', requirePermission('schedules.read'), ctrl.getSchedules);
 router.post('/generate', requirePermission('schedules.generate'), ctrl.generateSchedule);
-router.get('/hospital-staff', ctrl.getHospitalStaff);           // tout le personnel
+router.get('/hospital-staff', requirePermission('schedules.read'), ctrl.getHospitalStaff); // tout le personnel
 router.get('/roles', ctrl.getAllRoles);                         // tous les rôles
 router.get('/:id', requirePermission('schedules.read'), ctrl.getSchedule);
 router.get('/:id/conflicts', requirePermission('schedules.read'), ctrl.getConflicts);
@@ -21,4 +21,3 @@ router.post('/:id/submit', requirePermission('schedules.submit'), ctrl.submitSch
 // `schedules.approve` / `schedules.reject` restent en base mais ne sont plus
 // rattachées à aucune route.
 module.exports = router;
-

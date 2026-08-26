@@ -517,6 +517,15 @@ const createEvent = async (req, res) => {
     }
 
     emitToDepartment(req.app, departmentId, 'journal:event', { eventId: event.id, eventType, departmentId });
+    // Le même événement à l'échelle de l'hôpital : le directeur et le surveillant
+    // général n'appartiennent à aucun service (Lot L), donc la room
+    // `department:<service>` ne les atteint jamais. Sans cette ligne, « Garde en
+    // direct » et l'appel du jour ne se rafraîchiraient chez eux qu'au tick de
+    // 15 s. Même nom d'événement, même charge utile : les auditeurs existants
+    // (`useRealtime.handleJournal`) invalident déjà les bonnes clés, et les
+    // membres du service reçoivent simplement deux invalidations que
+    // react-query dédoublonne.
+    emitToEstablishment(req.app, establishmentId, 'journal:event', { eventId: event.id, eventType, departmentId });
     if (needsAlert) {
       emitToEstablishment(req.app, establishmentId, 'alert:new', { type: eventType, departmentId });
     }
@@ -596,7 +605,7 @@ const listCallRoster = async (req, res) => {
           expected.push({
             key, date: day, userId: entry.userId,
             userName: `${entry.firstName} ${entry.lastName}`.trim() || '—',
-            roleName: entry.roleName, code: entry.code, label: entry.label,
+            roleName: entry.roleName, label: entry.label,
             shiftStart: entry.shiftStart, shiftEnd: entry.shiftEnd,
             scheduleId: schedule.id, scheduleName: schedule.name,
             departmentId: schedule.department_id, departmentName: schedule.department_name,
@@ -853,11 +862,10 @@ const getServiceOverview = async (req, res) => {
     const todayGuards = [];
     const seenToday = new Set();
 
-    // `rosterOnDate` remplace ici `guardEntries` : les codes journaliers
-    // (J/N/S/G) sont facultatifs dans le tableur. Un planning validé avec les
-    // seules périodes de participation ne produisait donc aucune garde, et
-    // l'appel du jour annonçait « Aucune garde à pointer aujourd'hui » alors que
-    // le calendrier du tableur affichait bien ses agents de service.
+    // `rosterOnDate` applique la règle d'arbitrage de la ligne : cases cochées, ou
+    // période de participation quand la ligne n'en porte aucune. Ne lire que les
+    // cases donnait « Aucune garde à pointer aujourd'hui » sur un planning validé
+    // par périodes, alors que le calendrier du tableur affichait bien ses agents.
     for (const schedule of schedules) {
       for (const entry of rosterOnDate(schedule, today)) {
         // Un même agent ne doit pas être pointé deux fois pour un planning
@@ -873,10 +881,12 @@ const getServiceOverview = async (req, res) => {
           userId: entry.userId,
           name: `${entry.firstName} ${entry.lastName}`.trim() || '—',
           roleName: entry.roleName,
-          code: entry.code,
           label: entry.label,
           shiftStart: entry.shiftStart,
           shiftEnd: entry.shiftEnd,
+          // Garde à domicile (Lot N) : produit par `rosterOnDate`, recopié ici
+          // pour que « Garde en direct » distingue l'astreinte de la présence.
+          atHome: entry.atHome === true,
           scheduleId: schedule.id,
           scheduleName: schedule.name,
           departmentId: schedule.department_id,

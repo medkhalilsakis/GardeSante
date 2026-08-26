@@ -23,7 +23,7 @@
 
 const { query } = require('../../config/database');
 const { ROLES } = require('../../config/constants');
-const { countGuards, distinctStaff } = require('./spreadsheet-reader');
+const { countDuty, distinctDutyStaff } = require('./spreadsheet-reader');
 
 /** Rôles dont la portée est l'établissement entier. */
 const ESTABLISHMENT_SCOPE = [
@@ -119,8 +119,12 @@ const listInbox = async (req, res) => {
         notes: row.notes,
         pendingProposals: Number(row.pending_proposals) || 0,
         myProposals: Number(row.my_proposals) || 0,
-        guardCount: countGuards(row),
-        staffCount: distinctStaff(row).size,
+        // Lecture « de service » : la plupart des chefs ne saisissent que la
+        // période de participation de chaque agent. Ne compter que les cases
+        // cochées affichait « 0 garde · 0 agent » sur presque toutes les cartes
+        // de « Planning à consulter ».
+        guardCount: countDuty(row),
+        staffCount: distinctDutyStaff(row).size,
       }));
 
     return res.json({

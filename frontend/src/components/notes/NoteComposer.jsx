@@ -1,21 +1,13 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { FileText, Image as ImageIcon, Paperclip, PenLine, Pin } from 'lucide-react';
 import { notesAPI } from '../../api';
 import toast from 'react-hot-toast';
+import { CATEGORY_LABELS, PRIORITY_LABELS } from './notes-labels';
+import './notes-ui.css';
 
-const CATEGORIES = [
-  { value: 'note', label: '📝 Note' },
-  { value: 'circulaire', label: '📢 Circulaire' },
-  { value: 'directive', label: '📌 Directive' },
-  { value: 'info', label: 'ℹ️ Information' },
-];
-
-const PRIORITIES = [
-  { value: 'low', label: 'Faible' },
-  { value: 'normal', label: 'Normale' },
-  { value: 'high', label: 'Élevée' },
-  { value: 'urgent', label: 'Urgente' },
-];
+const CATEGORIES = Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }));
+const PRIORITIES = Object.entries(PRIORITY_LABELS).map(([value, label]) => ({ value, label }));
 
 export default function NoteComposer({ scopeLabel }) {
   const [title, setTitle] = useState('');
@@ -56,218 +48,82 @@ export default function NoteComposer({ scopeLabel }) {
   };
 
   return (
-    <div
-      style={{
-        background: '#FFFFFF',
-        borderRadius: '12px',
-        border: '1px solid #E5E7EB',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-        padding: '20px',
-        marginBottom: '20px',
-      }}
-    >
+    <div className="gsn-composer">
       {!open ? (
-        <button
-          onClick={() => setOpen(true)}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            padding: '14px 16px',
-            background: '#F9FAFB',
-            border: '1px dashed #D1D5DB',
-            borderRadius: '10px',
-            cursor: 'pointer',
-            color: '#6B7280',
-            fontSize: '15px',
-            textAlign: 'left',
-          }}
-        >
-          <span
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              background: '#EFF6FF',
-              color: '#3B82F6',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '18px',
-              flexShrink: 0,
-            }}
-          >
-            ✍️
-          </span>
+        <button type="button" className="gsn-composer__open" onClick={() => setOpen(true)}>
+          <span className="gsn-composer__glyph"><PenLine size={16} /></span>
           Écrire une note ou circulaire…
           {scopeLabel && (
-            <span
-              style={{
-                marginLeft: 'auto',
-                background: '#F3F4F6',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                color: '#6B7280',
-              }}
-            >
-              Diffusée à {scopeLabel}
-            </span>
+            <span className="gsn-pill is-quiet gsn-composer__scope">Diffusée {scopeLabel}</span>
           )}
         </button>
       ) : (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>Nouvelle note / circulaire</h3>
-            <button
-              onClick={() => setOpen(false)}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px', color: '#9CA3AF' }}
-            >
-              ✕
-            </button>
+          <div className="gsn-composer__head">
+            <h3>Nouvelle note ou circulaire</h3>
+            <button type="button" className="gsn-close" onClick={() => setOpen(false)} aria-label="Fermer">✕</button>
           </div>
 
           <input
             type="text"
+            className="gsn-input"
             placeholder="Titre de la note *"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             maxLength={255}
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '1px solid #D1D5DB',
-              borderRadius: '8px',
-              fontSize: '15px',
-              marginBottom: '12px',
-              outline: 'none',
-            }}
           />
 
           <textarea
+            className="gsn-textarea"
             placeholder="Contenu de la note…"
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={4}
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '1px solid #D1D5DB',
-              borderRadius: '8px',
-              fontSize: '14px',
-              resize: 'vertical',
-              marginBottom: '12px',
-              outline: 'none',
-            }}
           />
 
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              style={{
-                padding: '10px',
-                border: '1px solid #D1D5DB',
-                borderRadius: '8px',
-                fontSize: '14px',
-                background: 'white',
-                flex: 1,
-                minWidth: '140px',
-              }}
-            >
+          <div className="gsn-composer__row">
+            <select className="gsn-select" value={category} onChange={(e) => setCategory(e.target.value)}>
               {CATEGORIES.map((c) => (
                 <option key={c.value} value={c.value}>{c.label}</option>
               ))}
             </select>
-            <select
-              value={priority}
-              onChange={(e) => setPriority(e.target.value)}
-              style={{
-                padding: '10px',
-                border: '1px solid #D1D5DB',
-                borderRadius: '8px',
-                fontSize: '14px',
-                background: 'white',
-                flex: 1,
-                minWidth: '140px',
-              }}
-            >
+            <select className="gsn-select" aria-label="Priorité" value={priority} onChange={(e) => setPriority(e.target.value)}>
               {PRIORITIES.map((p) => (
-                <option key={p.value} value={p.value}>Priorité : {p.label}</option>
+                <option key={p.value} value={p.value}>Priorité — {p.label}</option>
               ))}
             </select>
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '10px',
-                border: '1px solid #D1D5DB',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                color: '#4B5563',
-                flexShrink: 0,
-              }}
-            >
+            <label className={`gsn-check${isPinned ? ' is-on' : ''}`}>
               <input
                 type="checkbox"
                 checked={isPinned}
                 onChange={(e) => setIsPinned(e.target.checked)}
-                style={{ accentColor: '#F59E0B' }}
               />
-              📌 Épingler
+              <Pin size={13} /> Épingler
             </label>
           </div>
 
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              padding: '12px',
-              border: '1px dashed #D1D5DB',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              color: '#4B5563',
-              marginBottom: '8px',
-            }}
-          >
-            📎 Joindre des fichiers (images ou PDF, max 5)
+          <label className="gsn-drop-files">
+            <Paperclip size={14} />
+            Joindre des fichiers (images ou PDF, 5 au maximum)
             <input
               type="file"
               multiple
               accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
               onChange={(e) => addFiles(e.target.files)}
-              style={{ display: 'none' }}
             />
           </label>
 
           {attachments.length > 0 && (
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+            <div className="gsn-files">
               {attachments.map((f, i) => (
-                <div
-                  key={`${f.name}_${i}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: '#F3F4F6',
-                    padding: '6px 10px',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    color: '#4B5563',
-                  }}
-                >
-                  <span>{f.type === 'application/pdf' ? '📄' : '🖼️'}</span>
-                  <span style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {f.name}
-                  </span>
+                <div key={`${f.name}_${i}`} className="gsn-file">
+                  {f.type === 'application/pdf' ? <FileText size={13} /> : <ImageIcon size={13} />}
+                  <span className="gsn-file__name">{f.name}</span>
                   <button
+                    type="button"
+                    className="gsn-file__drop"
+                    aria-label={`Retirer ${f.name}`}
                     onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#EF4444', fontSize: '14px' }}
                   >
                     ✕
                   </button>
@@ -276,37 +132,15 @@ export default function NoteComposer({ scopeLabel }) {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+          <div className="gsn-composer__foot">
+            <button type="button" className="gs-btn" onClick={() => setOpen(false)}>Annuler</button>
             <button
-              onClick={() => setOpen(false)}
-              style={{
-                padding: '10px 20px',
-                background: 'white',
-                border: '1px solid #D1D5DB',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                color: '#4B5563',
-              }}
-            >
-              Annuler
-            </button>
-            <button
+              type="button"
+              className="gs-btn is-primary"
               onClick={() => publish.mutate()}
               disabled={!title.trim() || publish.isPending}
-              style={{
-                padding: '10px 24px',
-                background: '#3B82F6',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: publish.isPending ? 'wait' : title.trim() ? 'pointer' : 'not-allowed',
-                fontSize: '14px',
-                fontWeight: '600',
-                color: 'white',
-                opacity: title.trim() ? 1 : 0.5,
-              }}
             >
-              {publish.isPending ? 'Publication…' : '📤 Publier'}
+              {publish.isPending ? 'Publication…' : 'Publier'}
             </button>
           </div>
         </div>

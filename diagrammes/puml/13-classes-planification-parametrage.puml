@@ -1,0 +1,244 @@
+' ============================================================================
+' GardeSanté — Diagramme de classes : paramétrage et règles de planification
+'
+' Sources vérifiées (information_schema + pg_constraint) :
+'   schedule_templates(1), schedule_column_models(30), learned_columns(0),
+'   assistant_briefs(0), workflow_definitions(0), workflow_steps(0),
+'   establishment_rules(15), rule_evaluations(0), public_holidays(4).
+'
+' Contrainte CHECK relevée :
+'   chk_brief_mode : manual | rotation | ab_rotation | periods | balanced
+' ============================================================================
+@startuml 13-classes-planification-parametrage
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam classAttributeIconSize 0
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  HeaderBackgroundColor #EEF2FF
+  FontStyle bold
+  AttributeFontSize 10
+  AttributeFontColor #334155
+  BackgroundColor<<référentiel>> #FFFFFF
+  BorderColor<<référentiel>> #0F766E
+  HeaderBackgroundColor<<référentiel>> #E6F4F1
+  BackgroundColor<<autre paquet>> #F8FAFC
+  BorderColor<<autre paquet>> #94A3B8
+  HeaderBackgroundColor<<autre paquet>> #F1F5F9
+  FontColor<<autre paquet>> #475569
+  BackgroundColor<<inexploité>> #FEF3C7
+  BorderColor<<inexploité>> #B4530A
+  HeaderBackgroundColor<<inexploité>> #FDE68A
+  FontColor<<inexploité>> #7C2D12
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+hide circle
+hide methods
+
+title Diagramme de classes — Paramétrage et règles de planification
+
+class ModèleDePlanning <<référentiel>> {
+  + id : UUID
+  --
+  nom : VARCHAR(200)
+  description : TEXT
+  typePériode : VARCHAR(30) = 'monthly'
+  modeSemaine : VARCHAR(20) = 'standard'
+  algorithmeGénération : VARCHAR(50) = 'round_robin'
+  colonnes : UUID[]
+  typesDeGarde : UUID[]
+  partagéAvec : UUID[]
+  configuration : JSONB
+  actif : BOOL = true
+  pardéfaut : BOOL = false
+  nombreUtilisations : INT = 0
+}
+
+class ModèleDeColonne <<référentiel>> {
+  + id : UUID
+  --
+  code : VARCHAR(50)
+  libellé : VARCHAR(150)
+  libelléAr : VARCHAR(150)
+  typeDeDonnée : VARCHAR(30) = 'text'
+  règlesDeValidation : JSONB
+  systeme : BOOL = false
+  pardéfaut : BOOL = true
+  ordreAffichage : INT
+  active : BOOL = true
+}
+
+class ColonneApprise {
+  + id : UUID
+  --
+  libelléBrut : VARCHAR(300)
+  libelléNormalisé : VARCHAR(300)
+  typeDétecté : VARCHAR(50)
+  confiance : NUMERIC
+  nombreUtilisations : INT = 1
+  confirmée : BOOL = false
+  rejetée : BOOL = false
+}
+
+class CahierDeContraintes {
+  + id : UUID
+  --
+  nom : VARCHAR(160)
+  mode : VARCHAR(30) = 'balanced'
+  cahier : JSONB
+  nombreUtilisations : INT = 0
+  dernierUsage : TIMESTAMPTZ
+  --
+  «CHECK» mode parmi manual | rotation |
+  ab_rotation | periods | balanced
+}
+
+class RègleÉtablissement <<référentiel>> {
+  + id : UUID
+  --
+  codeRègle : VARCHAR(80)
+  nomRègle : VARCHAR(200)
+  nomRègleAr : VARCHAR(200)
+  typeRègle : VARCHAR(50)
+  configuration : JSONB
+  gravité : VARCHAR(20) = 'warning'
+  active : BOOL = true
+  systeme : BOOL = false
+  priorité : INT = 0
+}
+
+class ÉvaluationDeRègle {
+  + id : UUID
+  --
+  codeRègle : VARCHAR(80)
+  gravité : VARCHAR(20)
+  violations : JSONB = '[]'
+  évaluéeLe : TIMESTAMPTZ
+}
+
+class JourFérié <<référentiel>> {
+  + id : UUID
+  --
+  nom : VARCHAR(255)
+  dateDébut : DATE
+  dateFin : DATE
+  année : INT
+  catégorie : VARCHAR(50) = 'national'
+  récurrent : BOOL = false
+  multiplicateur : NUMERIC = 1.50
+  notes : TEXT
+}
+
+class DéfinitionDeWorkflow <<inexploité>> {
+  + id : UUID
+  --
+  nom : VARCHAR(100)
+  typeEntité : VARCHAR(50)
+  actif : BOOL = true
+}
+
+class ÉtapeDeWorkflow <<inexploité>> {
+  + id : UUID
+  --
+  ordre : INT
+  codeRôle : VARCHAR(50)
+  nomÉtape : VARCHAR(100)
+  nomÉtapeAr : VARCHAR(100)
+  facultative : BOOL = false
+  délaiHeures : INT
+}
+
+class Établissement <<autre paquet>> {
+  + id : UUID
+}
+
+class Service <<autre paquet>> {
+  + id : UUID
+}
+
+class Planning <<autre paquet>> {
+  + id : UUID
+}
+
+Établissement "1" *-- "0..*" ModèleDePlanning : paramètre
+Établissement "0..1" o-- "0..*" ModèleDeColonne : paramètre
+Établissement "1" *-- "0..*" ColonneApprise : mémorise
+Établissement "1" *-- "0..*" CahierDeContraintes : héberge
+Établissement "1" *-- "0..*" RègleÉtablissement : édicte
+Établissement "1" *-- "0..*" DéfinitionDeWorkflow : définit
+
+ModèleDePlanning "0..*" --> "0..1" Service : réservé au service
+CahierDeContraintes "0..*" --> "1" Service : pour le service
+ColonneApprise "0..*" --> "0..1" ModèleDeColonne : rapprochée de
+
+RègleÉtablissement "0..1" o-- "0..*" ÉvaluationDeRègle : évaluée par
+Planning "1" *-- "0..*" ÉvaluationDeRègle : contrôlé par
+Planning "0..*" --> "0..1" ModèleDePlanning : instancie
+
+DéfinitionDeWorkflow "1" *-- "0..*" ÉtapeDeWorkflow : ordonne
+Planning "0..*" --> "0..1" DéfinitionDeWorkflow : suit
+
+note as N1
+  **L'import apprend les intitulés de colonnes.**
+  `ColonneApprise` conserve le libellé brut lu dans un
+  fichier importé, sa forme normalisée et le modèle de
+  colonne auquel un utilisateur l'a rapproché, avec un
+  indice de confiance. Les tableurs suivants reprennent
+  ce rapprochement : le paramétrage se construit à
+  l'usage plutôt que d'être déclaré à l'avance.
+end note
+
+note as N2
+  **Le circuit de validation n'est pas paramétrable.**
+  `DéfinitionDeWorkflow` et `ÉtapeDeWorkflow` sont vides
+  et sans usage : le circuit est codé en dur dans les
+  contrôleurs (chef → surveillant général) au lieu
+  d'être lu dans ces tables. Les colonnes
+  `Planning.workflow_id` et
+  `Planning.étapeWorkflowCourante` subsistent sans être
+  alimentées. À signaler comme dette de conception.
+end note
+
+note as N3
+  **Le moteur de règles est un garde-fou bloquant.**
+  15 règles sont paramétrées : repos minimum et double
+  affectation le même jour en gravité bloquante, plafond
+  mensuel de gardes et équité de répartition en simple
+  avertissement. La soumission d'un brouillon est
+  refusée tant qu'une règle bloquante est violée ; les
+  avertissements, eux, laissent passer.
+  `ÉvaluationDeRègle` était vide de toute ligne : le
+  moteur levait une erreur d'exécution à chaque appel,
+  corrigée depuis. Deux lectures cohabitent selon la
+  ligne du tableur — une période de service continue
+  compte pour une seule affectation, des cases cochées
+  pour autant de gardes distinctes.
+end note
+
+note as N4
+  `JourFérié` est un référentiel de plateforme, sans
+  `establishment_id` : les fêtes tunisiennes sont
+  communes à tous les hôpitaux. `multiplicateur`
+  majore la valorisation d'une garde tombant un jour
+  férié.
+end note
+
+N1 .. ColonneApprise
+N2 .. DéfinitionDeWorkflow
+N3 .. ÉvaluationDeRègle
+N4 .. JourFérié
+
+legend right
+  Bleu : entités du paquet Planification.
+  Vert : référentiels de paramétrage.
+  Orange : table présente au schéma, sans usage applicatif.
+  Gris : entité d'un autre paquet, citée pour l'association.
+endlegend
+
+@enduml

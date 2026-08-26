@@ -3,11 +3,23 @@
  *
  * Écrit une notification par directeur actif de l'hôpital et trace l'action
  * dans l'historique immuable — côté serveur, `POST /api/supervision/report`.
+ *
+ * Refonte (phase 4)
+ * ─────────────────
+ * La modale portait sa propre couche d'assombrissement,
+ * sa propre boîte et ses libellés en styles en ligne : elle se désaccordait des
+ * trente autres modales de la plateforme. Elle reprend ici la coquille commune
+ * (`.modal-overlay`, `.modal`, `.form-group`, `.form-control`) comme le fait le
+ * signalement d'absence ; seuls son sous-titre et ses consignes passent au
+ * vocabulaire du registre.
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
+import { X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supervisionAPI } from '../../../api';
+import { frenchRange } from '../../../utils/frenchDates';
+import '../supervision.css';
 
 export default function SupervisionReportModal({ schedules = [], defaultSummary = '', onClose }) {
   const [title, setTitle] = useState('');
@@ -36,88 +48,97 @@ export default function SupervisionReportModal({ schedules = [], defaultSummary 
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, .55)', zIndex: 1000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-      }}
-    >
-      <form
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-        style={{
-          background: 'var(--bg-card)', border: '1px solid var(--border-default)',
-          borderRadius: 'var(--border-radius-lg)', padding: 22,
-          width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto',
-          display: 'flex', flexDirection: 'column', gap: 14,
-        }}
-      >
-        <div>
-          <h3 style={{ fontSize: 'var(--font-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Rapport à la direction
-          </h3>
-          <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 3 }}>
-            Chaque directeur de l'hôpital reçoit une notification. L'envoi est tracé.
-          </p>
-        </div>
-
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>Titre *</span>
-          <input
-            className="input"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Couverture des gardes — semaine en cours"
-            maxLength={255}
-            autoFocus
-          />
-        </label>
-
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>Synthèse</span>
-          <textarea
-            className="input"
-            rows={5}
-            value={summary}
-            onChange={(e) => setSummary(e.target.value)}
-            placeholder="Constats, conflits relevés, corrections demandées…"
-            style={{ resize: 'vertical' }}
-          />
-        </label>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 10 }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>
-              Planning concerné
-            </span>
-            <select className="input" value={scheduleId} onChange={(e) => setScheduleId(e.target.value)}>
-              <option value="">Aucun en particulier</option>
-              {schedules.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.departmentName ? `${s.departmentName} — ` : ''}{s.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>Priorité</span>
-            <select className="input" value={priority} onChange={(e) => setPriority(e.target.value)}>
-              <option value="high">Haute</option>
-              <option value="urgent">Urgente</option>
-            </select>
-          </label>
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={send.isPending}>
-            Annuler
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={send.isPending}>
-            {send.isPending ? 'Transmission…' : 'Transmettre'}
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose?.()}>
+      {/* `.modal` porte déjà `max-width: 560px` : la largeur ne se répète pas ici. */}
+      <div className="modal">
+        <div className="modal-header">
+          <div>
+            <h2 className="modal-title">Rapport à la direction</h2>
+            <p className="gsp-modal-sub">
+              Chaque directeur de l'hôpital en reçoit une notification, et l'envoi
+              reste inscrit à l'historique.
+            </p>
+          </div>
+          <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Fermer">
+            <X size={16} strokeWidth={2.2} />
           </button>
         </div>
-      </form>
+
+        <form onSubmit={submit}>
+          <div className="modal-body gsp-modal-body">
+            <div className="form-group">
+              <label className="form-label" htmlFor="gsp-report-title">Titre *</label>
+              <input
+                id="gsp-report-title"
+                className="form-control"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Couverture des gardes — semaine en cours"
+                maxLength={255}
+                autoFocus
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="gsp-report-summary">Synthèse</label>
+              <textarea
+                id="gsp-report-summary"
+                className="form-control form-control-textarea"
+                rows={6}
+                value={summary}
+                onChange={(e) => setSummary(e.target.value)}
+                placeholder="Constats, anomalies relevées, corrections demandées…"
+              />
+              {/* Le brouillon reprend les mesures de l'écran : un rapport part de
+                  faits déjà comptés, pas d'une page blanche. */}
+              <span className="gsp-modal-hint">
+                Pré-rempli avec les mesures du jour — modifiez-le librement avant l'envoi.
+              </span>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label" htmlFor="gsp-report-schedule">Planning concerné</label>
+                <select
+                  id="gsp-report-schedule"
+                  className="form-control"
+                  value={scheduleId}
+                  onChange={(e) => setScheduleId(e.target.value)}
+                >
+                  <option value="">Aucun en particulier</option>
+                  {schedules.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.departmentName ? `${s.departmentName} — ` : ''}{s.name}
+                      {s.startDate ? ` (${frenchRange(s.startDate, s.endDate)})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="gsp-report-priority">Priorité</label>
+                <select
+                  id="gsp-report-priority"
+                  className="form-control"
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value)}
+                >
+                  <option value="high">Haute</option>
+                  <option value="urgent">Urgente</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={send.isPending}>
+              Annuler
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={send.isPending}>
+              {send.isPending ? 'Transmission…' : 'Transmettre'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

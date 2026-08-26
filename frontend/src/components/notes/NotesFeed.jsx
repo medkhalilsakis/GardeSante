@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Inbox } from 'lucide-react';
 import { notesAPI } from '../../api';
 import toast from 'react-hot-toast';
 import NoteCard from './NoteCard';
 import NoteModal from './NoteModal';
+import './notes-ui.css';
 
 export default function NotesFeed({ scopeLabel }) {
   const [selectedNote, setSelectedNote] = useState(null);
@@ -41,82 +43,42 @@ export default function NotesFeed({ scopeLabel }) {
   const canDelete = (note) => note.isAuthor;
 
   return (
-    <div style={{ padding: '20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h2 style={{ fontSize: '20px', fontWeight: '600', color: '#111827' }}>
-          📢 Notes et Circulaires
-        </h2>
-        {scopeLabel && (
-          <span
-            style={{
-              background: '#F3F4F6',
-              color: '#6B7280',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              fontSize: '13px',
-            }}
-          >
-            {scopeLabel}
-          </span>
-        )}
+    <div className="gsn-feed">
+      <div className="gsn-feed__head">
+        <h2 className="gsn-feed__title">Notes et circulaires</h2>
+        {scopeLabel && <span className="gsn-scope">{scopeLabel}</span>}
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+      <div className="gsn-filters">
         <select
+          className="gsn-select"
           value={filters.category}
           onChange={(e) => setFilters({ ...filters, category: e.target.value })}
-          style={{
-            padding: '10px',
-            border: '1px solid #D1D5DB',
-            borderRadius: '8px',
-            fontSize: '14px',
-            background: 'white',
-            cursor: 'pointer',
-          }}
         >
           <option value="">Toutes les catégories</option>
-          <option value="note">📝 Note</option>
-          <option value="circulaire">📢 Circulaire</option>
-          <option value="directive">📌 Directive</option>
-          <option value="info">ℹ️ Information</option>
+          <option value="note">Note</option>
+          <option value="circulaire">Circulaire</option>
+          <option value="directive">Directive</option>
+          <option value="info">Information</option>
         </select>
         <select
+          className="gsn-select"
           value={filters.scope}
           onChange={(e) => setFilters({ ...filters, scope: e.target.value })}
-          style={{
-            padding: '10px',
-            border: '1px solid #D1D5DB',
-            borderRadius: '8px',
-            fontSize: '14px',
-            background: 'white',
-            cursor: 'pointer',
-          }}
         >
           <option value="">Toutes les portées</option>
-          <option value="platform_directors">🌐 Plateforme</option>
-          <option value="establishment_staff">🏥 Hôpital</option>
-          <option value="department">🏢 Service</option>
+          <option value="platform_directors">Plateforme</option>
+          <option value="establishment_staff">Hôpital</option>
+          <option value="department">Service</option>
         </select>
       </div>
 
       {isLoading ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#9CA3AF' }}>
-          Chargement des notes…
-        </div>
+        <div className="gsn-loading">Chargement des notes…</div>
       ) : notes.length === 0 ? (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: '60px 20px',
-            background: '#F9FAFB',
-            borderRadius: '12px',
-            border: '1px dashed #D1D5DB',
-          }}
-        >
-          <div style={{ fontSize: '48px', marginBottom: '12px' }}>📭</div>
-          <p style={{ color: '#6B7280', fontSize: '15px' }}>
-            Aucune note ou circulaire pour le moment
-          </p>
+        <div className="gsn-empty">
+          <Inbox size={26} />
+          <p>Aucune note ou circulaire pour le moment</p>
         </div>
       ) : (
         <div>

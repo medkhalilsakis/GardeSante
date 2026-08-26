@@ -1,0 +1,160 @@
+' ============================================================================
+' GardeSanté — Diagramme d'activités : Médecin Senior
+'
+' Rôle de terrain. Il subit le planning plus qu'il ne le fait : il le consulte,
+' il pointe, il déclare ses propres absences, il demande un remplacement. Rien
+' de ce qu'il fait n'engage le service — sauf un geste, la confirmation de
+' présence, dont la portée réelle dépasse largement ce que son rôle suppose.
+'
+' Sources vérifiées :
+'   backend/src/db/migrations/012_role_autre.sql
+'     11 permissions : departments.read, schedules.read, shifts.read/confirm,
+'     absences.read/create, replacements.read/create, stats.read,
+'     remarks.read/create.
+'     ÉCART : le commentaire de cette même migration le dit « sans acces
+'     login » — rien dans auth.controller.js ne le refuse à la connexion.
+'   backend/src/modules/shifts/shifts.routes.js:13-14
+'     shifts.confirm est réellement exposée : POST /:id/confirm et /:id/absent
+'   backend/src/modules/shifts/shifts.controller.js:83-98
+'     ÉCART GRAVE : confirmPresence et markAbsent font UPDATE shifts … WHERE
+'     id = $1, sans borne d'établissement et sans vérifier que la garde est
+'     la sienne. Le module ne comporte AUCUN appel au journal.
+'   backend/src/modules/absences/absences.controller.js
+'     :14,141   SELF_ONLY_ROLES : il ne déclare une absence que pour lui-même
+'     :198-215  l'absence est écrite d'emblée à l'état accordé et bascule la
+'               garde concernée à « absent »
+'     le module ne comporte aucun appel au journal
+'   backend/src/modules/replacements/replacements-overlay.controller.js:536-538
+'     ÉCART : il détient replacements.create, mais la création d'un
+'     remplacement en surcouche est réservée au chef et aux surveillants. Il
+'     ne lui reste que le flux historique, lié à une absence.
+'   backend/src/modules/journal/journal.controller.js:43-47
+'     WRITE_ROLES ne l'inclut pas : l'appel du jour lui est fermé
+'   backend/src/modules/notes/notes.controller.js:42-52
+'     resolveScope renvoie null : publier une note lui est REFUSÉ, alors
+'     qu'il détient remarks.create
+'   backend/src/modules/history/history.routes.js:9
+'     /mine n'est gardée que par l'authentification : son historique lui est
+'     ouvert comme à tout le monde
+' ============================================================================
+@startuml 46-activite-medecin-senior
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontColor #0F172A
+  DiamondBackgroundColor #EEF2FF
+  DiamondBorderColor #1B4FCA
+  DiamondFontColor #1B4FCA
+  StartColor #0F766E
+  EndColor #B91C1C
+  BarColor #7A3E9D
+}
+skinparam partition {
+  BackgroundColor #F8FAFC
+  BorderColor #94A3B8
+  FontColor #475569
+  FontStyle bold
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Activités — Médecin Senior : consulter, pointer, déclarer pour soi
+
+start
+
+#FEF3C7:s'authentifier;
+note right
+  **Écart.** La migration qui crée les rôles annote
+  celui-ci « sans acces login ». Aucun contrôle ne
+  l'applique : la connexion réussit, et les onze
+  permissions du rôle s'appliquent normalement.
+end note
+
+partition "Prendre connaissance" {
+  fork
+    :consulter le planning\nde son service;
+  fork again
+    :consulter ses gardes\nà venir;
+  fork again
+    :consulter les statistiques\nqui lui sont ouvertes;
+  end fork
+}
+
+partition "Agir sur ses propres gardes" {
+  repeat
+    fork
+      :pointer sur une garde;
+      if (présent ?) then (oui)
+        #F3E8FF:la garde passe\nà « confirmée »;
+      else (non)
+        #F3E8FF:la garde passe\nà « absent »;
+      endif
+
+    fork again
+      :déclarer une absence\npour lui-même;
+      if (la période chevauche-t-elle\nune absence existante ?) then (oui)
+        #FEE2E2:refus — une absence couvre\ndéjà cette période;
+      else (non)
+        #F3E8FF:absence écrite d'emblée\nà l'état accordé;
+      endif
+
+    fork again
+      :demander un remplacement\nsur une garde absentée;
+      #F3E8FF:le système propose\njusqu'à cinq candidats;
+      :attendre la décision\ndu service;
+    end fork
+  repeat while (il reste des gardes à son nom) is (oui)
+  -> non;
+}
+
+partition "Ce qui lui est fermé" {
+  fork
+    #FEE2E2:créer un remplacement\nen surcouche;
+  fork again
+    #FEE2E2:publier une note\nde service;
+  fork again
+    #FEE2E2:faire l'appel du jour,\nsignaler un incident;
+  fork again
+    #FEE2E2:déclarer l'absence\nd'un collègue;
+  end fork
+}
+
+:consulter ses notifications;
+:lire son propre historique;
+stop
+
+floating note left
+  **Deux permissions qui ne mènent nulle part.** Il détient replacements.create,
+  mais la création d'un remplacement en surcouche — celle qui se superpose au
+  tableur en vigueur, sans le réécrire — est réservée au chef et aux
+  surveillants. Il ne lui reste que le flux historique, qui exige une absence
+  déclarée au préalable. Il détient remarks.create, mais la résolution de portée
+  ne reconnaît pas son rôle : publier une note lui est refusé.
+  ====
+  **Le pointage est son seul geste d'écriture, et c'est le moins contrôlé.**
+  La confirmation de présence et le signalement d'absence sur une garde
+  s'exécutent sur l'identifiant reçu dans l'adresse, sans borne d'établissement
+  et sans vérifier que la garde lui appartient. Aucun des deux n'écrit au journal
+  d'activité. C'est le rôle le plus faible qui atteint l'écriture la plus large :
+  l'écart est relevé en tant que tel dans le rapport.
+  ====
+  **Déclarer une absence n'est pas demander un congé.** L'absence est enregistrée
+  immédiatement accordée et fait basculer la garde concernée à « absent » : il
+  n'y a personne à convaincre, et rien à attendre. Les états « en attente » et
+  « refusé » figurent au schéma de la base sans qu'aucun chemin y conduise.
+end note
+
+legend right
+  Fond teinté violet : écriture en base. Fond teinté rouge : refus opposé par le logiciel.
+  Fond ambre : incohérence entre ce que la base déclare et ce que le code applique.
+  Aucun fond vert dans cette figure : aucune de ses actions n'écrit au journal d'activité.
+  Remplacements en surcouche : figures 23 et 24.
+endlegend
+
+@enduml

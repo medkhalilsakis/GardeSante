@@ -1,0 +1,150 @@
+' ============================================================================
+' GardeSanté — Diagramme d'activités : Chef de Service (2/2)
+'                                      tenir le tableur en vigueur
+'
+' Suite de la figure 43. Une fois le tableur engagé, il n'est plus réécrit : il
+' se corrige par propositions, se complète par remplacements, et se défend par
+' l'arbitrage des prêts. C'est le régime durable du rôle.
+'
+' Sources vérifiées :
+'   backend/src/modules/schedules/schedule-builder.controller.js
+'     :1240-1260 arbitrage d'une proposition de modification ; le refus
+'               enregistre le motif
+'     :1282-1300 rappel : 'submitted' peut redevenir 'draft', 'active' non —
+'               le message distingue explicitement les deux cas
+'     :474      au-delà du brouillon, l'édition directe change de régime et
+'               journalise schedule_live_update
+'   backend/src/modules/replacements/replacements-overlay.controller.js
+'     ce qu'il dépose lui-même est confirmé d'office ; ce qu'un surveillant
+'     dépose attend sa décision ; le refus SUPPRIME la ligne
+'   backend/src/modules/schedules/staff-loans.controller.js:276-381
+'     comme chef propriétaire il arbitre les prêts de SES agents ; le refus
+'     retire du planning demandeur la seule ligne de cet agent
+'   backend/src/modules/schedules/external-staff.js:221-255
+'     removeStaffFromSchedule : registre + shifts + affectations de cet agent
+'   backend/src/modules/absences/absences.controller.js:198-215
+'     l'absence de garde est écrite à l'état 'approved' et bascule la garde
+'     concernée à l'état 'absent'
+'   backend/src/modules/journal/journal.controller.js  appel du jour
+'   backend/src/modules/schedules/schedules.controller.js:675
+'     l'archivage passe par PATCH /:id/action
+' ============================================================================
+@startuml 44-activite-chef-de-service-tenir
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontColor #0F172A
+  DiamondBackgroundColor #EEF2FF
+  DiamondBorderColor #1B4FCA
+  DiamondFontColor #1B4FCA
+  StartColor #0F766E
+  EndColor #B91C1C
+  BarColor #7A3E9D
+}
+skinparam partition {
+  BackgroundColor #F8FAFC
+  BorderColor #94A3B8
+  FontColor #475569
+  FontStyle bold
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Activités — Chef de Service (2/2) : tenir le tableur en vigueur
+
+start
+
+:le tableur est envoyé ou en cours\n— suite de la figure 43;
+
+repeat
+  fork
+    :relever les propositions\nde modification;
+    if (fondée ?) then (oui)
+      :appliquer à la grille;
+      #F3E8FF:écrire la modification;
+    else (non)
+      #FEE2E2:refuser\navec motif;
+    endif
+    #E6F4F1:consigner\nl'arbitrage;
+
+  fork again
+    :relever les remplacements\ndéposés par les surveillants;
+    if (le binôme convient ?) then (oui)
+      :confirmer;
+      #F3E8FF:statut « confirmé »;
+    else (non)
+      #FEE2E2:refuser — la demande\nest supprimée;
+    endif
+    #E6F4F1:consigner\nla décision;
+
+  fork again
+    :déposer soi-même\nun remplacement;
+    #F3E8FF:confirmé d'office;
+
+  fork again
+    :arbitrer les prêts portant\nsur SES agents;
+    if (l'agent peut-il\nêtre prêté ?) then (oui)
+      :accepter — la ligne\ndu demandeur reste;
+    else (non)
+      #FEE2E2:refuser — retirer\nsa seule ligne;
+    endif
+
+  fork again
+    :déclarer une absence\nde garde;
+    #F3E8FF:la garde passe\nà « absent »;
+    :faire l'appel du jour;
+
+  fork again
+    :suivre le tableau de bord\ncouverture, charge, équité;
+    :consulter les statistiques\nde son service;
+  end fork
+
+  if (le planning doit-il être rappelé ?) then (oui)
+    if (est-il encore « envoyé » ?) then (oui)
+      :le ramener en brouillon\npour le reprendre;
+      note right
+        Le rappel n'est possible qu'avant le début de
+        la période. Il remet le planning à l'état
+        privé : les surveillants ne le voient plus
+        tant qu'il n'est pas renvoyé.
+      end note
+    else (non)
+      #FEE2E2:impossible — un planning en cours\nne revient pas en brouillon;
+      note right
+        Passé le début de la période, le tableur est
+        engagé : il se corrige par proposition et par
+        remplacement, jamais par réécriture. C'est
+        exactement ce que la couche de remplacement
+        est là pour permettre.
+      end note
+    endif
+  else (non)
+  endif
+repeat while (la période court toujours) is (oui)
+-> non;
+
+:archiver le planning échu;
+stop
+
+floating note left
+  **Deux façons de corriger, jamais la réécriture.** Une proposition amende la
+  grille elle-même, et seul le chef l'applique. Un remplacement ne la touche
+  pas : il vit dans une table voisine et se superpose à l'affichage, si bien que
+  le titulaire reste lisible à côté de celui qui le couvre. Le refus d'un
+  remplacement, lui, efface la demande — le journal d'activité en est alors la
+  seule trace durable.
+end note
+
+legend right
+  Fond teinté vert : écriture au journal. Fond teinté violet : écriture en base. Fond teinté rouge : refus.
+  Les six branches sont concurrentes et sans ordre imposé.
+  Propositions : figure 22. Remplacements : figures 23 et 24. Prêts de personnel : figure 25.
+endlegend
+
+@enduml

@@ -22,17 +22,39 @@ import toast from 'react-hot-toast';
  *   required    : bool
  *   currentRole : { code, name } - rôle déjà affecté, même s'il n'est pas
  *                 créable par l'acteur (édition de son propre profil, etc.)
+ *
+ * ── Harmonisation couleurs et typographie ──
+ * La structure et le balisage ne changent pas ; seules les couleurs bougent.
+ *
+ * Les huit rôles portaient chacun sa propre paire de teintes inventées. Or la
+ * pastille dit toujours le même mot — « Accès » — et le nom du rôle est écrit
+ * juste à côté : les huit coloris ne distinguaient rien que le texte ne disait
+ * déjà, et deux d'entre eux se lisaient comme un avertissement. Le sceau de la
+ * plate-forme suffit, et il est juste : cette pastille signale un accès à la
+ * plate-forme, rien d'autre.
+ *
+ * Les trois familles de fonction, elles, sont une vraie taxinomie. Elles
+ * reprennent à l'identique les teintes d'identité déjà employées par le
+ * sélecteur de personnel, pour qu'une même famille garde sa couleur d'un écran
+ * à l'autre.
+ *
+ * Retiré au passage : le `outline: 'none'` du champ de recherche et des deux
+ * champs d'ajout. Posé en style en ligne, il battait l'anneau de focus du
+ * calque de jetons — le panneau vivant dans un portail, plus rien ne signalait
+ * au clavier où l'on se trouvait.
  */
 
-const SYSTEM_ROLE_COLORS = {
-  director:           { bg: '#EFF6FF', color: '#1D4ED8', icon: '👔' },
-  hospital_admin:     { bg: '#F5F3FF', color: '#7C3AED', icon: '🏛️' },
-  general_supervisor: { bg: '#F0FDF4', color: '#15803D', icon: '🛡️' },
-  department_head:    { bg: '#FEF3C7', color: '#B45309', icon: '⭐' },
-  service_supervisor: { bg: '#FDF2F8', color: '#9333EA', icon: '🔹' },
-  senior_doctor:      { bg: '#F0F9FF', color: '#0284C7', icon: '👨‍⚕️' },
-  resident:           { bg: '#F8FAFC', color: '#64748B', icon: '🩺' },
-  observer:           { bg: '#F1F5F9', color: '#475569', icon: '👁️' },
+// Le pictogramme de chaque rôle. Il ne porte plus de couleur : la pastille
+// « Accès » est du sceau pour tous, puisqu'elle dit la même chose pour tous.
+const SYSTEM_ROLE_ICONS = {
+  director:           '👔',
+  hospital_admin:     '🏛️',
+  general_supervisor: '🛡️',
+  department_head:    '⭐',
+  service_supervisor: '🔹',
+  senior_doctor:      '👨‍⚕️',
+  resident:           '🩺',
+  observer:           '👁️',
 };
 
 // Une ligne d'explication par role : la liste se lit sans avoir a deviner ce
@@ -48,11 +70,17 @@ const SYSTEM_ROLE_HINTS = {
   observer:           'Consultation seule',
 };
 
+// Les trois familles de fonction, aux mêmes teintes d'identité que dans le
+// sélecteur de personnel. Aucune n'est un ton d'état : une famille de métier
+// n'est ni une alerte, ni un service en cours.
 const JT_CAT_COLORS = {
-  medical:   { bg: '#EFF6FF', color: '#3B82F6' },
-  administrative: { bg: '#F5F3FF', color: '#7C3AED' },
-  auxiliary: { bg: '#F0F9FF', color: '#0891B2' },
+  medical:        { bg: 'color-mix(in srgb, var(--gs-id-6) 12%, transparent)', color: 'var(--gs-id-6)' },
+  administrative: { bg: 'color-mix(in srgb, var(--gs-id-3) 12%, transparent)', color: 'var(--gs-id-3)' },
+  auxiliary:      { bg: 'color-mix(in srgb, var(--gs-id-7) 12%, transparent)', color: 'var(--gs-id-7)' },
 };
+
+// Ce que porte la pastille commune à tous les rôles systèmes.
+const ACCESS_CHIP = { bg: 'var(--gs-seal-wash)', color: 'var(--gs-seal)' };
 
 const JT_CAT_LABELS = {
   medical:   'Personnel médical',
@@ -179,7 +207,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
     if (!roleCode) return null;
     if (roleCode !== 'autre') {
       const r = systemRoles.find(r => r.code === roleCode);
-      return r ? { label: r.name, icon: SYSTEM_ROLE_COLORS[roleCode]?.icon || '👤', type: 'role', code: roleCode } : null;
+      return r ? { label: r.name, icon: SYSTEM_ROLE_ICONS[roleCode] || '👤', type: 'role', code: roleCode } : null;
     }
     if (jobTitleId) {
       const jt = jobTitles.find(t => t.id === jobTitleId);
@@ -209,17 +237,17 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
 
   const baseInput = {
     width: '100%', padding: '8px 12px', borderRadius: 8, boxSizing: 'border-box',
-    border: '1px solid var(--border-default)', background: 'var(--bg-input)',
-    color: 'var(--text-primary)', fontSize: 13, outline: 'none',
+    border: '1px solid var(--gs-rule)', background: 'var(--gs-paper-alt)',
+    color: 'var(--gs-ink)', fontSize: 13,
   };
 
   // En-tete de section, colle en haut pendant le defilement de la liste : on
   // sait toujours dans quel groupe on se trouve.
   const stickyHeader = {
     position: 'sticky', top: 0, zIndex: 2,
-    padding: '6px 12px 5px', fontSize: 10, fontWeight: 800,
-    letterSpacing: '.08em', textTransform: 'uppercase',
-    background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)',
+    padding: '6px 12px 5px', fontFamily: 'var(--gs-display)', fontSize: 10, fontWeight: 800,
+    letterSpacing: '.14em', textTransform: 'uppercase',
+    background: 'var(--gs-paper-alt)', borderBottom: '1px solid var(--gs-rule)',
   };
 
   const hasSelection = !!roleCode;
@@ -233,8 +261,8 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
         left: pos?.left ?? 0,
         width: pos?.width ?? 340,
         ...(pos?.flip ? { bottom: pos.bottom } : { top: pos?.top ?? 0 }),
-        background: 'var(--bg-card)', borderRadius: 10, zIndex: 3000,
-        boxShadow: '0 12px 40px rgba(0,0,0,.28)', border: '1px solid var(--border-subtle)',
+        background: 'var(--gs-paper)', borderRadius: 10, zIndex: 3000,
+        boxShadow: 'var(--gs-shadow-lift)', border: '1px solid var(--gs-rule)',
         overflow: 'hidden', display: 'flex', flexDirection: 'column',
         visibility: pos ? 'visible' : 'hidden',
       }}
@@ -243,7 +271,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
       <div style={{ padding: '10px 10px 0' }}>
         <div style={{ position: 'relative' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-            style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+            style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--gs-ink-faint)' }}>
             <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
           </svg>
           <input
@@ -259,7 +287,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
       </div>
 
       {/* Onglets — le compteur evite de scroller pour savoir ce qu'il y a */}
-      <div style={{ display: 'flex', gap: 4, padding: '8px 10px 6px', borderBottom: '1px solid var(--border-subtle)' }}>
+      <div style={{ display: 'flex', gap: 4, padding: '8px 10px 6px', borderBottom: '1px solid var(--gs-rule)' }}>
         {[
           { id: 'all',    label: 'Tout',            n: systemRoles.length + jobTitles.length },
           { id: 'roles',  label: 'Accès plateforme', n: systemRoles.length },
@@ -269,8 +297,8 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
             style={{
               padding: '3px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700,
               border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              background: tab === t.id ? 'var(--color-primary)' : 'var(--bg-elevated)',
-              color: tab === t.id ? '#fff' : 'var(--text-secondary)',
+              background: tab === t.id ? 'var(--gs-seal)' : 'var(--gs-paper-alt)',
+              color: tab === t.id ? '#fff' : 'var(--gs-ink-soft)',
               transition: 'all .15s',
             }}>
             {t.label} <span style={{ opacity: .65, fontWeight: 600 }}>{t.n}</span>
@@ -281,10 +309,10 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
       {/* Liste */}
       <div style={{ maxHeight: pos?.listMax ?? 320, overflowY: 'auto', overscrollBehavior: 'contain' }}>
         {isEmpty ? (
-          <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+          <div style={{ padding: '16px', textAlign: 'center', color: 'var(--gs-ink-faint)', fontSize: 13 }}>
             Aucun resultat pour "{search}".{' '}
             <button type="button" onClick={() => { setAddMode(true); setNewTitle(n => ({ ...n, name: search })); setTab('titles'); }}
-              style={{ color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit' }}>
+              style={{ color: 'var(--gs-seal)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit' }}>
               + Ajouter cette fonction
             </button>
           </div>
@@ -293,41 +321,40 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
             {/* Roles systeme */}
             {filtRoles.length > 0 && (
               <div>
-                <div style={{ ...stickyHeader, color: 'var(--text-muted)' }}>
+                <div style={{ ...stickyHeader, color: 'var(--gs-ink-faint)' }}>
                   Responsabilités avec accès plateforme
                   <span style={{ fontWeight: 400, opacity: .6 }}> ({filtRoles.length})</span>
                 </div>
                 {filtRoles.map(r => {
                   const isSelected = roleCode === r.code && !jobTitleId;
-                  const colors = SYSTEM_ROLE_COLORS[r.code] || { bg: '#F3F4F6', color: '#374151', icon: '👤' };
                   return (
                     <div
                       key={r.id}
                       onClick={() => { onChange({ roleCode: r.code, jobTitleId: null, label: r.name }); setOpen(false); setSearch(''); }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
-                        cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)',
-                        background: isSelected ? 'rgba(27,79,202,.06)' : 'transparent',
+                        cursor: 'pointer', borderBottom: '1px solid var(--gs-rule)',
+                        background: isSelected ? 'var(--gs-seal-wash)' : 'transparent',
                         transition: 'background .1s',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-elevated)'; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'rgba(27,79,202,.06)' : 'transparent'; }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--gs-paper-alt)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'var(--gs-seal-wash)' : 'transparent'; }}
                     >
-                      <span style={{ fontSize: 16 }}>{colors.icon}</span>
+                      <span style={{ fontSize: 16 }}>{SYSTEM_ROLE_ICONS[r.code] || '👤'}</span>
                       <span style={{
                         fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 20, flexShrink: 0,
-                        background: colors.bg, color: colors.color,
+                        background: ACCESS_CHIP.bg, color: ACCESS_CHIP.color,
                       }}>
                         Accès
                       </span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{r.name}</div>
+                        <div style={{ fontSize: 13, color: 'var(--gs-ink)', fontWeight: 500 }}>{r.name}</div>
                         {SYSTEM_ROLE_HINTS[r.code] && (
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{SYSTEM_ROLE_HINTS[r.code]}</div>
+                          <div style={{ fontSize: 10, color: 'var(--gs-ink-faint)' }}>{SYSTEM_ROLE_HINTS[r.code]}</div>
                         )}
                       </div>
                       {isSelected && (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="3">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gs-seal)" strokeWidth="3">
                           <path d="M20 6L9 17l-5-5" />
                         </svg>
                       )}
@@ -342,7 +369,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
               <div key={cat}>
                 <div style={{
                   ...stickyHeader,
-                  color: JT_CAT_COLORS[cat]?.color || '#6B7280',
+                  color: JT_CAT_COLORS[cat]?.color || 'var(--gs-ink-faint)',
                   display: 'flex', alignItems: 'center', gap: 6,
                 }}>
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: JT_CAT_COLORS[cat]?.color, flexShrink: 0 }} />
@@ -351,19 +378,19 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
                 </div>
                 {titles.map(t => {
                   const isSelected = jobTitleId === t.id;
-                  const colors = JT_CAT_COLORS[t.category] || { bg: '#F3F4F6', color: '#374151' };
+                  const colors = JT_CAT_COLORS[t.category] || { bg: 'var(--gs-paper-alt)', color: 'var(--gs-ink-soft)' };
                   return (
                     <div
                       key={t.id}
                       onClick={() => { onChange({ roleCode: 'autre', jobTitleId: t.id, label: t.name }); setOpen(false); setSearch(''); }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                        cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)',
-                        background: isSelected ? 'rgba(27,79,202,.06)' : 'transparent',
+                        cursor: 'pointer', borderBottom: '1px solid var(--gs-rule)',
+                        background: isSelected ? 'var(--gs-seal-wash)' : 'transparent',
                         transition: 'background .1s',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-elevated)'; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'rgba(27,79,202,.06)' : 'transparent'; }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--gs-paper-alt)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'var(--gs-seal-wash)' : 'transparent'; }}
                     >
                       <span style={{
                         fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, flexShrink: 0,
@@ -371,9 +398,9 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
                       }}>
                         {JT_CAT_LABELS[t.category] || t.category}
                       </span>
-                      <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)' }}>{t.name}</span>
+                      <span style={{ flex: 1, fontSize: 13, color: 'var(--gs-ink)' }}>{t.name}</span>
                       {isSelected && (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="3">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gs-seal)" strokeWidth="3">
                           <path d="M20 6L9 17l-5-5" />
                         </svg>
                       )}
@@ -388,8 +415,8 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
 
       {/* Ajouter une fonction personnalisée */}
       {addMode ? (
-        <div style={{ padding: '12px', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)' }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
+        <div style={{ padding: '12px', borderTop: '1px solid var(--gs-rule)', background: 'var(--gs-paper-alt)' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gs-ink-soft)', marginBottom: 8 }}>
             Nouvelle fonction du personnel
           </div>
           <input
@@ -413,7 +440,7 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
               disabled={!newTitle.name.trim() || createMut.isPending}
               style={{
                 flex: 1, padding: 8, borderRadius: 8, border: 'none', cursor: 'pointer',
-                background: 'var(--color-primary)', color: '#fff', fontWeight: 700, fontSize: 13,
+                background: 'var(--gs-seal)', color: '#fff', fontWeight: 700, fontSize: 13,
                 fontFamily: 'inherit',
                 opacity: !newTitle.name.trim() || createMut.isPending ? 0.5 : 1,
               }}>
@@ -421,8 +448,8 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
             </button>
             <button type="button" onClick={() => setAddMode(false)}
               style={{
-                padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border-default)',
-                background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
+                padding: '8px 14px', borderRadius: 8, border: '1px solid var(--gs-rule)',
+                background: 'transparent', color: 'var(--gs-ink-soft)', cursor: 'pointer',
                 fontSize: 13, fontFamily: 'inherit',
               }}>
               Annuler
@@ -430,12 +457,12 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
           </div>
         </div>
       ) : (
-        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border-subtle)' }}>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--gs-rule)' }}>
           <button type="button" onClick={() => setAddMode(true)}
             style={{
               width: '100%', padding: 8, borderRadius: 8,
-              border: '1px dashed var(--color-primary)', background: 'rgba(27,79,202,.04)',
-              color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 700, fontSize: 12,
+              border: '1px dashed var(--gs-seal)', background: 'var(--gs-seal-wash)',
+              color: 'var(--gs-seal)', cursor: 'pointer', fontWeight: 700, fontSize: 12,
               fontFamily: 'inherit',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}>
@@ -457,8 +484,8 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
-          border: `1px solid ${open ? 'var(--color-primary)' : (required && !hasSelection ? 'var(--color-danger)' : 'var(--border-default)')}`,
-          background: 'var(--bg-input)', transition: 'border-color .15s', minHeight: 40,
+          border: `1px solid ${open ? 'var(--gs-seal)' : (required && !hasSelection ? 'var(--gs-alert)' : 'var(--gs-rule)')}`,
+          background: 'var(--gs-paper-alt)', transition: 'border-color .15s', minHeight: 40,
         }}
       >
         {display ? (
@@ -468,13 +495,13 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
                 <span style={{ fontSize: 15 }}>{display.icon}</span>
                 <span style={{
                   fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                  background: SYSTEM_ROLE_COLORS[display.code]?.bg || '#F3F4F6',
-                  color: SYSTEM_ROLE_COLORS[display.code]?.color || '#374151',
+                  background: ACCESS_CHIP.bg,
+                  color: ACCESS_CHIP.color,
                   flexShrink: 0,
                 }}>
                   Role
                 </span>
-                <span style={{ fontSize: 13, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 13, color: 'var(--gs-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {display.label}
                 </span>
               </>
@@ -483,20 +510,20 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
                 <span style={{ fontSize: 15 }}>📋</span>
                 <span style={{
                   fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                  background: JT_CAT_COLORS[display.cat]?.bg || '#F3F4F6',
-                  color: JT_CAT_COLORS[display.cat]?.color || '#374151',
+                  background: JT_CAT_COLORS[display.cat]?.bg || 'var(--gs-paper-alt)',
+                  color: JT_CAT_COLORS[display.cat]?.color || 'var(--gs-ink-soft)',
                   flexShrink: 0,
                 }}>
                   {JT_CAT_LABELS[display.cat] || 'Titre'}
                 </span>
-                <span style={{ fontSize: 13, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 13, color: 'var(--gs-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {display.label}
                 </span>
               </>
             )}
           </div>
         ) : (
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 13, color: 'var(--gs-ink-faint)' }}>
             — Selectionner un role ou un titre de poste —
           </span>
         )}
@@ -504,12 +531,12 @@ export default function UnifiedRoleSelect({ roleCode, jobTitleId, onChange, requ
           {hasSelection && (
             <span
               onClick={e => { e.stopPropagation(); onChange({ roleCode: null, jobTitleId: null, label: null }); }}
-              style={{ color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}
+              style={{ color: 'var(--gs-ink-faint)', fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}
               title="Effacer"
             >x</span>
           )}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-            style={{ color: 'var(--text-muted)', transform: open ? 'rotate(180deg)' : '', transition: 'transform .2s' }}>
+            style={{ color: 'var(--gs-ink-faint)', transform: open ? 'rotate(180deg)' : '', transition: 'transform .2s' }}>
             <path d="M6 9l6 6 6-6" />
           </svg>
         </div>

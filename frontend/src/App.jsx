@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore, useUIStore } from './store';
 import AppLayout from './components/layout/AppLayout';
+import { PageLoader, AccessDenied, NotFound } from './components/layout/AppStates';
 import './index.css';
 
 const LoginPage                = lazy(() => import('./pages/auth/LoginPage'));
@@ -44,40 +45,12 @@ const queryClient = new QueryClient({
   },
 });
 
-// Loading spinner
-const PageLoader = () => (
-  <div style={{
-    height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'var(--bg-base)',
-  }}>
-    <div style={{ textAlign: 'center' }}>
-      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2"
-        className="animate-spin" style={{ display: 'block', margin: '0 auto 16px' }}>
-        <path d="M21 12a9 9 0 11-6.219-8.56" />
-      </svg>
-      <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>Chargement...</p>
-    </div>
-  </div>
-);
-
 // Route protégée
 function ProtectedRoute({ children, permission, roles }) {
   const { isAuthenticated, hasPermission, user } = useAuthStore();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if ((permission && !hasPermission(permission)) || (roles && !roles.includes(user?.roleCode))) {
-    return (
-      <div style={{
-        height: '100%', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', gap: 16,
-        padding: 40,
-      }}>
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="2">
-          <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
-        </svg>
-        <p style={{ fontSize: 'var(--font-xl)', fontWeight: 700, color: 'var(--text-primary)' }}>Accès refusé</p>
-        <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>Vous n'avez pas les permissions nécessaires pour accéder à cette page.</p>
-      </div>
-    );
+    return <AccessDenied permission={permission} />;
   }
   return children;
 }
@@ -114,7 +87,7 @@ export default function App() {
 
               {/* Super Admin — tableau de bord global */}
               <Route path="/admin" element={
-                <ProtectedRoute>
+                <ProtectedRoute roles={['super_admin']}>
                   <SuperAdminDashboard />
                 </ProtectedRoute>
               } />
@@ -205,7 +178,7 @@ export default function App() {
 
               {/* Super Admin — demandes de modification profil */}
               <Route path="/admin/profile-requests" element={
-                <ProtectedRoute>
+                <ProtectedRoute roles={['super_admin']}>
                   <ProfileRequestsAdminPage />
                 </ProtectedRoute>
               } />
@@ -286,16 +259,7 @@ export default function App() {
             </Route>
 
             {/* 404 */}
-            <Route path="*" element={
-              <div style={{
-                height: '100vh', display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)',
-              }}>
-                <p style={{ fontSize: 'var(--font-5xl)', fontWeight: 900, color: 'var(--color-primary)', marginBottom: 8 }}>404</p>
-                <p style={{ color: 'var(--text-secondary)' }}>Page introuvable</p>
-                <a href="/dashboard" className="btn btn-primary" style={{ marginTop: 24 }}>Retour au dashboard</a>
-              </div>
-            } />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
       </BrowserRouter>
@@ -306,16 +270,18 @@ export default function App() {
         toastOptions={{
           duration: 4000,
           style: {
-            background: 'var(--bg-card)',
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border-default)',
+            background: 'var(--gs-paper)',
+            color: 'var(--gs-ink)',
+            border: '1px solid var(--gs-rule-strong)',
             borderRadius: '10px',
             fontSize: '13px',
-            fontFamily: 'Inter, sans-serif',
-            boxShadow: 'var(--shadow-xl)',
+            fontFamily: 'var(--gs-body)',
+            boxShadow: 'var(--gs-shadow-lift)',
           },
-          success: { iconTheme: { primary: '#10B981', secondary: '#fff' } },
-          error: { iconTheme: { primary: '#EF4444', secondary: '#fff' } },
+          // Les deux seules couleurs qu'un message d'état peut porter : ce qui
+          // est fait (« de service ») et ce qui bloque.
+          success: { iconTheme: { primary: 'var(--gs-duty)', secondary: 'var(--gs-paper)' } },
+          error: { iconTheme: { primary: 'var(--gs-alert)', secondary: 'var(--gs-paper)' } },
         }}
       />
     </QueryClientProvider>

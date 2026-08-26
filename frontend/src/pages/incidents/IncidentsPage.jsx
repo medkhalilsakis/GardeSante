@@ -33,11 +33,14 @@ const SEVERITIES = [
   { value: 'error', label: 'Grave', icon: AlertTriangle },
   { value: 'critical', label: 'Critique', icon: ShieldAlert },
 ];
+// La pastille de la ligne reçoit son rang par propriété personnalisée. On y
+// passe le nom du jeton, pas une couleur calculée : c'est ce qui fait que le
+// thème sombre se retourne sans une ligne de plus.
 const SEVERITY_META = {
-  info: { label: 'Information', color: '#2563EB', bg: '#EFF6FF' },
-  warning: { label: 'Vigilance', color: '#B45309', bg: '#FFFBEB' },
-  error: { label: 'Grave', color: '#DC2626', bg: '#FEF2F2' },
-  critical: { label: 'Critique', color: '#991B1B', bg: '#FEE2E2' },
+  info: { label: 'Information', color: 'var(--incident-info)', bg: 'var(--incident-info-soft)' },
+  warning: { label: 'Vigilance', color: 'var(--incident-warning)', bg: 'var(--incident-warning-soft)' },
+  error: { label: 'Grave', color: 'var(--incident-danger)', bg: 'var(--incident-danger-soft)' },
+  critical: { label: 'Critique', color: 'var(--incident-critical)', bg: 'var(--incident-critical-soft)' },
 };
 
 const roleLabels = {

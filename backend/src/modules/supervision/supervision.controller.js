@@ -18,12 +18,12 @@ const { createNotification } = require('../notifications/notifications.controlle
 const { emitToEstablishment, emitToUser } = require('../../realtime/emit');
 const history = require('../history/history.controller');
 const {
-  guardEntries,
-  countGuards,
-  distinctStaff,
-  datesBetween,
+  countDuty,
+  distinctDutyStaff,
+  rosterOnDate,
   dateKey,
 } = require('../schedules/spreadsheet-reader');
+const conflictRules = require('./conflict-rules');
 
 /** Rôles autorisés sur la supervision hôpital. */
 const SUPERVISION_ROLES = [
@@ -98,8 +98,11 @@ const listSchedules = async (req, res) => {
         departmentName: row.department_name,
         notes: row.notes,
         pendingProposals: Number(row.pending_proposals) || 0,
-        guardCount: countGuards(row),
-        staffCount: distinctStaff(row).size,
+        // Volumétrie lue comme le tableur se lit : code du jour, sinon période de
+        // participation. Compter les seules cases codées affichait « 0 garde ·
+        // 0 agent » sur 6 plannings sur 7.
+        guardCount: countDuty(row),
+        staffCount: distinctDutyStaff(row).size,
       }));
 
     return res.json({ success: true, data: { schedules, total: schedules.length } });
@@ -125,7 +128,7 @@ const listConflicts = async (req, res) => {
     if (!scope) return forbidden(res);
 
     const { rows } = await query(
-      `SELECT s.id, s.name, s.status, s.department_id, s.metadata,
+      `SELECT s.id, s.name, s.status, s.department_id, s.metadata, s.schedule_type,
               TO_CHAR(s.start_date, 'YYYY-MM-DD') AS start_date,
               TO_CHAR(s.end_date,   'YYYY-MM-DD') AS end_date,
               planning_state(s.status, s.start_date, s.end_date) AS state,
@@ -139,50 +142,18 @@ const listConflicts = async (req, res) => {
       [scope.establishmentId]
     );
 
-    // Index (userId|date) → affectations, toutes gardes réelles confondues.
-    const byUserDate = new Map();
-    const departmentNames = new Map();
-    for (const schedule of rows) {
-      departmentNames.set(schedule.department_id, schedule.department_name);
-      for (const entry of guardEntries(schedule)) {
-        if (!entry.isGuard || !entry.userId) continue;
-        const key = `${entry.userId}|${entry.date}`;
-        if (!byUserDate.has(key)) byUserDate.set(key, []);
-        byUserDate.get(key).push({
-          ...entry,
-          departmentId: schedule.department_id,
-          departmentName: schedule.department_name,
-          scheduleName: schedule.name,
-        });
-      }
-    }
+    // Index (userId|date) → affectations, lu comme le tableur se lit lui-même
+    // (code du jour, sinon période de participation). Voir conflict-rules.js.
+    const byUserDate = conflictRules.buildDutyIndex(rows);
 
     const conflicts = [];
 
     // 1. Double affectation dans deux services distincts
-    for (const [key, entries] of byUserDate) {
-      const services = new Set(entries.map((e) => e.departmentId).filter(Boolean));
-      if (services.size < 2) continue;
-      const [userId, date] = key.split('|');
-      const first = entries[0];
-      conflicts.push({
-        type: 'double_booking',
-        severity: 'critical',
-        date,
-        userId,
-        staffName: `${first.firstName} ${first.lastName}`.trim(),
-        title: 'Agent affecté dans deux services le même jour',
-        detail: entries
-          .map((e) => `${e.departmentName || 'Service inconnu'} (${e.scheduleName} · ${e.code})`)
-          .join(' / '),
-        schedules: [...new Set(entries.map((e) => e.scheduleId))],
-      });
-    }
+    conflicts.push(...conflictRules.detectDoubleBooking(byUserDate));
 
     // 2. Garde posée sur un agent en congé — règle I, vérifiée en base
-    const guardKeys = [...byUserDate.keys()];
-    if (guardKeys.length) {
-      const userIds = [...new Set(guardKeys.map((k) => k.split('|')[0]))];
+    const userIds = [...new Set([...byUserDate.keys()].map((k) => k.split('|')[0]))];
+    if (userIds.length) {
       const leaves = await query(
         `SELECT a.user_id,
                 TO_CHAR(a.start_date, 'YYYY-MM-DD') AS start_date,
@@ -195,61 +166,19 @@ const listConflicts = async (req, res) => {
            AND a.status IN ('approved', 'pending')`,
         [userIds]
       );
-
-      for (const leave of leaves.rows) {
-        for (const [key, entries] of byUserDate) {
-          const [userId, date] = key.split('|');
-          if (userId !== leave.user_id) continue;
-          if (date < leave.start_date || date > leave.end_date) continue;
-          const first = entries[0];
-          conflicts.push({
-            type: 'on_leave',
-            severity: 'critical',
-            date,
-            userId,
-            staffName: `${first.firstName} ${first.lastName}`.trim(),
-            title: 'Agent affecté pendant un congé',
-            detail: `${leave.type_name || 'Congé'} du ${leave.start_date} au ${leave.end_date} — affecté sur ${first.scheduleName} (${first.departmentName || '—'})`,
-            schedules: [...new Set(entries.map((e) => e.scheduleId))],
-          });
-        }
-      }
+      conflicts.push(...conflictRules.detectOnLeave(byUserDate, leaves.rows));
     }
 
     // 3. Journées non couvertes dans un planning en cours ou à venir
-    const today = dateKey(new Date());
-    for (const schedule of rows) {
-      const covered = new Set(
-        guardEntries(schedule).filter((e) => e.isGuard).map((e) => e.date)
-      );
-      // Seules les journées à venir comptent : un trou passé n'est plus actionnable.
-      const uncovered = datesBetween(schedule.start_date, schedule.end_date)
-        .filter((d) => d >= today && !covered.has(d));
-      if (!uncovered.length) continue;
-      conflicts.push({
-        type: 'uncovered_day',
-        severity: uncovered.length > 3 ? 'error' : 'warning',
-        date: uncovered[0],
-        title: `${uncovered.length} journée(s) sans garde`,
-        detail: `${schedule.name} (${schedule.department_name || '—'}) — ${uncovered.slice(0, 8).join(', ')}${uncovered.length > 8 ? '…' : ''}`,
-        schedules: [schedule.id],
-      });
-    }
+    conflicts.push(...conflictRules.detectUncoveredDays(rows, dateKey(new Date())));
 
-    const order = { critical: 0, error: 1, warning: 2, info: 3 };
-    conflicts.sort((a, b) => (order[a.severity] - order[b.severity]) || a.date.localeCompare(b.date));
+    conflictRules.sortConflicts(conflicts);
 
     return res.json({
       success: true,
       data: {
         conflicts,
-        summary: {
-          total: conflicts.length,
-          critical: conflicts.filter((c) => c.severity === 'critical').length,
-          doubleBooking: conflicts.filter((c) => c.type === 'double_booking').length,
-          onLeave: conflicts.filter((c) => c.type === 'on_leave').length,
-          uncovered: conflicts.filter((c) => c.type === 'uncovered_day').length,
-        },
+        summary: conflictRules.summarizeConflicts(conflicts),
         schedulesAnalyzed: rows.length,
       },
     });
@@ -296,8 +225,15 @@ const getOverview = async (req, res) => {
         [eid]
       ),
       query(
-        `SELECT a.kind, a.department_id, COUNT(*) AS total
+        // Un retard n'est PAS un `kind` : c'est un `shift_absence` dont le type
+        // porte le code `retard` et qui renseigne `late_minutes`. Le compteur
+        // lisait `kind = 'late'`, valeur qui n'existe dans aucune ligne — d'où
+        // « 0 retard » en permanence. Le total des signalements reste inchangé,
+        // les retards en sont seulement extraits.
+        `SELECT a.kind, a.department_id, COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE t.code = 'retard' OR a.late_minutes IS NOT NULL) AS late_total
          FROM absences a
+         LEFT JOIN absence_types t ON t.id = a.absence_type_id
          WHERE a.establishment_id = $1
            AND $2::date BETWEEN a.start_date AND a.end_date
            AND a.status <> 'cancelled'
@@ -339,21 +275,41 @@ const getOverview = async (req, res) => {
       return acc;
     }, {});
 
-    const absencesByKind = tally(absRes.rows, 'kind');
+    // Les absences sont groupées par (kind, department_id) : `tally` écraserait
+    // les services les uns après les autres au lieu de les additionner (deux
+    // congés dans deux services le même jour n'en affichaient qu'un). Somme
+    // explicite, et retards comptés à part — un retard est un `shift_absence`
+    // de type `retard` (avec `late_minutes`), le `kind = 'late'` n'existe pas.
+    let latesToday = 0;
+    const absencesByKind = absRes.rows.reduce((acc, row) => {
+      acc[row.kind] = (acc[row.kind] || 0) + (Number(row.total) || 0);
+      latesToday += Number(row.late_total) || 0;
+      return acc;
+    }, {});
+
     const alerts = tally(alertRes.rows, 'severity');
     const events = tally(evtRes.rows, 'event_type');
     const replacements = tally(repRes.rows);
     const loans = tally(loanRes.rows);
 
     // Couverture par service, calculée sur les plannings actifs du jour.
+    // Lecture par `rosterOnDate` : les codes journaliers sont facultatifs dans le
+    // tableur, et les compter seuls annonçait « 0 garde, 0 agent, 0/3 services
+    // couverts » alors que sept agents étaient de service. La clé de
+    // dédoublonnage est celle du journal (`journal.controller.js:861-885`) pour
+    // que le surveillant général et le surveillant de service affichent le même
+    // nombre de gardes sur la même portée.
     const activeToday = schedRes.rows.filter((s) => s.state === 'en_cours');
     const guardsByDept = new Map();
+    const seen = new Set();
     let guardsToday = 0;
     const onDutyToday = new Set();
 
     for (const schedule of activeToday) {
-      for (const entry of guardEntries(schedule)) {
-        if (!entry.isGuard || entry.date !== today) continue;
+      for (const entry of rosterOnDate(schedule, today)) {
+        const key = `${schedule.id}|${entry.userId || '—'}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         guardsToday += 1;
         if (entry.userId) onDutyToday.add(entry.userId);
         const dept = schedule.department_id;
@@ -395,7 +351,7 @@ const getOverview = async (req, res) => {
           schedulesActive: byState.en_cours || 0,
           leavesToday: absencesByKind.leave || 0,
           shiftAbsencesToday: absencesByKind.shift_absence || 0,
-          latesToday: absencesByKind.late || 0,
+          latesToday,
           incidentsToday: events.incident || 0,
           reinforcementsToday: events.reinforcement || 0,
           openAlerts: Object.values(alerts).reduce((a, b) => a + b, 0),

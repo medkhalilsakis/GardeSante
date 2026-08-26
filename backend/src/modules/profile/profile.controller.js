@@ -4,6 +4,14 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
+// Les trois notifications de ce module écrivaient elles-mêmes dans la table, sur
+// des colonnes qui n'existent pas (`user_id`, `related_entity_type`,
+// `related_entity_id`) et sans les deux colonnes NOT NULL réelles
+// (`establishment_id`, `recipient_id`). Sous un `catch` muet, la boucle
+// « demande → approbation/refus » n'a donc jamais rien notifié. On passe par
+// l'utilitaire partagé, seul porteur du bon schéma.
+const { createNotification } = require('../notifications/notifications.controller');
+const { emitToUser } = require('../../realtime/emit');
 
 // ── Répertoire d'upload ──────────────────────────────────────
 const UPLOAD_DIR = path.join(__dirname, '..', '..', '..', 'uploads', 'avatars');
@@ -217,21 +225,34 @@ const requestProfileChange = async (req, res) => {
     [req.user.id, JSON.stringify(currentData), JSON.stringify(requested), changedFields]
   );
 
+  // Le Super Admin doit voir la demande arriver — et la voir en temps réel,
+  // comme toute action de la plateforme.
   try {
-    await query(
-      `INSERT INTO notifications (user_id, title, title_ar, message, message_ar, type, priority, related_entity_type, related_entity_id)
-       SELECT u.id, 'Demande de modification de profil', 'طلب تعديل معلومات الملف',
-              $2, $3, 'profile_request', 'high', 'profile_change_request', $4
-       FROM users u JOIN roles r ON u.role_id = r.id
-       WHERE r.code = 'super_admin' AND u.is_active = TRUE`,
-      [
-        req.user.id,
-        `${req.user.firstName} ${req.user.lastName} a soumis une demande (${changedFields.length} champ(s))`,
-        `قدّم ${req.user.firstName} ${req.user.lastName} طلب تعديل ملفه`,
-        result.rows[0].id,
-      ]
+    const admins = await query(
+      `SELECT u.id FROM users u JOIN roles r ON u.role_id = r.id
+       WHERE r.code = 'super_admin' AND u.is_active = TRUE`
     );
-  } catch (_) {}
+    for (const admin of admins.rows) {
+      await createNotification({
+        establishmentId: req.user.establishmentId,
+        recipientId: admin.id,
+        senderId: req.user.id,
+        type: 'profile_request',
+        title: 'Demande de modification de profil',
+        titleAr: 'طلب تعديل معلومات الملف',
+        message: `${req.user.firstName} ${req.user.lastName} a soumis une demande (${changedFields.length} champ(s))`,
+        messageAr: `قدّم ${req.user.firstName} ${req.user.lastName} طلب تعديل ملفه`,
+        entityType: 'profile_change_request',
+        entityId: result.rows[0].id,
+        priority: 'high',
+      });
+      emitToUser(req.app, admin.id, 'notification:new', { type: 'profile_request' });
+    }
+  } catch (err) {
+    // La demande est enregistrée : un échec d'avertissement ne doit pas la
+    // faire échouer. Mais il est tracé, contrairement à avant.
+    console.error('Notification de demande de profil non envoyée:', err.message);
+  }
 
   return res.status(201).json({
     success: true,
@@ -349,14 +370,24 @@ const adminApproveRequest = async (req, res) => {
   });
 
   try {
-    await query(
-      `INSERT INTO notifications (user_id, title, title_ar, message, message_ar, type, priority)
-       VALUES ($1,'Profil mis à jour','تم تحديث ملفك الشخصي',
-               'Votre demande de modification a été approuvée.',
-               'تمت الموافقة على طلب تعديل ملفك الشخصي.','profile_approved','normal')`,
-      [user_id]
-    );
-  } catch (_) {}
+    const target = await query('SELECT establishment_id FROM users WHERE id = $1', [user_id]);
+    await createNotification({
+      establishmentId: target.rows[0]?.establishment_id || req.user.establishmentId,
+      recipientId: user_id,
+      senderId: req.user.id,
+      type: 'profile_approved',
+      title: 'Profil mis à jour',
+      titleAr: 'تم تحديث ملفك الشخصي',
+      message: 'Votre demande de modification a été approuvée.',
+      messageAr: 'تمت الموافقة على طلب تعديل ملفك الشخصي.',
+      entityType: 'profile_change_request',
+      entityId: req.params.id,
+      priority: 'normal',
+    });
+    emitToUser(req.app, user_id, 'notification:new', { type: 'profile_approved' });
+  } catch (err) {
+    console.error('Notification d\'approbation de profil non envoyée:', err.message);
+  }
 
   return res.json({ success: true, message: 'Modifications approuvées et appliquées' });
 };
@@ -368,7 +399,10 @@ const adminRejectRequest = async (req, res) => {
   if (!reason) return res.status(400).json({ success: false, message: 'Motif de refus obligatoire' });
 
   const reqRow = await query(
-    'SELECT user_id FROM profile_change_requests WHERE id = $1 AND status = $2',
+    `SELECT pcr.user_id, u.establishment_id
+     FROM profile_change_requests pcr
+     JOIN users u ON pcr.user_id = u.id
+     WHERE pcr.id = $1 AND pcr.status = $2`,
     [req.params.id, 'pending']
   );
   if (!reqRow.rows[0]) return res.status(404).json({ success: false, message: 'Demande introuvable ou déjà traitée' });
@@ -381,16 +415,23 @@ const adminRejectRequest = async (req, res) => {
   );
 
   try {
-    await query(
-      `INSERT INTO notifications (user_id, title, title_ar, message, message_ar, type, priority)
-       VALUES ($1,'Demande de profil refusée','تم رفض طلب التعديل',$2,$3,'profile_rejected','normal')`,
-      [
-        reqRow.rows[0].user_id,
-        `Votre demande a été refusée. Motif : ${reason}`,
-        `تم رفض طلب تعديل ملفك. السبب : ${reason}`,
-      ]
-    );
-  } catch (_) {}
+    await createNotification({
+      establishmentId: reqRow.rows[0].establishment_id || req.user.establishmentId,
+      recipientId: reqRow.rows[0].user_id,
+      senderId: req.user.id,
+      type: 'profile_rejected',
+      title: 'Demande de profil refusée',
+      titleAr: 'تم رفض طلب التعديل',
+      message: `Votre demande a été refusée. Motif : ${reason}`,
+      messageAr: `تم رفض طلب تعديل ملفك. السبب : ${reason}`,
+      entityType: 'profile_change_request',
+      entityId: req.params.id,
+      priority: 'normal',
+    });
+    emitToUser(req.app, reqRow.rows[0].user_id, 'notification:new', { type: 'profile_rejected' });
+  } catch (err) {
+    console.error('Notification de refus de profil non envoyée:', err.message);
+  }
 
   return res.json({ success: true, message: 'Demande refusée' });
 };

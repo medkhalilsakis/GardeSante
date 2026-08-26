@@ -1,19 +1,24 @@
 import React, { useId } from 'react';
+import { Check, X } from 'lucide-react';
 
+/* Deux qualifications qui s'opposent : un motif est retenu, ou il ne l'est pas.
+   C'est un état, pas une catégorie — le service pour ce qui est en règle, le
+   degré haut de l'alerte pour ce qui est fautif. Les couleurs figées d'origine
+   restaient claires en thème sombre et le badge s'effaçait sur son fond. */
 const OPTIONS = [
   {
     value: true,
     label: 'Justifiée',
     description: 'Un motif valable ou un justificatif existe.',
-    color: '#059669',
-    background: 'rgba(16, 185, 129, .10)',
+    color: 'var(--gs-duty)',
+    background: 'var(--gs-duty-wash)',
   },
   {
     value: false,
     label: 'Non justifiée',
     description: 'Aucun motif valable ou justificatif n’est retenu.',
-    color: '#DC2626',
-    background: 'rgba(239, 68, 68, .10)',
+    color: 'var(--gs-alert-strong)',
+    background: 'var(--gs-alert-wash)',
   },
 ];
 
@@ -22,7 +27,7 @@ export function JustificationBadge({ value, emptyLabel = 'Non renseignée' }) {
     return (
       <span style={{
         display: 'inline-flex', alignItems: 'center', padding: '3px 8px', borderRadius: 999,
-        fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-elevated)',
+        fontSize: 11, fontWeight: 700, color: 'var(--gs-ink-faint)', background: 'var(--gs-paper-alt)',
         whiteSpace: 'nowrap',
       }}>
         {emptyLabel}
@@ -35,9 +40,11 @@ export function JustificationBadge({ value, emptyLabel = 'Non renseignée' }) {
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 999,
       fontSize: 11, fontWeight: 700, color: option.color, background: option.background,
-      border: `1px solid ${option.color}35`, whiteSpace: 'nowrap',
+      /* Le suffixe `35` collé à la couleur ne tenait que parce qu'elle était un
+         hexadécimal. Avec un jeton, il faut un mélange. */
+      border: `1px solid color-mix(in srgb, ${option.color} 34%, transparent)`, whiteSpace: 'nowrap',
     }}>
-      <span aria-hidden="true">{value ? '✓' : '✕'}</span>
+      {value ? <Check size={12} strokeWidth={3} aria-hidden="true" /> : <X size={12} strokeWidth={3} aria-hidden="true" />}
       {option.label}
     </span>
   );
@@ -56,7 +63,7 @@ export default function JustificationChoice({
   return (
     <fieldset style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }} disabled={disabled}>
       <legend className="form-label" style={{ marginBottom: 7 }}>
-        {label}{required && <span style={{ color: 'var(--color-danger)' }}> *</span>}
+        {label}{required && <span style={{ color: 'var(--gs-alert-strong)' }}> *</span>}
       </legend>
       <div role="radiogroup" aria-label={`${label} de ${subject.toLowerCase()}`} style={{
         display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 8,
@@ -67,8 +74,8 @@ export default function JustificationChoice({
             <label key={String(option.value)} style={{
               display: 'flex', alignItems: 'flex-start', gap: 9, padding: '10px 12px',
               borderRadius: 9, cursor: disabled ? 'not-allowed' : 'pointer',
-              border: `1px solid ${selected ? option.color : 'var(--border-default)'}`,
-              background: selected ? option.background : 'var(--bg-card)',
+              border: `1px solid ${selected ? option.color : 'var(--gs-rule)'}`,
+              background: selected ? option.background : 'var(--gs-paper)',
               opacity: disabled ? 0.6 : 1,
             }}>
               <input
@@ -80,10 +87,10 @@ export default function JustificationChoice({
                 style={{ marginTop: 2, accentColor: option.color }}
               />
               <span>
-                <span style={{ display: 'block', color: selected ? option.color : 'var(--text-primary)', fontSize: 13, fontWeight: 800 }}>
+                <span style={{ display: 'block', color: selected ? option.color : 'var(--gs-ink)', fontSize: 13, fontWeight: 800 }}>
                   {subject} {option.label.toLowerCase()}
                 </span>
-                <span style={{ display: 'block', marginTop: 2, color: 'var(--text-muted)', fontSize: 10.5, lineHeight: 1.35 }}>
+                <span style={{ display: 'block', marginTop: 2, color: 'var(--gs-ink-faint)', fontSize: 10.5, lineHeight: 1.35 }}>
                   {option.description}
                 </span>
               </span>

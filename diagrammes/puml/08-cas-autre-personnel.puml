@@ -1,0 +1,93 @@
+' ============================================================================
+' GardeSanté — Cas d'utilisation : Autre Personnel (niveau 8, 0 permission)
+'
+' Sources vérifiées :
+'   - Le rôle `autre` est absent de la table `role_permissions` : il ne détient
+'     aucune permission. Effectif observé en base : 10 comptes.
+'   - Il atteint néanmoins les écrans dont la route n'est gardée que par
+'     `authenticate` (frontend/src/App.jsx : <ProtectedRoute> sans `roles` ni
+'     `permission`), le serveur bornant ensuite la réponse à son périmètre.
+' ============================================================================
+@startuml 08-cas-autre-personnel
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ActorBorderColor #0F766E
+skinparam ActorBackgroundColor #E6F4F1
+skinparam ActorFontStyle bold
+skinparam UsecaseBorderColor #1B4FCA
+skinparam UsecaseBackgroundColor #EEF2FF
+skinparam usecase {
+BackgroundColor<<hérité>> #F1F5F9
+BorderColor<<hérité>> #94A3B8
+FontColor<<hérité>> #475569
+BackgroundColor<<refusé>> #FEE2E2
+BorderColor<<refusé>> #B91C1C
+FontColor<<refusé>> #7F1D1D
+}
+skinparam PackageBorderColor #94A3B8
+skinparam PackageBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Cas d'utilisation — Autre Personnel\nniveau 8 · aucune permission
+
+left to right direction
+
+actor "Utilisateur\nauthentifié" as U
+actor "Autre Personnel" as AUT
+U <|-- AUT
+
+package "Socle commun\n(seul périmètre accessible)" as P0 {
+  usecase "S'authentifier" as UC_LOGIN <<hérité>>
+  usecase "Changer son mot de passe" as UC_PWD <<hérité>>
+  usecase "Consulter son profil" as UC_PROF <<hérité>>
+  usecase "Demander une modification\nde son profil" as UC_PROF_REQ <<hérité>>
+  usecase "Consulter ses notifications" as UC_NOTIF <<hérité>>
+  usecase "Lire les notes\net circulaires" as UC_NOTE <<hérité>>
+  usecase "Consulter son propre\nhistorique" as UC_HIST <<hérité>>
+}
+
+package "Refusé par le serveur" as P1 {
+  usecase "Consulter les plannings\nde garde" as UC_PLAN <<refusé>>
+  usecase "Déclarer une absence" as UC_ABS <<refusé>>
+  usecase "Consulter le portfolio\ndu service" as UC_PORT <<refusé>>
+  usecase "Consulter les statistiques" as UC_STAT <<refusé>>
+}
+
+U --> UC_LOGIN
+U --> UC_PWD
+U --> UC_PROF
+U --> UC_PROF_REQ
+U --> UC_NOTIF
+U --> UC_NOTE
+U --> UC_HIST
+
+AUT ..> UC_PLAN #B91C1C : 403
+AUT ..> UC_ABS #B91C1C : 403
+AUT ..> UC_PORT #B91C1C : 403
+AUT ..> UC_STAT #B91C1C : 403
+
+note as N1
+Ce paquet ne fait pas partie du périmètre du rôle :
+il documente les refus. `requirePermission` rejette
+l'appel en 403 puisque `role_permissions` ne contient
+aucune ligne pour `autre`. Le rôle sert à référencer
+un agent dans un planning sans lui ouvrir la
+plateforme — un agent référencé n'est pas un
+utilisateur actif.
+end note
+
+legend right
+Gris : capacités héritées du socle authentifié.
+Rouge : cas refusés par le serveur, tracés pour
+documenter la borne du rôle.
+endlegend
+
+' Ancrage des notes flottantes
+N1 .. UC_PLAN
+
+@enduml

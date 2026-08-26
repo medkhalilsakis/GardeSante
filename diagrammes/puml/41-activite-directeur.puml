@@ -1,0 +1,202 @@
+' ============================================================================
+' GardeSanté — Diagramme d'activités : Directeur d'établissement
+'
+' Le Directeur est le seul rôle qui réunisse les deux ensembles disjoints
+' « élaborer » et « valider » : il détient à la fois les permissions du Chef de
+' Service et celles du Surveillant Général. Son activité se lit donc en trois
+' temps — armer l'hôpital, le faire tourner, en rendre compte.
+'
+' Sources vérifiées :
+'   backend/src/db/migrations/012_role_autre.sql
+'     36 permissions : celles du Super Admin moins establishments.create,
+'     .update et .delete. Il conserve establishments.config et .read.
+'   backend/src/modules/departments/departments.routes.js
+'     :11-19  créer, modifier, supprimer un service ; migrer et désactiver ;
+'             nommer le chef et le ou les surveillants ; gérer les membres
+'   backend/src/modules/users/users.controller.js
+'     création de compte, rôle et grade, archivage
+'   backend/src/modules/establishments/establishments.controller.js
+'     configuration de l'établissement et règles de garde
+'   backend/src/modules/schedules/schedule-builder.controller.js:1317-1360
+'     la soumission met le planning en vigueur SANS approbation : le statut
+'     devient 'active' si la période a commencé, 'submitted' sinon
+'   backend/src/modules/schedules/schedule-inbox.controller.js:29-33
+'     ESTABLISHMENT_SCOPE inclut le directeur : il lit les plannings en
+'     vigueur de tous les services de son hôpital
+'   backend/src/modules/schedules/schedule-builder.controller.js
+'     :873-879  canProposeScheduleChange n'admet QUE le surveillant général
+'               et le surveillant de service membre du service : le directeur
+'               est refusé, sans échappatoire super-administrateur
+'     :463-473  saveDraft — l'édition directe d'un planning en vigueur est
+'               réservée au chef de CE service ; le directeur est refusé aussi
+'     :1224     decideChangeProposal — arbitrer une proposition est également
+'               réservé au chef de ce service
+'     ÉCART : le directeur cumule les permissions des deux camps, mais sur un
+'     planning déjà en vigueur il ne détient aucun levier direct — ni
+'     proposition, ni édition, ni arbitrage. Il ne lui reste que la note.
+'   backend/src/modules/leaves/…  → modules/absences/leaves.controller.js
+'     :18     MANAGER_ROLES = directeur | administrateur d'hôpital
+'     :278-282 le congé est inséré directement en statut 'approved',
+'             approuvé par son auteur : il n'existe aucune demande à arbitrer
+'   backend/src/modules/journal/journal.controller.js
+'     :54     EVENT_WRITE_ROLES inclut le directeur
+'     :344    mais il est restreint aux seuls événements de type « présence »
+'   backend/src/modules/schedules/staff-loans.controller.js:189
+'     WATCHER_ROLES : il suit les prêts, il ne les arbitre pas
+'   backend/src/modules/notes/notes.controller.js
+'     resolveScope ⇒ portée 'establishment_staff'
+'   backend/src/modules/history/history.controller.js:9
+'     OVERSIGHT_ROLES : lecture du journal de tout son établissement
+' ============================================================================
+@startuml 41-activite-directeur
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontColor #0F172A
+  DiamondBackgroundColor #EEF2FF
+  DiamondBorderColor #1B4FCA
+  DiamondFontColor #1B4FCA
+  StartColor #0F766E
+  EndColor #B91C1C
+  BarColor #7A3E9D
+}
+skinparam partition {
+  BackgroundColor #F8FAFC
+  BorderColor #94A3B8
+  FontColor #475569
+  FontStyle bold
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Activités — Directeur : armer l'hôpital, le faire tourner, en rendre compte
+
+start
+
+:s'authentifier;
+
+partition "Armer l'hôpital" {
+  :configurer l'établissement\ncapacité, horaires, paramètres;
+  :définir les règles de garde\nde l'hôpital;
+  note right
+    Les règles définies ici sont celles que le
+    moteur opposera plus tard à chaque tableur
+    soumis. Les fixer, c'est décider ce qui
+    sera refusé au chef de service.
+  end note
+
+  :créer les services;
+
+  repeat
+    :créer un compte\nnom, courriel, rôle, grade;
+    :le rattacher à un service;
+  repeat while (reste-t-il du personnel à inscrire ?) is (oui)
+  -> non;
+
+  :nommer le chef de chaque service;
+  :nommer le ou les surveillants de service;
+  note right
+    Un service sans chef désigné ne peut pas
+    répondre à une demande de prêt : le système
+    approuve alors d'office plutôt que de
+    laisser la demande sans destinataire.
+  end note
+  #E6F4F1:consigner chaque acte au journal;
+}
+
+partition "Faire tourner l'hôpital" {
+  repeat
+    fork
+      :suivre le tableau de bord\ncouverture, effectifs, alertes;
+      if (un service est-il\ndécouvert ?) then (oui)
+        :alerter le chef concerné\npar une note de service;
+      else (non)
+      endif
+
+    fork again
+      :relever les plannings\nen vigueur;
+      if (une correction\ns'impose-t-elle ?) then (oui)
+        #FEE2E2:refusé — ni proposition,\nni édition, ni arbitrage;
+        :en saisir le chef de service\npar une note;
+      else (non)
+      endif
+
+    fork again
+      :enregistrer un congé;
+      #F3E8FF:écrire l'absence et lever\nle drapeau « en congé »;
+
+    fork again
+      :suivre les prêts de personnel\nentre services;
+
+    fork again
+      :faire l'appel du jour;
+      if (est-ce une présence ?) then (oui)
+        :enregistrer la présence;
+      else (non)
+        #FEE2E2:refusé — ni remarque,\nni incident, ni renfort;
+      endif
+    end fork
+
+    if (une information doit-elle circuler ?) then (oui)
+      :publier une note\nà tout l'établissement;
+      if (des agents ne l'ont pas lue ?) then (oui)
+        :relancer les lecteurs manquants;
+      else (non)
+      endif
+    else (non)
+    endif
+  repeat while (l'hôpital est en activité) is (oui)
+  -> non;
+}
+
+partition "Rendre compte" {
+  :consulter les statistiques\nde l'établissement;
+  :exporter en Excel, PDF ou CSV;
+  :lire le journal de tous les acteurs\nde son établissement;
+  note right
+    Portée bornée à son hôpital, déduite de
+    l'établissement de l'auteur de chaque
+    ligne : le journal ne porte pas lui-même
+    de colonne d'établissement.
+  end note
+}
+
+stop
+
+floating note left
+  **Ce que le fonctionnement courant recouvre.** La boîte des plannings n'est pas
+  un guichet d'approbation : le planning est déjà en vigueur quand le directeur
+  le voit, et il ne détient aucun levier direct dessus. Proposer une modification
+  est réservé aux deux surveillants ; l'éditer directement et arbitrer les
+  propositions, au chef de CE service. Le directeur est refusé aux trois : sa
+  seule voie est la note de service. Les prêts de personnel, de même, se suivent
+  en lecture seule — la décision appartient au chef du service qui perd l'agent.
+  ====
+  **Le congé n'est pas une demande.** Il est saisi par la direction et
+  enregistré immédiatement accordé, avec son propre auteur pour approbateur. Il
+  n'existe aucune demande en attente qu'un agent formulerait et qu'on
+  arbitrerait ensuite : les états « en attente » et « refusé » figurent au
+  schéma de la base, mais aucun chemin du logiciel n'y conduit.
+  ====
+  **Le Directeur peut composer un planning, mais pas le faire générer.** Il
+  détient schedules.create, .update, .submit et .generate, et rien dans le code
+  ne l'empêche d'ouvrir un brouillon, d'en écrire la grille et de l'envoyer. En
+  revanche l'assistant de répartition lui est fermé : la génération n'admet que
+  le chef de service et le surveillant de service, alors même que la permission
+  lui est accordée en base. En marche normale il ne s'en sert pas — composer le
+  tableur reste l'affaire du service.
+end note
+
+legend right
+  Fond teinté vert : écriture au journal d'activité. Fond teinté violet : écriture en base.
+  Fond teinté rouge : refus. Les cinq branches du fonctionnement courant sont concurrentes.
+  Le cycle de vie complet d'un planning fait l'objet de la figure 21.
+endlegend
+
+@enduml

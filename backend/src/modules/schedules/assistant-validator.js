@@ -18,7 +18,7 @@
  */
 
 const { findLeaveViolations } = require('../absences/leave-check');
-const { normalizeCode, isGuard, REST_CODE } = require('./spreadsheet-reader');
+const { isMarked } = require('./spreadsheet-reader');
 
 const SEVERITY = { ERROR: 'error', WARNING: 'warning' };
 
@@ -26,14 +26,14 @@ const SEVERITY = { ERROR: 'error', WARNING: 'warning' };
 const rowName = (row) =>
   `${row.firstName || ''} ${row.lastName || ''}`.trim() || 'Agent sans nom';
 
-/** Toutes les cases qui comptent comme garde, à plat. */
+/** Toutes les journées de service posées par l'assistant, à plat. */
 const guardAssignments = (rows) => {
   const out = [];
   for (const row of rows || []) {
     if (!row.userId) continue;
-    for (const [date, code] of Object.entries(row.shifts || {})) {
-      if (!isGuard(code)) continue;
-      out.push({ userId: row.userId, date: String(date).slice(0, 10), code: normalizeCode(code), row });
+    for (const [date, value] of Object.entries(row.shifts || {})) {
+      if (!isMarked(value)) continue;
+      out.push({ userId: row.userId, date: String(date).slice(0, 10), row });
     }
   }
   return out;
@@ -79,8 +79,8 @@ const checkDoubleBooking = (rows) => {
 
   for (const row of rows || []) {
     if (!row.userId) continue;
-    for (const [date, code] of Object.entries(row.shifts || {})) {
-      if (!isGuard(code)) continue;
+    for (const [date, value] of Object.entries(row.shifts || {})) {
+      if (!isMarked(value)) continue;
       const key = `${row.userId}|${String(date).slice(0, 10)}`;
       if (seen.has(key)) {
         anomalies.push({
@@ -114,7 +114,7 @@ const checkUnderstaffing = (rows, dates, requirements = {}) => {
 
   const anomalies = [];
   for (const date of dates) {
-    const onGuard = (rows || []).filter((r) => r.userId && isGuard(r.shifts?.[date]));
+    const onGuard = (rows || []).filter((r) => r.userId && isMarked(r.shifts?.[date]));
 
     if (minPerDay && onGuard.length < minPerDay) {
       anomalies.push({
@@ -151,7 +151,7 @@ const checkOverload = (rows, requirements = {}) => {
   for (const row of rows || []) {
     if (!row.userId) continue;
     const guardDates = Object.entries(row.shifts || {})
-      .filter(([, code]) => isGuard(code))
+      .filter(([, value]) => isMarked(value))
       .map(([date]) => String(date).slice(0, 10))
       .sort();
 
@@ -207,7 +207,7 @@ const checkRest = (rows, requirements = {}) => {
   for (const row of rows || []) {
     if (!row.userId) continue;
     const guardDates = Object.entries(row.shifts || {})
-      .filter(([, code]) => isGuard(code))
+      .filter(([, value]) => isMarked(value))
       .map(([date]) => String(date).slice(0, 10))
       .sort();
 
@@ -261,7 +261,6 @@ const validateProposal = async ({ rows = [], dates = [], startDate, endDate, req
 
 module.exports = {
   SEVERITY,
-  REST_CODE,
   validateProposal,
   guardAssignments,
   weekKey,

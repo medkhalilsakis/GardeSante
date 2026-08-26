@@ -23,7 +23,7 @@ const { query, transaction } = require('../../config/database');
 const { log, getIp } = require('../history/history.controller');
 const { generateV2, MODES, computeMetrics } = require('./assistant-generator');
 const { validateProposal } = require('./assistant-validator');
-const { datesBetween, isGuard } = require('./spreadsheet-reader');
+const { datesBetween, isMarked } = require('./spreadsheet-reader');
 const { emitToDepartment } = require('../../realtime/emit');
 
 /** Rôles autorisés à piloter l'assistant : ceux qui construisent un planning. */
@@ -260,7 +260,7 @@ const applyFixes = async (req, res) => {
         const row = byUser.get(fix.userId);
         if (!row) continue;
         const dates = Object.keys(row.shifts)
-          .filter((d) => isGuard(row.shifts[d]))
+          .filter((d) => isMarked(row.shifts[d]))
           .sort();
         const scoped = fix.action === 'trim_week'
           ? dates.filter((d) => {
@@ -285,7 +285,7 @@ const applyFixes = async (req, res) => {
 
         // Rejouer le générateur sur la seule journée manquante réutilise toute la
         // logique de disponibilité (congés, périodes, jours exclus) sans la dupliquer.
-        const candidates = next.filter((r) => r.userId && !isGuard(r.shifts[date]));
+        const candidates = next.filter((r) => r.userId && !isMarked(r.shifts[date]));
         const single = await generateV2({
           members: candidates.map((r) => ({
             ...r,
@@ -303,10 +303,10 @@ const applyFixes = async (req, res) => {
 
         let filled = 0;
         for (const candidate of single.rows) {
-          if (!isGuard(candidate.shifts[date])) continue;
+          if (!isMarked(candidate.shifts[date])) continue;
           const row = byUser.get(candidate.userId);
-          if (!row || isGuard(row.shifts[date])) continue;
-          row.shifts[date] = candidate.shifts[date];
+          if (!row || isMarked(row.shifts[date])) continue;
+          row.shifts[date] = true;
           filled += 1;
           if (filled >= wanted) break;
         }

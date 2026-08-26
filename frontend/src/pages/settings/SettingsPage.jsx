@@ -1,271 +1,233 @@
-import React, { useState } from 'react';
-import { useAuthStore, useUIStore } from '../../store';
-import { authAPI, usersAPI } from '../../api';
-import { useTranslation } from '../../utils/helpers';
+import { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import {
+  Check,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Globe2,
+  KeyRound,
+  Languages,
+  LockKeyhole,
+  MonitorCog,
+  Moon,
+  Settings2,
+  ShieldCheck,
+  Sun,
+  UserRound,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
+import { profileAPI } from '../../api';
+import Avatar from '../../components/common/Avatar';
+import { GsBadge, GsPageHeader, GsPanel, GsTabRail } from '../../components/gs';
+import { useAuthStore, useUIStore } from '../../store';
+import { useTranslation } from '../../utils/helpers';
+import './settings.css';
 
-export default function SettingsPage() {
-  const { user, updateUser } = useAuthStore();
-  const { language, setLanguage } = useUIStore();
-  const { t } = useTranslation();
+const TABS = [
+  { id: 'account', label: 'Compte', icon: <UserRound size={15} aria-hidden="true" /> },
+  { id: 'security', label: 'Sécurité', icon: <ShieldCheck size={15} aria-hidden="true" /> },
+  { id: 'preferences', label: 'Préférences', icon: <Settings2 size={15} aria-hidden="true" /> },
+];
 
-  const [activeTab, setActiveTab] = useState('profile');
-  const [profileForm, setProfileForm] = useState({
-    firstName: user?.firstName || '',
-    lastName: user?.lastName || '',
-    phone: user?.phone || '',
-    speciality: user?.speciality || '',
-  });
-  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
-  const [saving, setSaving] = useState(false);
+function Field({ label, required = false, hint, children }) {
+  return (
+    <label className="gsset-field">
+      <span>{label}{required ? <b aria-hidden="true">*</b> : null}</span>
+      {children}
+      {hint ? <small>{hint}</small> : null}
+    </label>
+  );
+}
 
-  const handleSaveProfile = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      const res = await usersAPI.update(user.id, profileForm);
-      updateUser(res.data.data);
-      toast.success('Profil mis à jour');
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Erreur');
-    } finally { setSaving(false); }
-  };
-
-  const handleChangePassword = async (e) => {
-    e.preventDefault();
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      return toast.error('Les mots de passe ne correspondent pas');
-    }
-    if (passwordForm.newPassword.length < 8) {
-      return toast.error('Le mot de passe doit contenir au moins 8 caractères');
-    }
-    setSaving(true);
-    try {
-      await authAPI.changePassword({ currentPassword: passwordForm.currentPassword, newPassword: passwordForm.newPassword });
-      toast.success('Mot de passe modifié avec succès');
-      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Mot de passe actuel incorrect');
-    } finally { setSaving(false); }
-  };
-
-  const tabs = [
-    { id: 'profile', label: 'Mon profil', icon: '👤' },
-    { id: 'security', label: 'Sécurité', icon: '🔐' },
-    { id: 'preferences', label: 'Préférences', icon: '⚙️' },
+function AccountTab({ user, roleLabel, onOpenProfile }) {
+  const facts = [
+    ['Adresse email', user?.email],
+    ['Matricule', user?.matricule],
+    ['Rôle', roleLabel],
+    ['Grade', user?.grade],
+    ['Établissement', user?.establishmentName],
+    ['Service principal', user?.departments?.find((department) => department.isPrimary)?.name || user?.departments?.[0]?.name],
   ];
 
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Paramètres</h1>
-          <p className="page-subtitle">Gérer votre compte et vos préférences</p>
+    <div className="gsset-account-grid">
+      <GsPanel title="Dossier de compte" sub="Résumé des informations utilisées par la plateforme." icon={<UserRound size={18} aria-hidden="true" />}>
+        <div className="gsset-account-card">
+          <Avatar avatarUrl={user?.avatarUrl} firstName={user?.firstName} lastName={user?.lastName} size="xl" />
+          <div>
+            <span className="gs-eyebrow">Compte connecté</span>
+            <h2>{user?.firstName} {user?.lastName}</h2>
+            <p>{roleLabel}</p>
+          </div>
+          <GsBadge tone="duty" dot>Session active</GsBadge>
         </div>
-      </div>
+        <dl className="gsset-facts">
+          {facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '—'}</dd></div>)}
+        </dl>
+      </GsPanel>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 'var(--space-6)' }}>
-        {/* Sidebar onglets */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '10px 14px',
-                borderRadius: 'var(--border-radius-sm)',
-                border: 'none',
-                background: activeTab === tab.id ? 'var(--color-primary-10)' : 'transparent',
-                color: activeTab === tab.id ? 'var(--color-primary-light)' : 'var(--text-secondary)',
-                fontWeight: activeTab === tab.id ? 600 : 400,
-                fontSize: 'var(--font-sm)',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                textAlign: 'left',
-                transition: 'all var(--transition-fast)',
-                borderLeft: activeTab === tab.id ? '2px solid var(--color-primary)' : '2px solid transparent',
-              }}
-            >
-              <span>{tab.icon}</span>
-              <span>{tab.label}</span>
+      <GsPanel title="Informations personnelles" sub="Les modifications suivent le circuit d’approbation et restent traçables." icon={<MonitorCog size={18} aria-hidden="true" />}>
+        <div className="gsset-profile-link">
+          <div>
+            <strong>Ouvrir le dossier de profil</strong>
+            <p>Photo, coordonnées, identité, fonction déclarée et historique des demandes.</p>
+          </div>
+          <button type="button" className="gs-btn is-primary" onClick={onOpenProfile}>
+            Gérer mon profil <ChevronRight size={15} aria-hidden="true" />
+          </button>
+        </div>
+      </GsPanel>
+    </div>
+  );
+}
+
+function SecurityTab() {
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [showPassword, setShowPassword] = useState(false);
+
+  const changePassword = useMutation({
+    mutationFn: (data) => profileAPI.updateCredentials(data),
+    onSuccess: () => {
+      toast.success('Mot de passe modifié avec succès');
+      setForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Mot de passe actuel incorrect'),
+  });
+
+  const checks = [
+    { label: '8 caractères minimum', ok: form.newPassword.length >= 8 },
+    { label: 'une majuscule', ok: /[A-Z]/.test(form.newPassword) },
+    { label: 'un chiffre', ok: /[0-9]/.test(form.newPassword) },
+    { label: 'un caractère spécial', ok: /[^A-Za-z0-9]/.test(form.newPassword) },
+  ];
+
+  const submit = (event) => {
+    event.preventDefault();
+    if (form.newPassword !== form.confirmPassword) return toast.error('Les mots de passe ne correspondent pas');
+    if (form.newPassword.length < 8) return toast.error('Le mot de passe doit contenir au moins 8 caractères');
+    changePassword.mutate({ currentPassword: form.currentPassword, newPassword: form.newPassword });
+  };
+
+  return (
+    <GsPanel title="Changer le mot de passe" sub="La nouvelle valeur doit être unique et ne jamais être partagée." icon={<LockKeyhole size={18} aria-hidden="true" />} className="gsset-security-panel">
+      <form className="gsset-security-form" onSubmit={submit}>
+        <Field label="Mot de passe actuel" required>
+          <div className="gsset-password-input">
+            <input type={showPassword ? 'text' : 'password'} value={form.currentPassword} onChange={(event) => setForm((current) => ({ ...current, currentPassword: event.target.value }))} autoComplete="current-password" />
+            <button type="button" onClick={() => setShowPassword((shown) => !shown)} aria-label={showPassword ? 'Masquer les mots de passe' : 'Afficher les mots de passe'}>
+              {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+            </button>
+          </div>
+        </Field>
+        <Field label="Nouveau mot de passe" required><input type={showPassword ? 'text' : 'password'} value={form.newPassword} onChange={(event) => setForm((current) => ({ ...current, newPassword: event.target.value }))} autoComplete="new-password" /></Field>
+        <Field label="Confirmation" required><input type={showPassword ? 'text' : 'password'} value={form.confirmPassword} onChange={(event) => setForm((current) => ({ ...current, confirmPassword: event.target.value }))} autoComplete="new-password" /></Field>
+
+        {form.newPassword ? (
+          <ul className="gsset-password-rules">
+            {checks.map((check) => <li key={check.label} data-valid={check.ok ? 'true' : 'false'}>{check.ok ? <Check size={13} aria-hidden="true" /> : <span aria-hidden="true" />}{check.label}</li>)}
+          </ul>
+        ) : null}
+
+        <div className="gsset-security-actions">
+          <span>La mise à jour révoque les jetons de renouvellement existants.</span>
+          <button type="submit" className="gs-btn is-danger" disabled={changePassword.isPending || !form.currentPassword || !form.newPassword || form.newPassword !== form.confirmPassword}>
+            <KeyRound size={15} aria-hidden="true" /> {changePassword.isPending ? 'Modification…' : 'Modifier le mot de passe'}
+          </button>
+        </div>
+      </form>
+    </GsPanel>
+  );
+}
+
+function PreferencesTab({ user }) {
+  const { language, setLanguage, theme, setTheme } = useUIStore();
+  const updateUser = useAuthStore((state) => state.updateUser);
+
+  const saveLanguage = useMutation({
+    mutationFn: (preferredLanguage) => profileAPI.updatePreferences({ preferredLanguage }),
+    onSuccess: (_response, preferredLanguage) => {
+      setLanguage(preferredLanguage);
+      updateUser({ preferredLanguage });
+      toast.success(preferredLanguage === 'fr' ? 'Interface en français' : 'تم تغيير لغة الواجهة');
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Impossible d’enregistrer la langue'),
+  });
+
+  const languages = [
+    { id: 'fr', name: 'Français', detail: 'Lecture de gauche à droite' },
+    { id: 'ar', name: 'العربية', detail: 'واجهة من اليمين إلى اليسار' },
+  ];
+
+  const themes = [
+    { id: 'light', name: 'Clair', detail: 'Papier clair et encre sombre', icon: Sun },
+    { id: 'dark', name: 'Sombre', detail: 'Papier sombre et encre claire', icon: Moon },
+  ];
+
+  return (
+    <div className="gsset-preference-grid">
+      <GsPanel title="Langue de l’interface" sub="La préférence est liée à votre compte et suit votre prochaine session." icon={<Languages size={18} aria-hidden="true" />}>
+        <div className="gsset-option-list">
+          {languages.map((option) => (
+            <button key={option.id} type="button" aria-pressed={language === option.id} onClick={() => saveLanguage.mutate(option.id)} disabled={saveLanguage.isPending}>
+              <Globe2 size={18} aria-hidden="true" />
+              <span><strong>{option.name}</strong><small>{option.detail}</small></span>
+              {language === option.id ? <Check size={17} aria-hidden="true" /> : null}
             </button>
           ))}
-
-          {/* Avatar */}
-          <div style={{ marginTop: 24, padding: 16, textAlign: 'center' }}>
-            <div className="avatar avatar-xl" style={{
-              background: 'var(--color-primary-10)', color: 'var(--color-primary-light)',
-              fontWeight: 800, margin: '0 auto 12px',
-              fontSize: 'var(--font-3xl)',
-            }}>
-              {user?.firstName?.[0]}{user?.lastName?.[0]}
-            </div>
-            <p style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 'var(--font-sm)' }}>
-              {user?.firstName} {user?.lastName}
-            </p>
-            <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>
-              {t(`roles.${user?.roleCode}`)}
-            </p>
-            <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 4 }}>
-              {user?.establishmentName}
-            </p>
-          </div>
         </div>
+      </GsPanel>
 
-        {/* Contenu onglet */}
-        <div>
-          {/* Profil */}
-          {activeTab === 'profile' && (
-            <div className="card">
-              <div className="card-header">
-                <h3 className="card-title">Informations personnelles</h3>
-              </div>
-              <form onSubmit={handleSaveProfile}>
-                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Prénom</label>
-                      <input className="form-control" value={profileForm.firstName} onChange={e => setProfileForm(f => ({ ...f, firstName: e.target.value }))} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Nom</label>
-                      <input className="form-control" value={profileForm.lastName} onChange={e => setProfileForm(f => ({ ...f, lastName: e.target.value }))} />
-                    </div>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Email</label>
-                    <input className="form-control" value={user?.email} disabled style={{ opacity: 0.5 }} />
-                    <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>L'email ne peut pas être modifié</span>
-                  </div>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Téléphone</label>
-                      <input className="form-control" value={profileForm.phone} onChange={e => setProfileForm(f => ({ ...f, phone: e.target.value }))} placeholder="+213..." />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Spécialité</label>
-                      <input className="form-control" value={profileForm.speciality} onChange={e => setProfileForm(f => ({ ...f, speciality: e.target.value }))} />
-                    </div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, padding: 16, background: 'var(--bg-elevated)', borderRadius: 8 }}>
-                    {[
-                      { label: 'Matricule', value: user?.matricule },
-                      { label: 'Grade', value: user?.grade },
-                      { label: 'Rôle', value: t(`roles.${user?.roleCode}`) },
-                    ].map(({ label, value }) => (
-                      <div key={label}>
-                        <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginBottom: 2 }}>{label}</p>
-                        <p style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 'var(--font-sm)' }}>{value || '—'}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end' }}>
-                  <button type="submit" className="btn btn-primary" disabled={saving}>
-                    {saving ? 'Sauvegarde...' : 'Enregistrer les modifications'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          {/* Sécurité */}
-          {activeTab === 'security' && (
-            <div className="card">
-              <div className="card-header">
-                <h3 className="card-title">🔐 Changer le mot de passe</h3>
-              </div>
-              <form onSubmit={handleChangePassword}>
-                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 420 }}>
-                  <div className="form-group">
-                    <label className="form-label">Mot de passe actuel *</label>
-                    <input type="password" className="form-control" value={passwordForm.currentPassword}
-                      onChange={e => setPasswordForm(f => ({ ...f, currentPassword: e.target.value }))} required />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Nouveau mot de passe *</label>
-                    <input type="password" className="form-control" value={passwordForm.newPassword}
-                      onChange={e => setPasswordForm(f => ({ ...f, newPassword: e.target.value }))} required minLength={8} />
-                    <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>Minimum 8 caractères avec majuscule, chiffre et symbole</span>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Confirmer le mot de passe *</label>
-                    <input type="password" className="form-control" value={passwordForm.confirmPassword}
-                      onChange={e => setPasswordForm(f => ({ ...f, confirmPassword: e.target.value }))} required />
-                    {passwordForm.newPassword && passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && (
-                      <span style={{ fontSize: 'var(--font-xs)', color: 'var(--color-danger)' }}>Les mots de passe ne correspondent pas</span>
-                    )}
-                  </div>
-                </div>
-                <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end' }}>
-                  <button type="submit" className="btn btn-primary" disabled={saving}>
-                    {saving ? 'Modification...' : 'Modifier le mot de passe'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          {/* Préférences */}
-          {activeTab === 'preferences' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div className="card">
-                <div className="card-header">
-                  <h3 className="card-title">🌐 Langue & Direction</h3>
-                </div>
-                <div className="card-body">
-                  <p style={{ fontSize: 'var(--font-sm)', color: 'var(--text-secondary)', marginBottom: 16 }}>
-                    Choisissez la langue d'affichage de l'interface. Le mode arabe activera automatiquement le sens RTL.
-                  </p>
-                  <div style={{ display: 'flex', gap: 12 }}>
-                    {[
-                      { lang: 'fr', label: '🇫🇷 Français', sublabel: 'Interface en français (LTR)' },
-                      { lang: 'ar', label: '🇩🇿 العربية', sublabel: 'واجهة عربية (RTL)' },
-                    ].map(({ lang, label, sublabel }) => (
-                      <button
-                        key={lang}
-                        onClick={() => { setLanguage(lang); toast.success(lang === 'fr' ? 'Interface passée en français' : 'تم تغيير اللغة إلى العربية'); }}
-                        style={{
-                          flex: 1, padding: '16px 20px',
-                          background: language === lang ? 'var(--color-primary-10)' : 'var(--bg-elevated)',
-                          border: `2px solid ${language === lang ? 'var(--color-primary)' : 'var(--border-default)'}`,
-                          borderRadius: 10, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
-                          transition: 'all var(--transition-fast)',
-                        }}
-                      >
-                        <p style={{ fontSize: 'var(--font-lg)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>{label}</p>
-                        <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>{sublabel}</p>
-                        {language === lang && <p style={{ fontSize: 'var(--font-xs)', color: 'var(--color-success)', marginTop: 4 }}>✓ Langue actuelle</p>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="card-header">
-                  <h3 className="card-title">ℹ️ Informations système</h3>
-                </div>
-                <div className="card-body">
-                  <div style={{ display: 'grid', gap: 10 }}>
-                    {[
-                      { label: 'Version', value: 'GardeSante v1.0.0' },
-                      { label: 'Établissement ID', value: user?.establishmentId?.substring(0, 8) + '...' },
-                      { label: 'Session', value: 'JWT · Expire dans 24h' },
-                      { label: 'Navigateur', value: navigator.userAgent.split(' ').slice(-1)[0] },
-                    ].map(({ label, value }) => (
-                      <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                        <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>{label}</span>
-                        <span style={{ fontSize: 'var(--font-xs)', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+      <GsPanel title="Apparence" sub="Le thème agit immédiatement sur ce navigateur." icon={<MonitorCog size={18} aria-hidden="true" />}>
+        <div className="gsset-option-list">
+          {themes.map((option) => {
+            const Icon = option.icon;
+            return (
+              <button key={option.id} type="button" aria-pressed={theme === option.id} onClick={() => setTheme(option.id)}>
+                <Icon size={18} aria-hidden="true" />
+                <span><strong>{option.name}</strong><small>{option.detail}</small></span>
+                {theme === option.id ? <Check size={17} aria-hidden="true" /> : null}
+              </button>
+            );
+          })}
         </div>
+      </GsPanel>
+
+      <GsPanel title="Informations de session" sub="Repères techniques utiles au support, sans donnée secrète." icon={<ShieldCheck size={18} aria-hidden="true" />} className="gsset-system-panel">
+        <dl className="gsset-system-list">
+          <div><dt>Plateforme</dt><dd>GardeSante</dd></div>
+          <div><dt>Établissement</dt><dd>{user?.establishmentName || 'Non renseigné'}</dd></div>
+          <div><dt>Identifiant établissement</dt><dd className="gs-num">{user?.establishmentId ? `${user.establishmentId.slice(0, 8)}…` : '—'}</dd></div>
+          <div><dt>Authentification</dt><dd>Session sécurisée</dd></div>
+        </dl>
+      </GsPanel>
+    </div>
+  );
+}
+
+export default function SettingsPage() {
+  const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const { t } = useTranslation();
+  const [tab, setTab] = useState('account');
+  const roleLabel = t(`roles.${user?.roleCode}`, user?.roleName || user?.roleCode || 'Rôle non renseigné');
+
+  return (
+    <div className="gsset-page">
+      <GsPageHeader
+        eyebrow="Mon espace"
+        title="Paramètres"
+        subtitle="Réglez votre compte, sa sécurité et l’affichage de la plateforme."
+        meta={[{ label: 'Compte', value: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.email }, { label: 'Établissement', value: user?.establishmentName || 'Non renseigné' }]}
+      >
+        <GsTabRail tabs={TABS} value={tab} onChange={setTab} label="Sections des paramètres" />
+      </GsPageHeader>
+
+      <div className="gsset-content">
+        {tab === 'account' ? <AccountTab user={user} roleLabel={roleLabel} onOpenProfile={() => navigate('/profile')} /> : null}
+        {tab === 'security' ? <SecurityTab /> : null}
+        {tab === 'preferences' ? <PreferencesTab user={user} /> : null}
       </div>
     </div>
   );

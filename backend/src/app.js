@@ -36,6 +36,10 @@ const adminOversightRoutes   = require('./modules/admin/admin-oversight.routes')
 const assistantRoutes        = require('./modules/schedules/assistant.routes');
 const userArchiveRoutes      = require('./modules/users/user-archive.routes');
 const scheduleInboxRoutes    = require('./modules/schedules/schedule-inbox.routes');
+// Vue d'ensemble de pilotage du directeur (Lot Y1)
+const directorOverviewRoutes = require('./modules/director/director-overview.routes');
+// Vue d'ensemble de pilotage du chef de service (Lot Z3)
+const chefOverviewRoutes     = require('./modules/chef/chef-overview.routes');
 
 const app = express();
 
@@ -47,8 +51,17 @@ app.use(helmet({
   contentSecurityPolicy: false,
 }));
 
+// `CORS_ORIGIN` accepte plusieurs origines séparées par des virgules : une
+// plateforme déployée sert souvent le front sur plus d'une adresse, et en
+// développement un second serveur Vite (port de secours, revue d'interface)
+// échouait jusqu'ici sur un refus de préflight sans explication.
+const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: CORS_ORIGINS.length === 1 ? CORS_ORIGINS[0] : CORS_ORIGINS,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -129,6 +142,10 @@ app.use('/api/assistant',         assistantRoutes);
 app.use('/api/user-archive',      userArchiveRoutes);
 // Espace « Planning à consulter » du surveillant de service (point 3)
 app.use('/api/schedule-inbox',    scheduleInboxRoutes);
+// Pilotage de l'établissement pour la direction (Lot Y1)
+app.use('/api/director',          directorOverviewRoutes);
+// Pilotage d'un service pour son chef ou son surveillant (Lot Z3)
+app.use('/api/chef',              chefOverviewRoutes);
 
 
 // Health check

@@ -1,0 +1,227 @@
+' ============================================================================
+' GardeSanté — Diagramme de classes : remplacements en surcouche et prêts
+'
+' Sources vérifiées (information_schema + pg_constraint + contrôleurs) :
+'   replacements(1), replacement_items(1), replacement_candidates(0),
+'   staff_loan_requests(1).
+'
+' Contraintes CHECK relevées :
+'   chk_replacement_status       : pending | proposed | confirmed | accepted
+'                                  | rejected | cancelled | completed
+'   chk_replacement_confirmation : confirmed | pending_chef
+'   chk_replacement_scope        : full_period | date_range | single_day
+'                                  | time_slot
+'   chk_replacement_period       : end_date >= start_date
+'   chk_replacement_item_distinct: absent_user_id <> replacement_user_id
+'   chk_loan_status              : pending | approved | rejected
+'                                  | auto_approved
+'
+' Règles de contrôleur vérifiées :
+'   replacements-overlay.controller.js:14  SCOPES = ['full_period',
+'     'date_range', 'single_day', 'time_slot']
+'   replacements-overlay.controller.js:650
+'     const confirmationStatus = isChef ? 'confirmed' : 'pending_chef';
+'   staff-loans.controller.js:82-88  agent sans service propriétaire ou déjà
+'     du service demandeur => enregistrement direct en 'auto_approved'
+' ============================================================================
+@startuml 15-classes-remplacements-prets
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam classAttributeIconSize 0
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  HeaderBackgroundColor #EEF2FF
+  FontStyle bold
+  AttributeFontSize 10
+  AttributeFontColor #334155
+  BackgroundColor<<autre paquet>> #F8FAFC
+  BorderColor<<autre paquet>> #94A3B8
+  HeaderBackgroundColor<<autre paquet>> #F1F5F9
+  FontColor<<autre paquet>> #475569
+  BackgroundColor<<surcouche>> #FFFFFF
+  BorderColor<<surcouche>> #7A3E9D
+  HeaderBackgroundColor<<surcouche>> #F3E8FF
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+hide circle
+hide methods
+
+title Diagramme de classes — Remplacements en surcouche et prêts de personnel
+
+class Remplacement <<surcouche>> {
+  + id : UUID
+  --
+  état : VARCHAR(30) = 'pending'
+  étatConfirmation : VARCHAR(50) = 'confirmed'
+  urgence : VARCHAR(20) = 'normal'
+  rôleCréateur : VARCHAR(40)
+  --
+  portée : VARCHAR(20)
+  typeRemplacement : VARCHAR(30) = 'full'
+  typeDurée : VARCHAR(30) = 'full'
+  dateDébut : DATE
+  dateFin : DATE
+  heureDébut : TIME
+  heureFin : TIME
+  duréeHeures : NUMERIC
+  duréePersonnalisée : VARCHAR(100)
+  --
+  motif : TEXT
+  notes : TEXT
+  proposéLe : TIMESTAMPTZ
+  acceptéLe : TIMESTAMPTZ
+  confirméLe : TIMESTAMPTZ
+  terminéLe : TIMESTAMPTZ
+  motifRejet : TEXT
+  --
+  «CHECK» état parmi pending | proposed |
+  confirmed | accepted | rejected |
+  cancelled | completed
+  «CHECK» étatConfirmation parmi confirmed
+  | pending_chef
+  «CHECK» portée parmi full_period |
+  date_range | single_day | time_slot
+}
+
+class LigneDeRemplacement <<surcouche>> {
+  + id : UUID
+  --
+  interService : BOOL = false
+  notes : TEXT
+  --
+  «CHECK» agentAbsent <> agentRemplaçant
+}
+
+class CandidatAuRemplacement {
+  + id : UUID
+  --
+  score : NUMERIC
+  état : VARCHAR(20) = 'proposed'
+  notifiéLe : TIMESTAMPTZ
+  réponduLe : TIMESTAMPTZ
+  notes : TEXT
+}
+
+class DemandeDePrêt {
+  + id : UUID
+  --
+  dateDeGarde : DATE
+  état : VARCHAR(20) = 'pending'
+  demandéLe : TIMESTAMPTZ
+  réponduLe : TIMESTAMPTZ
+  motifRéponse : TEXT
+  --
+  «CHECK» état parmi pending | approved |
+  rejected | auto_approved
+}
+
+class Utilisateur <<autre paquet>> {
+  + id : UUID
+}
+
+class Service <<autre paquet>> {
+  + id : UUID
+}
+
+class Planning <<autre paquet>> {
+  + id : UUID
+}
+
+class Garde <<autre paquet>> {
+  + id : UUID
+}
+
+class Absence <<autre paquet>> {
+  + id : UUID
+}
+
+Remplacement "0..*" --> "0..1" Planning : surcouche du planning
+Remplacement "0..*" --> "0..1" Garde : sur la garde
+Remplacement "0..*" --> "0..1" Absence : motivé par
+Remplacement "0..*" --> "0..1" Utilisateur : agent absent
+Remplacement "0..*" --> "0..1" Utilisateur : agent remplaçant
+Remplacement "0..*" --> "1" Utilisateur : demandé par
+Remplacement "0..*" --> "0..1" Utilisateur : confirmé / rejeté par
+Remplacement "0..*" --> "0..1" Service : service d'origine
+Remplacement "0..*" --> "0..1" Service : service visé
+
+Remplacement "1" *-- "0..*" LigneDeRemplacement : détaille
+Remplacement "1" *-- "0..*" CandidatAuRemplacement : sollicite
+LigneDeRemplacement "0..*" --> "1" Utilisateur : agent absent
+LigneDeRemplacement "0..*" --> "1" Utilisateur : agent remplaçant
+CandidatAuRemplacement "0..*" --> "1" Utilisateur : candidat
+
+DemandeDePrêt "0..*" --> "1" Planning : pour le planning
+DemandeDePrêt "0..*" --> "1" Utilisateur : agent prêté
+DemandeDePrêt "0..*" --> "1" Utilisateur : chef demandeur
+DemandeDePrêt "0..*" --> "0..1" Utilisateur : chef propriétaire
+DemandeDePrêt "0..*" --> "1" Service : service demandeur
+DemandeDePrêt "0..*" --> "1" Service : service propriétaire
+
+note as N1
+  **Le remplacement est une surcouche, pas une réécriture.**
+  Il pointe le planning et, si elle existe, la garde
+  visée — mais les deux clés sont facultatives :
+  `portée` et les dates suffisent à décrire la
+  substitution. C'est ce qui permet de corriger un
+  planning déjà en vigueur sans toucher à la grille
+  validée. Lire un planning consiste donc à superposer
+  les remplacements à la grille d'origine.
+end note
+
+note as N2
+  **La confirmation dépend du rôle qui crée.**
+  Un remplacement créé par un chef de service naît
+  `confirmed` ; créé par un surveillant, il naît
+  `pending_chef` et attend l'arbitrage du chef. Une
+  seule ligne de code porte cette asymétrie :
+  `confirmationStatus = isChef ? 'confirmed' : 'pending_chef'`
+end note
+
+note as N3
+  **Quatre portées, une détection de chevauchement.**
+  `full_period` couvre toute la période du planning,
+  `date_range` un intervalle, `single_day` une journée,
+  `time_slot` une plage horaire d'une journée. Deux
+  remplacements sont comparés en tenant compte de leur
+  portée respective : deux `time_slot` du même jour ne
+  se chevauchent que si leurs horaires se recoupent.
+end note
+
+note as N4
+  **Le prêt peut s'auto-approuver.**
+  Si l'agent visé n'a pas de service propriétaire, ou
+  appartient déjà au service demandeur, la demande est
+  enregistrée directement en `auto_approved` : la trace
+  est conservée sans imposer un aller-retour inutile
+  entre chefs. Sinon elle part en `pending` vers le
+  chef propriétaire, seul habilité à répondre.
+end note
+
+note as N5
+  `LigneDeRemplacement` permet un remplacement
+  multiple : plusieurs couples (agent absent, agent
+  remplaçant) sous une même décision. La contrainte
+  `agentAbsent <> agentRemplaçant` interdit qu'un agent
+  se remplace lui-même.
+end note
+
+N1 .. Remplacement
+N2 .. LigneDeRemplacement
+N3 .. CandidatAuRemplacement
+N4 .. DemandeDePrêt
+N5 .. Utilisateur
+
+legend right
+  Violet : entités de la surcouche de remplacement.
+  Gris : entité d'un autre paquet, citée pour l'association.
+  Losange plein : composition (ON DELETE CASCADE).
+endlegend
+
+@enduml

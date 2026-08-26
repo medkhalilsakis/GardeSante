@@ -11,6 +11,8 @@ const { parse } = require('csv-parse/sync');
 const { query, transaction } = require('../../config/database');
 const { log, getIp } = require('../history/history.controller');
 const { normalizePeriods, periodBounds } = require('./periods');
+// Règle de lecture unique du tableur : « de service / pas de service ».
+const { isMarked, dutyEntries } = require('./spreadsheet-reader');
 
 // ── Utility: Flexible Date String Parser ────────────────────────────────
 const parseFlexDate = (val) => {
@@ -255,15 +257,13 @@ const importPreview = async (req, res) => {
       }
     }
 
-    // Récupération des gardes du jour
+    // Journées de service cochées dans le fichier. Toute cellule non vide vaut
+    // « de service » ; seul l'ancien code « R » (Repos) reste ignoré, pour que
+    // les fichiers antérieurs s'importent sans surprise.
     const shiftMap = {};
     dateColumns.forEach(dateCol => {
-      const rawVal = String(row[dateCol.original] || '').trim().toUpperCase();
-      if (rawVal) {
-        // Normaliser les codes de garde connus (J, N, S, G, R)
-        const code = ['J', 'N', 'S', 'G', 'R'].includes(rawVal) ? rawVal : rawVal.charAt(0);
-        shiftMap[dateCol.dateKey] = code;
-      }
+      const rawVal = String(row[dateCol.original] || '').trim();
+      if (isMarked(rawVal)) shiftMap[dateCol.dateKey] = true;
     });
 
     return {
@@ -400,21 +400,22 @@ const importConfirm = async (req, res) => {
     }
   }
 
-  // 3. Récupérer les types de gardes configurés pour peupler la table shifts
-  const shiftTypesRes = await query(
-    `SELECT id, UPPER(code) AS code, LOWER(name) AS name FROM shift_types WHERE establishment_id = $1 AND is_active = TRUE`,
-    [estId]
-  );
-  const shiftTypes = shiftTypesRes.rows;
-  const resolveShiftTypeId = (code) => {
-    const upperCode = String(code).toUpperCase();
-    const matched = shiftTypes.find(st => st.code === upperCode)
-      || shiftTypes.find(st => (upperCode === 'J' && st.name.includes('jour')) || (upperCode === 'N' && st.name.includes('nuit')) || (upperCode === 'S' && st.name.includes('soir')) || (upperCode === 'G' && st.name.includes('garde')));
-    return matched ? matched.id : (shiftTypes[0] ? shiftTypes[0].id : null);
-  };
+  // 3. Décompte annoncé au chef : les journées de service telles que le tableur
+  //    les lira ensuite (cases cochées du fichier, ou période de participation
+  //    pour les lignes qui n'en portent aucune). Aucune conversion en `shifts` :
+  //    le tableur est la seule source de vérité.
+  const dutyDaysCount = dutyEntries(
+    {
+      start_date: startDate,
+      end_date: endDate,
+      schedule_type: scheduleType,
+      metadata: { spreadsheet: { rows: rosterRows } },
+    },
+    startDate,
+    endDate
+  ).length;
 
   // 4. Enregistrer dans PostgreSQL via Transaction
-  let insertedShiftsCount = 0;
   await transaction(async (client) => {
     // Mettre à jour les métadonnées pour SmartSpreadsheet
     const metaDataToUpdate = {
@@ -433,10 +434,10 @@ const importConfirm = async (req, res) => {
       [targetScheduleId, JSON.stringify(metaDataToUpdate)]
     );
 
-    // Vider les anciennes gardes si mise à jour
-    if (scheduleId) {
-      await client.query(`DELETE FROM shifts WHERE schedule_id = $1`, [targetScheduleId]);
-    }
+    // Le tableur ne peuple plus la table `shifts`. On purge malgré tout les
+    // lignes héritées de ce planning : laissées en place, elles referaient
+    // surface dans la fusion de l'export et contrediraient le fichier importé.
+    await client.query(`DELETE FROM shifts WHERE schedule_id = $1`, [targetScheduleId]);
 
     await client.query('DELETE FROM schedule_staff_periods WHERE schedule_id = $1', [targetScheduleId]);
     await client.query('DELETE FROM schedule_staff_assignments WHERE schedule_id = $1', [targetScheduleId]);
@@ -454,30 +455,13 @@ const importConfirm = async (req, res) => {
         );
       }
     }
-
-    // Réinsérer les gardes pour les utilisateurs enregistrés
-    for (const r of rosterRows) {
-      if (!r.userId) continue;
-      for (const [dateStr, shiftCode] of Object.entries(r.shifts || {})) {
-        if (!shiftCode || shiftCode === 'R') continue;
-        const stId = resolveShiftTypeId(shiftCode);
-        if (!stId) continue;
-        await client.query(
-          `INSERT INTO shifts (schedule_id, establishment_id, department_id, user_id, shift_type_id, shift_date, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           ON CONFLICT DO NOTHING`,
-          [targetScheduleId, estId, departmentId, r.userId, stId, dateStr, req.user.id]
-        );
-        insertedShiftsCount++;
-      }
-    }
   });
 
   log({
     userId: req.user.id,
     action: scheduleId ? 'schedule_import_update' : 'schedule_import_create',
     category: 'schedule',
-    description: `Planning « ${schedName} » ${scheduleId ? 'mis à jour' : 'créé'} via import Excel/CSV (${rosterRows.length} agents, ${insertedShiftsCount} gardes)`,
+    description: `Planning « ${schedName} » ${scheduleId ? 'mis à jour' : 'créé'} via import Excel/CSV (${rosterRows.length} agents, ${dutyDaysCount} journées de service)`,
     entityType: 'schedules',
     entityId: targetScheduleId,
     ipAddress: getIp(req),
@@ -490,7 +474,7 @@ const importConfirm = async (req, res) => {
       name: schedName,
       scheduleType,
       totalRows: rosterRows.length,
-      insertedShiftsCount,
+      dutyDaysCount,
     },
     message: `Planning « ${schedName} » importé avec succès (${rosterRows.length} lignes dans le Tableur).`,
   });
@@ -555,12 +539,14 @@ const downloadTemplate = async (req, res) => {
     });
     ws.getRow(1).height = 26;
 
-    // Remplissage avec le personnel réel
-    const shiftCodes = ['J', 'N', 'S', 'G', 'R', ''];
-    const shiftColors = { J: 'FFDBEAFE', N: 'FFEDE9FE', S: 'FFD1FAE5', G: 'FFFEF3C7', R: 'FFF3F4F6' };
+    // Remplissage avec le personnel réel. Une seule notion à saisir : « X » quand
+    // l'agent est de service ce jour-là, cellule vide sinon.
+    const DUTY_MARK = 'X';
+    const DUTY_FILL = 'FFDBEAFE';
 
     staffList.forEach((person, idx) => {
-      const sampleShifts = days.map((_, di) => shiftCodes[(idx + di) % shiftCodes.length]);
+      // Exemple lisible : un jour de service sur deux, décalé d'un agent à l'autre.
+      const sampleShifts = days.map((_, di) => ((idx + di) % 2 === 0 ? DUTY_MARK : ''));
       const sampleAtHome = idx === 1 ? 'Oui' : 'Non';
       const samplePeriods = idx === 1 && days.length >= 4
         ? `${days[0]} au ${days[Math.min(2, days.length - 1)]}; ${days[Math.min(3, days.length - 1)]} au ${days.at(-1)}`
@@ -578,9 +564,8 @@ const downloadTemplate = async (req, res) => {
             cell.font = { bold: true, size: 10, color: { argb: 'FF6D28D9' } };
           }
         } else if (colIdx > AT_HOME_COL) {
-          const code = String(cell.value || '').toUpperCase();
-          if (shiftColors[code]) {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: shiftColors[code] } };
+          if (String(cell.value || '').trim()) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: DUTY_FILL } };
             cell.font = { bold: true, size: 10 };
           }
         }
@@ -589,15 +574,12 @@ const downloadTemplate = async (req, res) => {
 
     // Onglet Légende
     const legendWs = wb.addWorksheet('Légende & Instructions');
-    legendWs.addRow(['Code', 'Intitulé', 'Description']);
+    legendWs.addRow(['Colonne', 'Intitulé', 'Description']);
     legendWs.getRow(1).font = { bold: true };
     [
-      ['J', 'Jour', 'Service ou garde de jour'],
-      ['N', 'Nuit', 'Service ou garde de nuit'],
-      ['S', 'Soir', 'Service de soir'],
-      ['G', 'Garde', 'Garde de 24 heures / générale'],
-      ['R', 'Repos', 'Jour de repos (aucune garde)'],
-      ['Vide', 'Aucune affectation', 'Laissez la cellule vide si pas de garde'],
+      ['X', 'De service', "L'agent est de service ce jour-là. Toute autre marque (1, O, V…) est acceptée."],
+      ['Vide', 'Pas de service', "Laissez la cellule vide quand l'agent n'est pas de service."],
+      ['', 'Colonnes de jours facultatives', "Si vous ne cochez aucun jour, la « Periodes » de l'agent fait foi : il est de service sur toute sa plage."],
       ['', '', ''],
       ['Periodes', 'Une ou plusieurs plages', 'Exemple : 01/08/2026 au 10/08/2026; 18/08/2026 au 31/08/2026. Séparez les plages par un point-virgule.'],
       ['', 'Période complète', 'Une seule plage couvrant tout le planning reste acceptée.'],

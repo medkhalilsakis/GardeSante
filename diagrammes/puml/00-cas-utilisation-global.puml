@@ -1,0 +1,96 @@
+' ============================================================================
+' GardeSanté — Diagramme de cas d'utilisation : vue d'ensemble par domaine
+'
+' Cette figure donne la lecture d'ensemble : qui intervient, sur quel domaine
+' fonctionnel, et comment les rôles s'emboîtent. Le détail exhaustif des cas
+' est porté par les huit diagrammes par acteur (01 à 08).
+'
+' Sources vérifiées :
+'   - Acteurs : table `roles` — 8 rôles, niveaux 0, 2, 3, 4, 5, 6, 7 et 8.
+'   - Hiérarchie : déduite de l'inclusion effective des ensembles de
+'     `role_permissions` (39, 36, 23, 20, 19, 11, 8 et 0 permissions).
+'     Le Surveillant Général n'hérite pas du Chef de Service : leurs
+'     ensembles sont disjoints (l'un valide, l'autre élabore). Les deux
+'     branches ne se rejoignent qu'au niveau du Directeur.
+'   - Domaines : les 19 modules de backend/src/modules/.
+' ============================================================================
+@startuml 00-cas-utilisation-global
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ActorBorderColor #0F766E
+skinparam ActorBackgroundColor #E6F4F1
+skinparam ActorFontStyle bold
+skinparam UsecaseBorderColor #1B4FCA
+skinparam UsecaseBackgroundColor #EEF2FF
+skinparam UsecaseFontSize 13
+skinparam RectangleBorderColor #94A3B8
+skinparam RectangleBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Cas d'utilisation — vue d'ensemble par domaine fonctionnel\nGardeSanté · gestion des gardes hospitalières
+
+left to right direction
+
+actor "Utilisateur\nauthentifié" as U
+actor "Autre\nPersonnel" as AUT
+actor "Résident" as RES
+actor "Médecin\nSenior" as MED
+actor "Surveillant\nde Service" as SS
+actor "Chef de\nService" as CS
+actor "Surveillant\nGénéral" as SG
+actor "Directeur" as DIR
+actor "Super\nAdministrateur" as SA
+
+rectangle "Plateforme GardeSanté" {
+  usecase "Gérer son compte\net sa communication" as D1
+  usecase "Consulter le planning\net ses gardes" as D2
+  usecase "Déclarer et suivre\nses absences" as D3
+  usecase "Élaborer et soumettre\nle planning de garde" as D4
+  usecase "Valider ou rejeter\nun planning soumis" as D5
+  usecase "Gérer les remplacements\net les prêts de personnel" as D6
+  usecase "Animer la vie\ndu service" as D7
+  usecase "Administrer l'établissement\net son personnel" as D8
+  usecase "Administrer la plateforme\net ses référentiels" as D9
+}
+
+' ── Hiérarchie des acteurs ──────────────────────────────────────────────────
+U <|-- AUT
+U <|-- RES
+U <|-- SG
+RES <|-- MED
+MED <|-- SS
+SS <|-- CS
+CS <|-- DIR
+SG <|-- DIR
+DIR <|-- SA
+
+' ── Domaines, rattachés au rôle le plus bas qui y accède ────────────────────
+U --> D1
+RES --> D2
+RES --> D3
+MED --> D6
+SS --> D4
+SS --> D7
+SG --> D5
+DIR --> D8
+SA --> D9
+
+note right of D9
+  Le Super Administrateur appartient au compte
+  plateforme et non à un établissement : son
+  périmètre est l'ensemble des hôpitaux.
+end note
+
+note bottom of AUT
+  « Autre Personnel » ne détient aucune
+  permission en base. Il n'atteint que les
+  écrans dont les routes ne sont gardées
+  que par l'authentification.
+end note
+
+@enduml

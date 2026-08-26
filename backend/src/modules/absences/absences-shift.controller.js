@@ -332,6 +332,11 @@ const reportShiftAbsence = async (req, res) => {
     emitToUser(req.app, userId, 'absence:reported', { absenceId: absence.id, scheduleId, userId });
     emitToUser(req.app, userId, 'notification:new', { type: 'absence_reported' });
     emitToDepartment(req.app, departmentId, 'absence:reported', { absenceId: absence.id, scheduleId, userId });
+    // Même raison qu'au journal : la supervision (directeur, surveillant général)
+    // n'est membre d'aucun service et ne recevait donc que `alert:new`. Cette
+    // ligne fait remonter le signalement à l'hôpital pour que « Garde en direct »
+    // se mette à jour sans attendre le rafraîchissement périodique.
+    emitToEstablishment(req.app, establishmentId, 'absence:reported', { absenceId: absence.id, scheduleId, userId });
     emitToEstablishment(req.app, establishmentId, 'alert:new', { type: 'staff_absent', userId });
 
     return res.status(201).json({ success: true, data: absence, message: 'Absence signalée' });
@@ -365,13 +370,36 @@ const listShiftAbsences = async (req, res) => {
       conditions.push(`a.establishment_id = $${params.length + 1}`);
       params.push(establishmentId);
 
-      // Chef / surveillant de service : limité à son service
+      // Chef / surveillant de service : limité à ses services.
+      //
+      // `req.user.departmentId` (middleware/auth.js) est le service **primaire**.
+      // S'y tenir seul avait deux effets : le sélecteur de service du tableau de
+      // bord n'avait aucun effet sur l'onglet « Absences » — un chef de deux
+      // services ne voyait jamais les signalements du second — et un compte sans
+      // ligne `is_primary` recevait une liste vide alors qu'il appartient bien à
+      // un service. On honore donc `?departmentId=` quand ce service est l'un des
+      // siens, et à défaut on ouvre sur l'ensemble de ses services (ce qui, pour
+      // un chef mono-service, est exactement le comportement actuel).
       if ([ROLES.DEPARTMENT_HEAD, ROLES.SERVICE_SUPERVISOR].includes(roleCode)) {
-        if (!departmentId) {
+        const mine = await query(
+          'SELECT department_id FROM user_departments WHERE user_id = $1',
+          [req.user.id]
+        );
+        const myIds = mine.rows.map((r) => r.department_id);
+        const asked = req.query.departmentId || null;
+
+        if (asked && myIds.includes(asked)) {
+          conditions.push(`a.department_id = $${params.length + 1}`);
+          params.push(asked);
+        } else if (myIds.length > 0) {
+          conditions.push(`a.department_id = ANY($${params.length + 1}::uuid[])`);
+          params.push(myIds);
+        } else if (departmentId) {
+          conditions.push(`a.department_id = $${params.length + 1}`);
+          params.push(departmentId);
+        } else {
           return res.json({ success: true, data: [] });
         }
-        conditions.push(`a.department_id = $${params.length + 1}`);
-        params.push(departmentId);
       }
     }
 

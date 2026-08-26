@@ -1,0 +1,398 @@
+/**
+ * Registre général des plannings — préfixe `.gsl-`.
+ * Une liste administrative compacte remplace la grille de cartes : le nom,
+ * la période, le service et le volume se comparent désormais sur un même axe.
+ */
+
+.gsl-page {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  padding-bottom: 24px;
+}
+
+.gsl-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.gsl-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.gsl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gsl-field > span {
+  font-family: var(--gs-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsl-field > input,
+.gsl-field > select,
+.gsl-field > textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 8px;
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+  font-size: 12px;
+  outline: 0;
+  transition: border-color var(--transition-fast, .15s), background var(--transition-fast, .15s), box-shadow var(--transition-fast, .15s);
+}
+
+.gsl-field > input,
+.gsl-field > select {
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+.gsl-field > input[type='date'] {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.gsl-field > textarea {
+  resize: vertical;
+  min-height: 86px;
+  padding: 9px 10px;
+  line-height: 1.5;
+}
+
+.gsl-field > input:focus,
+.gsl-field > select:focus,
+.gsl-field > textarea:focus {
+  border-color: var(--gs-seal);
+  background: var(--gs-paper);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
+}
+
+.gsl-field > small {
+  color: var(--gs-ink-faint);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.gsl-filter-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  padding-top: 10px;
+  border-top: 1px solid var(--gs-rule);
+  color: var(--gs-ink-faint);
+  font-size: 11px;
+}
+
+.gsl-register {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.gsl-row {
+  --gsl-tone: var(--gs-ink-faint);
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(220px, 1.05fr) minmax(330px, 1.45fr) minmax(185px, auto);
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+  padding: 14px 16px 14px 19px;
+  border-bottom: 1px solid var(--gs-rule);
+  background: var(--gs-paper);
+  transition: background var(--transition-fast, .15s);
+}
+
+.gsl-row:last-child { border-bottom: 0; }
+.gsl-row:hover { background: var(--gs-paper-alt); }
+.gsl-row[data-tone='seal'] { --gsl-tone: var(--gs-seal); }
+.gsl-row[data-tone='duty'] { --gsl-tone: var(--gs-duty); }
+.gsl-row[data-tone='alert'] { --gsl-tone: var(--gs-alert); }
+
+.gsl-state-rail {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--gsl-tone);
+}
+
+.gsl-identity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gsl-open {
+  position: relative;
+  z-index: 0;
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--gs-ink);
+  font-family: var(--gs-display);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gsl-open::after {
+  content: '';
+  position: absolute;
+  inset: -12px -10px;
+}
+
+.gsl-open:hover { color: var(--gs-seal); }
+
+.gsl-service,
+.gsl-author {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--gs-ink-faint);
+  font-size: 10.5px;
+}
+
+.gsl-service > svg,
+.gsl-author > svg { flex-shrink: 0; }
+
+.gsl-facts {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.35fr) minmax(78px, .55fr) minmax(135px, 1fr);
+  gap: 0;
+  min-width: 0;
+  margin: 0;
+}
+
+.gsl-facts > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 0 13px;
+  border-left: 1px solid var(--gs-rule);
+}
+
+.gsl-facts dt {
+  font-family: var(--gs-display);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsl-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--gs-ink-soft);
+  font-size: 10.5px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gsl-facts dd.gs-num {
+  color: var(--gs-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gsl-row-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.gsl-state-pad { padding: 16px; }
+
+.gsl-loading {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.gsl-loading > span {
+  position: relative;
+  display: block;
+  height: 76px;
+  border-bottom: 1px solid var(--gs-rule);
+  background: var(--gs-paper);
+  overflow: hidden;
+}
+
+.gsl-loading > span:last-child { border-bottom: 0; }
+
+.gsl-loading > span::before,
+.gsl-loading > span::after {
+  content: '';
+  position: absolute;
+  left: 18px;
+  border-radius: 5px;
+  background: var(--gs-paper-alt);
+}
+
+.gsl-loading > span::before {
+  top: 19px;
+  width: min(34%, 260px);
+  height: 12px;
+}
+
+.gsl-loading > span::after {
+  top: 40px;
+  width: min(24%, 180px);
+  height: 8px;
+}
+
+.gsl-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--gs-ink-faint);
+  font-size: 11px;
+}
+
+.gsl-pagination .gs-num { color: var(--gs-ink); }
+
+.gsl-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: color-mix(in srgb, var(--gs-ink) 42%, transparent);
+}
+
+.gsl-modal {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: var(--border-radius-lg, 16px);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-lift);
+}
+
+.gsl-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 15px;
+  border-bottom: 1px solid var(--gs-rule);
+}
+
+.gsl-modal-head > div { min-width: 0; }
+
+.gsl-modal-head h2 {
+  margin: 3px 0 0;
+  color: var(--gs-ink);
+  font-family: var(--gs-display);
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.gsl-modal-head p {
+  max-width: 58ch;
+  margin: 4px 0 0;
+  color: var(--gs-ink-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.gsl-modal-close {
+  min-width: 32px;
+  padding-inline: 7px;
+  flex-shrink: 0;
+}
+
+.gsl-modal-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px 12px;
+  padding: 18px 20px 20px;
+}
+
+.gsl-field-wide { grid-column: 1 / -1; }
+
+.gsl-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 13px 20px;
+  border-top: 1px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
+}
+
+@media (max-width: 1100px) {
+  .gsl-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gsl-row { grid-template-columns: minmax(210px, 1fr) minmax(310px, 1.35fr); }
+  .gsl-row-actions { grid-column: 1 / -1; justify-content: flex-start; padding-top: 3px; }
+}
+
+@media (max-width: 720px) {
+  .gsl-page { gap: 12px; }
+  .gsl-head-actions { justify-content: flex-start; }
+  .gsl-row { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 13px 13px 13px 17px; }
+  .gsl-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gsl-facts > div { padding: 0 10px; }
+  .gsl-facts > div:first-child { grid-column: 1 / -1; padding-bottom: 8px; }
+  .gsl-row-actions { grid-column: auto; }
+}
+
+@media (max-width: 520px) {
+  .gsl-filter-grid,
+  .gsl-modal-body { grid-template-columns: minmax(0, 1fr); }
+  .gsl-field-wide { grid-column: auto; }
+  .gsl-filter-foot { align-items: flex-start; flex-direction: column; }
+  .gsl-facts { grid-template-columns: minmax(0, 1fr); }
+  .gsl-facts > div,
+  .gsl-facts > div:first-child {
+    grid-column: auto;
+    padding: 7px 0;
+    border-left: 0;
+    border-bottom: 1px solid var(--gs-rule);
+  }
+  .gsl-facts > div:last-child { border-bottom: 0; }
+  .gsl-row-actions { align-items: stretch; flex-direction: column; }
+  .gsl-row-actions .gsk-badge { align-self: flex-start; }
+  .gsl-pagination { justify-content: space-between; gap: 6px; }
+  .gsl-pagination > span { text-align: center; }
+  .gsl-pagination .gs-btn { padding-inline: 9px; }
+  .gsl-modal-backdrop { align-items: end; padding: 10px; }
+  .gsl-modal { max-height: calc(100vh - 20px); border-radius: 14px; }
+  .gsl-modal-head,
+  .gsl-modal-body,
+  .gsl-modal-foot { padding-inline: 14px; }
+  .gsl-modal-foot > .gs-btn { flex: 1; }
+}

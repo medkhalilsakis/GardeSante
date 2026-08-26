@@ -1,30 +1,49 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * Direction — administrer l'organisation de l'hôpital
+ * ═══════════════════════════════════════════════════
+ * Cet écran ne surveille pas la garde du jour : c'est le rôle de `/supervision`.
+ * Ici, le directeur répond à une seule question de fond — **qui encadre quoi** —
+ * et c'est la seule chose que lui seul peut réparer : un service sans chef ne
+ * peut pas produire de planning.
+ *
+ * D'où l'ordre de l'écran : l'encadrement d'abord (services, manques), puis
+ * l'effectif, puis ce qui se passe aujourd'hui en une ligne. Les deux listes
+ * deviennent des registres : un service et un agent se lisent en comparant des
+ * colonnes.
+ *
+ * Les taxonomies perdent leurs pastilles colorées. Un rôle, une catégorie de
+ * personnel, un type de service ne sont pas des états : ce sont des valeurs de
+ * colonne, et l'en-tête de colonne les nomme déjà. Les sept couleurs de rôle et
+ * les trois couleurs de catégorie codées en dur disparaissent donc, sans qu'un
+ * `tone` sémantique soit détourné pour les remplacer.
+ *
+ * Rien n'a changé côté données : mêmes requêtes, mêmes clés de cache, mêmes
+ * douze mutations, mêmes règles de validation.
+ */
+
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
-import { departmentsAPI, usersAPI, jobTitlesAPI } from '../../api';
+import {
+  Plus, Pencil, Trash2, X, Info, AlertTriangle, RotateCcw, Building2, Users, UserPlus,
+} from 'lucide-react';
+import { departmentsAPI, usersAPI, jobTitlesAPI, directorOverviewAPI } from '../../api';
 import UnifiedRoleSelect from '../../components/ui/UnifiedRoleSelect';
 import HospitalGuardCalendar from '../../components/calendar/HospitalGuardCalendar';
 import ScopedStatsPanel from '../../components/statistics/ScopedStatsPanel';
 import StaffLoanStatsPanel from '../../components/statistics/StaffLoanStatsPanel';
 import LeavesPanel from './components/LeavesPanel';
 import StaffHistoryPanel from './components/StaffHistoryPanel';
+import DirectorOverviewPanel from './components/DirectorOverviewPanel';
 import ContextBadge from '../../components/layout/ContextBadge';
+import {
+  GsPageHeader, GsPanel, GsStat, GsStatRail, GsTabRail,
+  GsTable, GsBadge, GsFilterBar, GsEmpty, GsSkeleton,
+} from '../../components/gs';
+import { fullFrenchDate } from '../../utils/frenchDates';
 import { useAuthStore } from '../../store';
 import toast from 'react-hot-toast';
-
-// ─── Icônes SVG légères ──────────────────────────────────────
-const Icon = ({ path, size = 18 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d={path} />
-  </svg>
-);
-const PlusIcon   = () => <Icon path="M12 5v14M5 12h14" />;
-const EditIcon   = () => <Icon path="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />;
-const TrashIcon  = () => <Icon path="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />;
-const UserIcon   = () => <Icon path="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" />;
-const BuildingIcon = () => <Icon path="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10" />;
-const ShieldIcon = () => <Icon path="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />;
-const XIcon      = () => <Icon path="M18 6L6 18M6 6l12 12" />;
+import './director.css';
 
 // Le surveillant général couvre l'hôpital entier : il n'appartient à aucun
 // service et ne peut donc être ni chef ni surveillant d'un service. Le serveur
@@ -32,126 +51,126 @@ const XIcon      = () => <Icon path="M18 6L6 18M6 6l12 12" />;
 // des listes de candidats pour ne pas proposer une action vouée à échouer.
 const HOSPITAL_WIDE_ROLES = ['general_supervisor'];
 const deptCandidates = (members) =>
-  (members || []).filter(m => !HOSPITAL_WIDE_ROLES.includes(m.role_code));
+  (members || []).filter((m) => !HOSPITAL_WIDE_ROLES.includes(m.role_code));
 
-// ─── KPI Card ────────────────────────────────────────────────
-const KpiCard = ({ icon, label, value, sub, color }) => (
-  <div style={{
-    background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
-    borderRadius: 'var(--border-radius)', padding: 'var(--space-5)',
-    display: 'flex', flexDirection: 'column', gap: 8,
-    borderTop: `3px solid ${color}`,
-  }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-primary)' }}>{value ?? '—'}</div>
-      <div style={{ background: `${color}20`, color, borderRadius: 8, padding: 8 }}>{icon}</div>
-    </div>
-    <div style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>{label}</div>
-    {sub && <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>{sub}</div>}
-  </div>
-);
+const ROLES_NEED_DEPT = ['department_head', 'service_supervisor', 'senior_doctor', 'resident'];
 
-// ─── Badge rôle ──────────────────────────────────────────────
-const roleBadgeStyle = {
-  director:           { bg: '#1B4FCA22', color: '#1B4FCA' },
-  hospital_admin:     { bg: '#7C3AED22', color: '#7C3AED' },
-  general_supervisor: { bg: '#059669 22', color: '#059669' },
-  department_head:    { bg: '#D97706 22', color: '#D97706' },
-  service_supervisor: { bg: '#0891B222', color: '#0891B2' },
-  senior_doctor:      { bg: '#DB277722', color: '#DB2777' },
-  resident:           { bg: '#71717A22', color: '#71717A' },
+const DEPT_TYPE_LABELS = {
+  emergency: 'Urgences', surgery: 'Chirurgie', icu: 'Réanimation',
+  internal: 'Médecine interne', pediatrics: 'Pédiatrie',
+  radiology: 'Radiologie', other: 'Autre',
 };
-const RoleBadge = ({ code, name }) => {
-  const s = roleBadgeStyle[code] || { bg: '#33333322', color: '#999' };
+
+// Libellés de repli : le serveur envoie `personnel_category_label` la plupart du
+// temps, mais pas sur les comptes anciens.
+const PERSONNEL_TYPE_LABELS = {
+  medical: 'Personnel médical',
+  administrative: 'Personnel administratif',
+  auxiliary: 'Personnel auxiliaire',
+};
+
+const TABS = [
+  { id: 'overview',    label: "Vue d'ensemble", path: '/director' },
+  { id: 'departments', label: 'Services',      path: '/director/services' },
+  { id: 'staff',       label: 'Personnel',     path: '/director/personnel' },
+  { id: 'conges',      label: 'Congés',        path: '/director/conges' },
+  { id: 'calendrier',  label: 'Calendrier',    path: '/director/calendrier' },
+  { id: 'stats',       label: 'Statistiques',  path: '/director/statistiques' },
+  { id: 'loan-stats',  label: 'Prêts de personnel', path: '/director/prets' },
+  { id: 'historique',  label: 'Historique',    path: '/director/historique' },
+];
+
+const EMPTY_STAFF_FILTER = {
+  search: '', roleCode: '', personnelType: '', isActive: '', departmentId: '', canLogin: '',
+};
+
+const pad = (n) => String(n).padStart(2, '0');
+/** Clé du jour en heure locale : `new Date().toISOString()` décale d'un jour. */
+const todayKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+/** Comparaison insensible à la casse et aux accents. */
+const norm = (s) => String(s || '')
+  .toLowerCase()
+  // « Réanimation » doit se trouver en tapant « reanimation » : NFD sépare la
+  // lettre de son accent, la propriété Unicode retire l'accent.
+  .normalize('NFD')
+  .replace(/\p{Diacritic}/gu, '');
+
+/**
+ * `supervisors` est agrégé par le backend ; `supervisor_id` reste renseigné avec
+ * le premier pour compatibilité. Un service peut en compter plusieurs.
+ */
+const supervisorsOf = (dept) => {
+  if (Array.isArray(dept?.supervisors)) return dept.supervisors;
+  if (dept?.supervisor_id) {
+    return [{
+      id: dept.supervisor_id,
+      firstName: dept.supervisor_first_name,
+      lastName: dept.supervisor_last_name,
+    }];
+  }
+  return [];
+};
+
+/**
+ * Restrictions du registre des services. Au module et non dans le composant :
+ * l'ensemble ne dépend d'aucun état, et `useMemo` peut alors le déclarer en
+ * dépendance sans se recalculer à chaque frappe.
+ */
+const SCOPE_OF = {
+  all:      () => true,
+  noHead:   (d) => !d.head_id,
+  noSuperv: (d) => supervisorsOf(d).length === 0,
+  empty:    (d) => Number(d.member_count || 0) === 0,
+};
+
+/**
+ * Coque de modale — celle de la plateforme (`index.css`), et non les cinq
+ * variantes réécrites à la main que cet écran portait. Ajoute la fermeture au
+ * clavier, qui manquait : une modale qu'on ne peut fermer qu'à la souris n'est
+ * pas utilisable au clavier.
+ */
+const DirModal = ({ title, onClose, wide = false, footer, children }) => {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <span style={{
-      background: s.bg, color: s.color, border: `1px solid ${s.color}33`,
-      borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700,
-      whiteSpace: 'nowrap',
-    }}>
-      {name || code}
-    </span>
-  );
-};
-
-const personnelTypeStyles = {
-  medical:        { label: 'Personnel médical',        bg: '#DBEAFE', color: '#1D4ED8', border: '#93C5FD' },
-  administrative: { label: 'Personnel administratif', bg: '#EDE9FE', color: '#6D28D9', border: '#C4B5FD' },
-  auxiliary:      { label: 'Personnel auxiliaire',     bg: '#CCFBF1', color: '#0F766E', border: '#5EEAD4' },
-};
-const PersonnelTypeBadge = ({ category, label }) => {
-  const style = personnelTypeStyles[category] || {
-    label: label || 'Non renseigné', bg: 'var(--bg-elevated)', color: 'var(--text-muted)', border: 'var(--border-default)',
-  };
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '3px 9px', borderRadius: 999, whiteSpace: 'nowrap',
-      background: style.bg, color: style.color, border: `1px solid ${style.border}`,
-      fontSize: 10, fontWeight: 800,
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: style.color }} />
-      {label || style.label}
-    </span>
-  );
-};
-
-// ─── Modal générique ─────────────────────────────────────────
-const Modal = ({ title, onClose, children, wide }) => (
-  <div style={{
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    zIndex: 1000, padding: 16,
-  }} onClick={e => e.target === e.currentTarget && onClose()}>
-    <div style={{
-      background: 'var(--bg-card)', borderRadius: 12, width: '100%',
-      maxWidth: wide ? 700 : 480, maxHeight: '90vh', overflow: 'auto',
-      boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
-    }}>
-      <div style={{
-        padding: '20px 24px', borderBottom: '1px solid var(--border-subtle)',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      }}>
-        <h3 style={{ margin: 0, fontSize: 'var(--font-md)', fontWeight: 700 }}>{title}</h3>
-        <button onClick={onClose} style={{
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: 'var(--text-muted)', padding: 4,
-        }}><XIcon /></button>
+    <div
+      className="modal-overlay"
+      role="presentation"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className={`modal${wide ? ' modal-lg' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-header">
+          <h3 className="modal-title">{title}</h3>
+          <button type="button" className="gsd-icon-btn" onClick={onClose} aria-label="Fermer">
+            <X size={14} strokeWidth={2.2} />
+          </button>
+        </div>
+        <div className="modal-body gsd-modal-body">{children}</div>
+        {footer ? <div className="modal-footer">{footer}</div> : null}
       </div>
-      <div style={{ padding: 24 }}>{children}</div>
     </div>
-  </div>
-);
+  );
+};
 
-// ─── Champ de formulaire ─────────────────────────────────────
-const Field = ({ label, required, children }) => (
-  <div style={{ marginBottom: 16 }}>
-    <label style={{ display: 'block', fontSize: 'var(--font-xs)', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-      {label}{required && <span style={{ color: 'var(--color-danger)', marginLeft: 4 }}>*</span>}
-    </label>
+/** Un champ : son libellé, le contrôle, et la règle qui s'y applique. */
+const Fld = ({ label, required = false, hint, hintTone, children }) => (
+  <label className="gsd-field">
+    <span>{label}{required ? <b className="gsd-req">*</b> : null}</span>
     {children}
-  </div>
-);
-const Input = (props) => (
-  <input {...props} style={{
-    width: '100%', background: 'var(--bg-input)', border: '1px solid var(--border-default)',
-    borderRadius: 8, padding: '8px 12px', color: 'var(--text-primary)',
-    fontSize: 'var(--font-sm)', outline: 'none', boxSizing: 'border-box',
-    ...props.style,
-  }} />
-);
-const Select = ({ children, ...props }) => (
-  <select {...props} style={{
-    width: '100%', background: 'var(--bg-input)', border: '1px solid var(--border-default)',
-    borderRadius: 8, padding: '8px 12px', color: 'var(--text-primary)',
-    fontSize: 'var(--font-sm)', outline: 'none', boxSizing: 'border-box',
-  }}>
-    {children}
-  </select>
+    {hint ? <small className={hintTone === 'alert' ? 'gsd-hint is-alert' : 'gsd-hint'}>{hint}</small> : null}
+  </label>
 );
 
 // ════════════════════════════════════════════════════════════
-// DASHBOARD DIRECTEUR
+// DIRECTION
 // ════════════════════════════════════════════════════════════
 export default function DirectorDashboard() {
   const { user } = useAuthStore();
@@ -180,20 +199,24 @@ export default function DirectorDashboard() {
   const [migrationDept,   setMigrationDept]   = useState(null);
   const [migrationTarget, setMigrationTarget] = useState('');
   const [userModal,       setUserModal]       = useState(null);
-  const [staffFilter,     setStaffFilter]     = useState({ search: '', roleCode: '', personnelType: '', isActive: '', departmentId: '' });
+  const [staffFilter,     setStaffFilter]     = useState(EMPTY_STAFF_FILTER);
   const [deptForm,        setDeptForm]        = useState({});
   const [userForm,        setUserForm]        = useState({});
   const [selectedUserId,  setSelectedUserId]  = useState('');
+  // Restriction du registre des services : le manque d'encadrement est ce que
+  // le directeur vient chercher, il doit pouvoir l'isoler.
+  const [deptScope,       setDeptScope]       = useState('all');
+  const [deptSearch,      setDeptSearch]      = useState('');
 
   const eid = user?.establishmentId;
 
   // ── Requêtes ─────────────────────────────────────────────
   const { data: departments = [], isLoading: loadingDepts } = useQuery({
     queryKey: ['departments', eid],
-    queryFn: () => departmentsAPI.getAll().then(r => r.data.data),
+    queryFn: () => departmentsAPI.getAll().then((r) => r.data.data),
   });
 
-  const { data: staffData } = useQuery({
+  const { data: staffData, isLoading: loadingStaff } = useQuery({
     queryKey: ['users', eid, staffFilter],
     queryFn: () => usersAPI.getAll({
       search: staffFilter.search || undefined,
@@ -201,39 +224,62 @@ export default function DirectorDashboard() {
       personnelType: staffFilter.personnelType || undefined,
       departmentId: staffFilter.departmentId || undefined,
       isActive: staffFilter.isActive !== '' ? staffFilter.isActive : undefined,
+      // `canLogin` est déjà géré côté serveur (users.controller.js:116) : il
+      // permet à la vue d'ensemble d'ouvrir « comptes sans accès plateforme »
+      // sur une liste réellement filtrée.
+      canLogin: staffFilter.canLogin !== '' ? staffFilter.canLogin : undefined,
       limit: 500,
-    }).then(r => r.data),
+    }).then((r) => r.data),
   });
   const staff = staffData?.data || [];
 
+  // Totaux de l'établissement. La rangée de mesures annonce « Personnel » : elle
+  // ne doit donc pas suivre les filtres de l'onglet Personnel, ni être plafonnée
+  // par la pagination. Même clé de cache que `DirectorOverviewPanel` —
+  // react-query mutualise l'appel, il n'y en a qu'un.
+  const { data: overview } = useQuery({
+    queryKey: ['director-overview'],
+    queryFn: () => directorOverviewAPI.get().then((r) => r.data?.data),
+    staleTime: 60_000,
+  });
+
   const { data: availableRoles = [] } = useQuery({
     queryKey: ['roles-available'],
-    queryFn: () => usersAPI.rolesAvailable().then(r => r.data.data),
+    queryFn: () => usersAPI.rolesAvailable().then((r) => r.data.data),
   });
   // Rôles métier cumulables avec le titre « Chef de service ». Clé distincte de
   // ['roles-available'] : ce cache est partagé avec UnifiedRoleSelect, qui ne
   // lit que `data` — deux queryFn sur une même clé se marcheraient dessus.
   const { data: secondaryRoles = [] } = useQuery({
     queryKey: ['roles-secondary'],
-    queryFn: () => usersAPI.rolesAvailable().then(r => r.data.secondaryRoles || []),
+    queryFn: () => usersAPI.rolesAvailable().then((r) => r.data.secondaryRoles || []),
     staleTime: 120000,
   });
   const { data: jobTitles = [] } = useQuery({
     queryKey: ['job-titles', 'all'],
-    queryFn: () => jobTitlesAPI.getAll().then(r => r.data.data),
+    queryFn: () => jobTitlesAPI.getAll().then((r) => r.data.data),
   });
 
   // Membres du service sélectionné (pour désigner chef/surveillant)
   const { data: deptDetail } = useQuery({
     queryKey: ['department', headModal || supervModal],
-    queryFn: () => departmentsAPI.getOne(headModal || supervModal).then(r => r.data.data),
+    queryFn: () => departmentsAPI.getOne(headModal || supervModal).then((r) => r.data.data),
     enabled: !!(headModal || supervModal),
   });
 
   // ── Mutations ────────────────────────────────────────────
+  // react-query v5 attend un objet de filtres. Passé en tableau (signature v4),
+  // `queryKey` vaut `undefined` : aucun filtre n'est appliqué et c'est TOUT le
+  // cache de l'application qui est invalidé à chaque création de service ou de
+  // compte — les onglets Congés, Calendrier, Statistiques et Historique
+  // rechargeaient sans raison.
   const invalidate = () => {
-    qc.invalidateQueries(['departments', eid]);
-    qc.invalidateQueries(['users', eid]);
+    qc.invalidateQueries({ queryKey: ['departments', eid] });
+    qc.invalidateQueries({ queryKey: ['users', eid] });
+    // Désigner un chef ou clôturer un compte change les chiffres de la vue
+    // d'ensemble : sans cette ligne, la rangée de mesures et la liste des
+    // services sans chef resteraient sur leurs anciennes valeurs une minute.
+    qc.invalidateQueries({ queryKey: ['director-overview'] });
   };
 
   const createDept = useMutation({
@@ -249,9 +295,14 @@ export default function DirectorDashboard() {
   const deleteDept = useMutation({
     mutationFn: (id) => departmentsAPI.delete(id),
     onSuccess: () => { toast.success('Service désactivé'); invalidate(); },
-    onError:   (e) => {
+    // `id` est le second argument que react-query passe à onError : c'est
+    // exactement ce qui a été muté. L'ancienne version relisait l'identifiant
+    // dans `e.config.url` — une chaîne d'URL qui n'existe plus si la requête
+    // échoue avant d'être émise (réseau coupé), et la modale de migration ne
+    // s'ouvrait alors jamais.
+    onError: (e, id) => {
       if (e.response?.data?.code === 'DEPARTMENT_HAS_MEMBERS') {
-        const dept = departments.find((d) => d.id === e.config?.url?.split('/').pop());
+        const dept = departments.find((d) => d.id === id);
         if (dept) setMigrationDept(dept);
       }
       toast.error(e.response?.data?.message || 'Erreur');
@@ -311,6 +362,11 @@ export default function DirectorDashboard() {
     setDeptForm({
       name: dept.name, nameAr: dept.name_ar, code: dept.code,
       departmentType: dept.department_type, floor: dept.floor,
+      // `wing` est bien persisté par le serveur (departments.controller.js:139)
+      // mais n'était pas relu ici : le champ « Aile / Bâtiment » revenait vide à
+      // chaque ouverture, et comme l'update fait un COALESCE, envoyer un champ
+      // vide ne l'effaçait pas — la valeur devenait impossible à corriger.
+      wing: dept.wing,
       phone: dept.phone, bedCount: dept.bed_count, minGuardCount: dept.min_guard_count,
     });
     setDeptModal(dept);
@@ -325,12 +381,12 @@ export default function DirectorDashboard() {
     }
   };
 
-  const ROLES_NEED_DEPT = ['department_head', 'service_supervisor', 'senior_doctor', 'resident'];
-  const selectedTitle = jobTitles.find(t => t.id === userForm.jobTitleId);
+  const selectedTitle = jobTitles.find((t) => t.id === userForm.jobTitleId);
   const personnelNeedsDept = ROLES_NEED_DEPT.includes(userForm.roleCode)
     || ['medical', 'paramedical'].includes(selectedTitle?.category);
   // Rôle transversal (surveillant général) : aucun service, comme le directeur.
   const roleIsHospitalWide = HOSPITAL_WIDE_ROLES.includes(userForm.roleCode);
+
   const openEditUser = (staffMember) => {
     const primaryDepartment = (staffMember.departments || []).find((d) => d.isPrimary || d.is_primary)
       || (staffMember.departments || [])[0];
@@ -351,15 +407,16 @@ export default function DirectorDashboard() {
     });
     setUserModal(staffMember);
   };
+
   const submitUser = () => {
     if (!userForm.firstName || !userForm.lastName || !userForm.email || !userForm.roleCode) {
-      return toast.error('Prenom, Nom, Email et Role/Titre sont obligatoires');
+      return toast.error('Prénom, nom, courriel et rôle ou fonction sont obligatoires');
     }
     if (userForm.roleCode === 'autre' && !userForm.jobTitleId) {
       return toast.error('Veuillez choisir une fonction du personnel.');
     }
     if (personnelNeedsDept && !userForm.departmentId) {
-      return toast.error('Le personnel medical ou paramedical doit obligatoirement etre affecte a un service.');
+      return toast.error('Le personnel médical ou paramédical doit être affecté à un service.');
     }
     // Le champ service est masqué pour les rôles transversaux, mais il peut
     // rester renseigné si le rôle a été changé après coup : on le neutralise
@@ -374,779 +431,1028 @@ export default function DirectorDashboard() {
     else updateUser.mutate({ id: userModal.id, ...userForm });
   };
 
-  // ── Statistiques rapides ─────────────────────────────────
-  const totalStaff  = staff.length;
-  const activeStaff = staff.filter(u => u.is_active).length;
-  const withLogin   = staff.filter(u => u.can_login).length;
-
-  const DEPT_TYPE_LABELS = {
-    emergency: 'Urgences', surgery: 'Chirurgie', icu: 'Réanimation',
-    internal: 'Médecine interne', pediatrics: 'Pédiatrie',
-    radiology: 'Radiologie', other: 'Autre',
+  /**
+   * Le filtre est remis à zéro avant d'appliquer celui demandé : sinon un clic
+   * sur « Personnel médical » se cumulerait avec un service resté sélectionné,
+   * et la liste ne montrerait pas le nombre annoncé.
+   */
+  const openStaff = (filter) => {
+    setStaffFilter({ ...EMPTY_STAFF_FILTER, ...filter });
+    navigate('/director/personnel');
   };
 
+  const openDepartments = (scope) => {
+    setDeptScope(scope);
+    // La recherche est effacée avec le filtre : une mesure cliquable doit ouvrir
+    // exactement l'ensemble qu'elle annonce.
+    setDeptSearch('');
+    navigate('/director/services');
+  };
+
+  // ── Mesures ──────────────────────────────────────────────
+  // Les totaux de personnel viennent de `/director/overview`, décomptés en SQL
+  // sur tout l'établissement. Ils étaient auparavant dérivés de `staff`,
+  // c'est-à-dire de la liste FILTRÉE et plafonnée à 500 lignes : filtrer sur
+  // « Urgences » faisait chuter « Personnel total » de 17 à 4. Le repli sur la
+  // liste garde un chiffre affiché le temps du premier chargement.
+  const totalStaff    = overview?.staff?.total        ?? staff.length;
+  const activeStaff   = overview?.staff?.active       ?? staff.filter((u) => u.is_active).length;
+  const withLogin     = overview?.staff?.withLogin    ?? staff.filter((u) => u.can_login).length;
+  const withoutLogin  = overview?.staff?.withoutLogin;
+  const closedStaff   = overview?.staff?.suspended    ?? (staff.length - staff.filter((u) => u.is_active).length);
+
+  // L'encadrement se compte sur la liste réellement affichée par l'onglet
+  // Services, et non sur l'agrégat du serveur : une mesure cliquable doit
+  // ouvrir un écran dont la longueur est exactement le chiffre annoncé.
+  const noHeadCount   = departments.filter(SCOPE_OF.noHead).length;
+  const noSupervCount = departments.filter(SCOPE_OF.noSuperv).length;
+
+  const onDutyToday   = overview?.planning?.staffOnDutyToday;
+  const coveredToday  = overview?.planning?.departmentsCoveredToday;
+  const onLeaveToday  = overview?.leaves?.ongoing;
+
+  // ── Registre des services ────────────────────────────────
+  const searchedDepts = useMemo(() => {
+    const q = norm(deptSearch);
+    if (!q) return departments;
+    return departments.filter((d) => {
+      const head = `${d.head_first_name || ''} ${d.head_last_name || ''}`;
+      const type = DEPT_TYPE_LABELS[d.department_type] || d.department_type || '';
+      return [d.name, d.name_ar, d.code, type, head].some((v) => norm(v).includes(q));
+    });
+  }, [departments, deptSearch]);
+
+  const shownDepts = useMemo(
+    () => searchedDepts.filter(SCOPE_OF[deptScope] || SCOPE_OF.all),
+    [searchedDepts, deptScope]
+  );
+
+  // Le compteur d'un filtre annonce ce qu'il RESTERA après application : il se
+  // calcule donc sur l'ensemble déjà cherché, pas sur la liste entière.
+  const deptFilters = [
+    { id: 'all',      label: 'Tous',             count: searchedDepts.length },
+    { id: 'noHead',   label: 'Sans chef',        count: searchedDepts.filter(SCOPE_OF.noHead).length, tone: 'alert', title: 'Un service sans chef ne peut pas produire de planning' },
+    { id: 'noSuperv', label: 'Sans surveillant', count: searchedDepts.filter(SCOPE_OF.noSuperv).length },
+    { id: 'empty',    label: 'Sans personnel',   count: searchedDepts.filter(SCOPE_OF.empty).length },
+  ];
+
+  const deptColumns = [
+    {
+      key: 'code', label: 'Code', width: 84,
+      // Un code de service est un identifiant : il passe au registre comme un
+      // matricule, mais reste aligné à gauche — c'est une clé, pas une quantité.
+      render: (d) => <span className="gsd-code">{d.code}</span>,
+    },
+    {
+      key: 'name', label: 'Service',
+      render: (d) => (
+        <div className="gsd-name">
+          <b>{d.name}</b>
+          {d.name_ar ? <span dir="rtl">{d.name_ar}</span> : null}
+        </div>
+      ),
+    },
+    {
+      key: 'type', label: 'Type',
+      render: (d) => (
+        <span className="gsd-word">{DEPT_TYPE_LABELS[d.department_type] || d.department_type || '—'}</span>
+      ),
+    },
+    {
+      key: 'where', label: 'Localisation',
+      // `wing` était persisté et modifiable, mais ne s'affichait nulle part.
+      render: (d) => {
+        const parts = [d.floor, d.wing].filter(Boolean);
+        return parts.length
+          ? <span className="gsd-word">{parts.join(' · ')}</span>
+          : <span className="gsd-word is-void">Non renseignée</span>;
+      },
+    },
+    {
+      key: 'head', label: 'Chef de service',
+      render: (d) => (d.head_id ? (
+        <div className="gsd-name">
+          <b>{d.head_first_name} {d.head_last_name}</b>
+          <span>Chef de service</span>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="gsd-fill is-alert"
+          onClick={() => { setSelectedUserId(''); setHeadModal(d.id); }}
+        >
+          <Plus size={11} strokeWidth={2.6} /> Désigner
+        </button>
+      )),
+    },
+    {
+      key: 'sup', label: 'Surveillants',
+      render: (d) => {
+        const sup = supervisorsOf(d);
+        return (
+          <div className="gsd-chips">
+            {sup.map((s) => (
+              <span key={s.id} className="gsd-chip">
+                {s.firstName} {s.lastName}
+                <button
+                  type="button"
+                  className="gsd-chip-off"
+                  aria-label={`Retirer ${s.firstName} ${s.lastName} des surveillants`}
+                  title="Retirer ce surveillant"
+                  onClick={() => {
+                    if (window.confirm(`Retirer ${s.firstName} ${s.lastName} des surveillants de « ${d.name} » ?`)) {
+                      removeSuperv.mutate({ deptId: d.id, userId: s.id });
+                    }
+                  }}
+                >
+                  <X size={10} strokeWidth={2.8} />
+                </button>
+              </span>
+            ))}
+            <button
+              type="button"
+              className="gsd-fill"
+              onClick={() => { setSelectedUserId(''); setSupervModal(d.id); }}
+            >
+              <Plus size={11} strokeWidth={2.6} /> {sup.length ? 'Ajouter' : 'Désigner'}
+            </button>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'members', label: 'Effectif', num: true, width: 88,
+      render: (d) => Number(d.member_count || 0),
+    },
+    {
+      key: 'acts', label: '', align: 'right',
+      render: (d) => (
+        <div className="gsd-acts">
+          <button type="button" className="gsd-icon-btn" title="Modifier ce service" onClick={() => openEditDept(d)}>
+            <Pencil size={13} strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            className="gsd-icon-btn is-danger"
+            title="Désactiver ce service"
+            onClick={() => {
+              if (Number(d.member_count) > 0) { setMigrationDept(d); setMigrationTarget(''); }
+              else if (window.confirm(`Désactiver le service « ${d.name} » ?`)) deleteDept.mutate(d.id);
+            }}
+          >
+            <Trash2 size={13} strokeWidth={2} />
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  // ── Registre du personnel ────────────────────────────────
+  const staffFilterActive = Object.values(staffFilter).some((v) => v !== '');
+
+  const staffColumns = [
+    {
+      key: 'matricule', label: 'Matricule', width: 104,
+      render: (u) => (u.matricule
+        ? <span className="gsd-code">{u.matricule}</span>
+        : <span className="gsd-word is-void">—</span>),
+    },
+    {
+      key: 'name', label: 'Nom',
+      render: (u) => (
+        <div className="gsd-name">
+          <b>{u.first_name} {u.last_name}</b>
+          {u.email ? <span>{u.email}</span> : null}
+        </div>
+      ),
+    },
+    {
+      key: 'role', label: 'Rôle / Fonction',
+      // Sept couleurs de rôle avaient été inventées ici. Un rôle n'est pas un
+      // état : la colonne le nomme, le texte suffit.
+      render: (u) => (
+        <div className="gsd-name">
+          <b>{u.role_name || u.role_code || '—'}</b>
+          {u.job_title ? <span>{u.job_title}</span> : null}
+          {u.secondary_role_name ? (
+            <span className="gsd-sub is-seal" title="Rôle métier cumulé avec le titre de chef de service">
+              + {u.secondary_role_name}
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      key: 'depts', label: 'Service(s)',
+      render: (u) => {
+        const depts = Array.isArray(u.departments) ? u.departments : [];
+        if (!depts.length) return <span className="gsd-word is-void">Aucun service</span>;
+        return (
+          <div className="gsd-chips">
+            {depts.map((d) => (
+              <span
+                key={d.id}
+                className="gsd-chip"
+                data-head={d.isHead ? '' : undefined}
+                title={d.isHead ? `Chef du service ${d.name}` : d.name}
+              >
+                {d.name}
+                {d.isHead ? <i>chef</i> : null}
+              </span>
+            ))}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'category', label: 'Type du personnel',
+      render: (u) => {
+        const label = u.personnel_category_label || PERSONNEL_TYPE_LABELS[u.personnel_category];
+        return label
+          ? <span className="gsd-word">{label}</span>
+          : <span className="gsd-word is-void">Non renseigné</span>;
+      },
+    },
+    {
+      key: 'access', label: 'Accès',
+      render: (u) => (u.can_login
+        ? <span className="gsd-word">Plateforme</span>
+        : <span className="gsd-word is-void">Sans accès</span>),
+    },
+    {
+      key: 'state', label: 'Statut',
+      render: (u) => (
+        <GsBadge tone={u.is_active ? 'duty' : 'quiet'} dot>
+          {u.is_active ? 'Actif' : 'Clôturé'}
+        </GsBadge>
+      ),
+    },
+    {
+      key: 'acts', label: '', align: 'right',
+      render: (u) => (
+        <div className="gsd-acts">
+          <button type="button" className="gs-btn is-quiet" onClick={() => openEditUser(u)}>
+            <Pencil size={12} strokeWidth={2} /> Modifier
+          </button>
+          {u.id !== user?.id && (u.is_active ? (
+            <button
+              type="button"
+              className="gs-btn is-danger"
+              onClick={() => {
+                if (window.confirm(`Clôturer le compte de ${u.first_name} ${u.last_name} ?`)) deactivate.mutate(u.id);
+              }}
+            >
+              Clôturer
+            </button>
+          ) : (
+            <button type="button" className="gs-btn is-quiet" onClick={() => activate.mutate(u.id)}>
+              <RotateCcw size={12} strokeWidth={2} /> Réactiver
+            </button>
+          ))}
+        </div>
+      ),
+    },
+  ];
+
+  const currentSupervisors = supervisorsOf(departments.find((d) => d.id === supervModal));
+
   return (
-    <div>
+    <div className="gsd-wrap">
       {/* Appartenance — hôpital dirigé et service(s) de rattachement. */}
       <ContextBadge variant="header" />
 
-      {/* ── En-tête ── */}
-      <div className="page-header" style={{ marginBottom: 'var(--space-6)' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <div style={{
-              background: 'linear-gradient(135deg,#1B4FCA,#6366F1)',
-              borderRadius: 10, padding: 8, display: 'flex',
-            }}>
-              <BuildingIcon />
-            </div>
-            <div>
-              <h1 className="page-title" style={{ marginBottom: 0 }}>
-                Tableau de bord — Direction
-              </h1>
-              <p style={{ margin: 0, fontSize: 'var(--font-sm)', color: 'var(--color-primary-light)', fontWeight: 600 }}>
-                🏥 {user?.establishmentName}
-              </p>
-            </div>
-          </div>
-          <p className="page-subtitle" style={{ marginTop: 4 }}>
-            Bienvenue, {user?.firstName} {user?.lastName} · Directeur
-          </p>
-        </div>
-      </div>
+      {/* Le nom de l'hôpital n'est pas répété dans le surtitre : le badge de
+          contexte et la barre latérale le portent déjà. */}
+      <GsPageHeader
+        eyebrow="Direction · tous les services"
+        title="Gestion de l'hôpital"
+        subtitle="Cet écran administre l'organisation — services, encadrement, comptes et congés. La garde du jour se surveille depuis « Supervision de l'hôpital »."
+        meta={[
+          { key: 'jour', label: 'Journée du', value: fullFrenchDate(todayKey()) },
+          { key: 'dir', label: 'Directeur', value: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || '—' },
+        ]}
+        rail={(
+          <GsStatRail>
+            <GsStat
+              label="Services"
+              value={loadingDepts ? null : departments.length}
+              tone="seal"
+              onClick={() => openDepartments('all')}
+              title="Ouvrir le registre des services"
+            />
+            <GsStat
+              label="Sans chef"
+              value={loadingDepts ? null : noHeadCount}
+              tone={noHeadCount > 0 ? 'alert' : undefined}
+              hint="Ne peuvent pas produire de planning"
+              onClick={() => openDepartments('noHead')}
+            />
+            <GsStat
+              label="Sans surveillant"
+              value={loadingDepts ? null : noSupervCount}
+              onClick={() => openDepartments('noSuperv')}
+            />
+            <GsStat
+              label="Personnel"
+              value={totalStaff}
+              hint={`${activeStaff} actifs`}
+              onClick={() => openStaff({})}
+            />
+            <GsStat
+              label="Comptes plateforme"
+              value={withLogin}
+              hint={withoutLogin === undefined ? undefined : `${withoutLogin} sans accès`}
+              onClick={() => openStaff({ canLogin: 'true' })}
+            />
+            <GsStat
+              label="Comptes clôturés"
+              value={closedStaff}
+              onClick={() => openStaff({ isActive: 'false' })}
+            />
+            {/* Lu sur le tableur, pas sur la table `shifts` : c'est le même
+                décompte que « Supervision de l'hôpital ». Non cliquable — aucun
+                écran de cette page n'ouvre exactement cette liste. */}
+            <GsStat
+              label="De service aujourd'hui"
+              value={onDutyToday}
+              tone="duty"
+              unit="agents"
+              hint={coveredToday === undefined ? undefined : `${coveredToday} service(s) couvert(s) sur ${departments.length}`}
+            />
+            <GsStat label="En congé aujourd'hui" value={onLeaveToday} hint="Absences en cours" />
+          </GsStatRail>
+        )}
+      >
+        <GsTabRail
+          label="Sections de la direction"
+          tabs={TABS}
+          value={activeTab}
+          onChange={(id) => {
+            const tab = TABS.find((t) => t.id === id);
+            if (tab) navigate(tab.path);
+          }}
+        />
+      </GsPageHeader>
 
-      {/* ── KPIs ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
-        <KpiCard icon={<BuildingIcon />} label="Services actifs" value={departments.length}
-          sub="dans votre établissement" color="var(--color-primary)" />
-        <KpiCard icon={<UserIcon />} label="Personnel total" value={totalStaff}
-          sub={`${activeStaff} actifs`} color="var(--color-success)" />
-        <KpiCard icon={<ShieldIcon />} label="Comptes plateforme" value={withLogin}
-          sub="avec accès connecté" color="var(--color-info)" />
-        <KpiCard icon={<UserIcon />} label="Comptes clôturés" value={totalStaff - activeStaff}
-          sub="à réactiver si besoin" color="var(--color-danger)" />
-      </div>
+      <div className="gsd-tab-body">
+        {/* ══ VUE D'ENSEMBLE ══ */}
+        {activeTab === 'overview' && (
+          <DirectorOverviewPanel
+            onGoTo={(path) => navigate(path)}
+            onOpenStaff={openStaff}
+            onDesignateHead={(id) => { setSelectedUserId(''); setHeadModal(id); }}
+            onDesignateSuperv={(id) => { setSelectedUserId(''); setSupervModal(id); }}
+          />
+        )}
 
-      {/* ── Onglets ── */}
-      <div style={{
-        display: 'flex', gap: 4, background: 'var(--bg-elevated)',
-        borderRadius: 10, padding: 4, marginBottom: 'var(--space-6)', width: 'fit-content',
-        flexWrap: 'wrap',
-      }}>
-        {[
-          { id: 'overview',     label: '📊 Vue d\'ensemble', path: '/director' },
-          { id: 'departments',  label: '🏥 Services',         path: '/director/services' },
-          { id: 'staff',        label: '👤 Personnel',        path: '/director/personnel' },
-          { id: 'conges',       label: '🏖️ Congés',           path: '/director/conges' },
-          { id: 'calendrier',   label: '📅 Calendrier',       path: '/director/calendrier' },
-          { id: 'stats',        label: '📊 Statistiques',     path: '/director/statistiques' },
-          { id: 'loan-stats',   label: '🤝 Prêts personnel',  path: '/director/prets' },
-          { id: 'historique',   label: '🕓 Historique',       path: '/director/historique' },
-        ].map(t => (
-          <button key={t.id} onClick={() => navigate(t.path)} style={{
-            padding: '8px 20px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            fontWeight: 600, fontSize: 'var(--font-sm)', fontFamily: 'inherit',
-            background: activeTab === t.id ? 'var(--color-primary)' : 'transparent',
-            color: activeTab === t.id ? '#fff' : 'var(--text-secondary)',
-            transition: 'all 0.2s',
-          }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+        {/* ══ SERVICES ══ */}
+        {activeTab === 'departments' && (
+          <GsPanel
+            flush
+            icon={<Building2 size={14} strokeWidth={2} />}
+            title="Registre des services"
+            sub="Un service sans chef ne peut pas produire de planning ; un service peut compter plusieurs surveillants."
+            tools={(
+              <button type="button" className="gs-btn is-primary" onClick={() => { setDeptForm({}); setDeptModal('create'); }}>
+                <Plus size={13} strokeWidth={2.4} /> Nouveau service
+              </button>
+            )}
+          >
+            <GsFilterBar
+              inset
+              label="Restreindre les services"
+              filters={deptFilters}
+              value={deptScope}
+              onChange={setDeptScope}
+              search={{
+                value: deptSearch,
+                onChange: setDeptSearch,
+                placeholder: 'Nom, code, type ou chef',
+                label: 'Rechercher un service',
+              }}
+            />
 
-      {/* ══ TAB : SERVICES ══ */}
-      {/* ══ TAB : VUE D'ENSEMBLE ══ */}
-      {activeTab === 'overview' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 'var(--space-5)' }}>
-          <div className="card" style={{ cursor: 'pointer' }} onClick={() => navigate('/director/services')}>
-            <div className="card-header">
-              <h3 className="card-title"><BuildingIcon /> Services</h3>
-              <span style={{ fontSize: 28, fontWeight: 800, color: 'var(--color-primary)' }}>{departments.length}</span>
-            </div>
-            <p style={{ fontSize: 'var(--font-sm)', color: 'var(--text-secondary)', margin: '8px 0 0' }}>
-              {departments.filter(d => d.head_id).length} avec chef de service · {departments.filter(d => !d.head_id).length} sans chef
-            </p>
-            <p style={{ fontSize: 11, color: 'var(--color-primary-light)', marginTop: 8 }}>→ Gérer les services</p>
-          </div>
-          <div className="card" style={{ cursor: 'pointer' }} onClick={() => navigate('/director/personnel')}>
-            <div className="card-header">
-              <h3 className="card-title"><UserIcon /> Personnel</h3>
-              <span style={{ fontSize: 28, fontWeight: 800, color: 'var(--color-success)' }}>{totalStaff}</span>
-            </div>
-            <p style={{ fontSize: 'var(--font-sm)', color: 'var(--text-secondary)', margin: '8px 0 0' }}>
-              {activeStaff} actifs · {withLogin} avec accès plateforme
-            </p>
-            <p style={{ fontSize: 11, color: 'var(--color-primary-light)', marginTop: 8 }}>→ Gérer le personnel</p>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'departments' && (
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">
-              <BuildingIcon /> Gestion des Services
-            </h3>
-            <button className="btn btn-primary" onClick={() => { setDeptForm({}); setDeptModal('create'); }}>
-              <PlusIcon /> Nouveau service
-            </button>
-          </div>
-          <div style={{ overflowX: 'auto' }}>
             {loadingDepts ? (
-              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Chargement…</div>
-            ) : departments.length === 0 ? (
-              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-                Aucun service. Créez le premier service de votre hôpital.
-              </div>
+              <div className="gsd-load"><GsSkeleton variant="rows" count={4} /></div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
-                    {['Code','Service','Type','Étage','Chef de Service','Surveillants','Personnel','Actions'].map(h => (
-                      <th key={h} style={{
-                        padding: '10px 16px', textAlign: 'left', fontSize: 11,
-                        fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase',
-                        letterSpacing: '0.05em', whiteSpace: 'nowrap',
-                      }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {departments.map(dept => (
-                    <tr key={dept.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{
-                          fontFamily: 'monospace', fontSize: 12, fontWeight: 700,
-                          background: 'var(--bg-elevated)', padding: '2px 8px', borderRadius: 4,
-                          color: 'var(--color-primary)',
-                        }}>{dept.code}</span>
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 'var(--font-sm)' }}>{dept.name}</div>
-                        {dept.name_ar && <div style={{ fontSize: 11, color: 'var(--text-muted)', direction: 'rtl' }}>{dept.name_ar}</div>}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                          {DEPT_TYPE_LABELS[dept.department_type] || dept.department_type || '—'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 16px', fontSize: 'var(--font-xs)', color: 'var(--text-secondary)' }}>
-                        {dept.floor || '—'}
-                      </td>
-                      {/* Chef */}
-                      <td style={{ padding: '12px 16px' }}>
-                        {dept.head_id ? (
-                          <div>
-                            <div style={{ fontSize: 'var(--font-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
-                              {dept.head_first_name} {dept.head_last_name}
-                            </div>
-                            <RoleBadge code={dept.head_role_code} name="Chef" />
-                          </div>
-                        ) : (
-                          <button style={{
-                            fontSize: 11, padding: '3px 10px', borderRadius: 6,
-                            border: '1px dashed var(--color-warning)', background: 'transparent',
-                            color: 'var(--color-warning)', cursor: 'pointer', fontFamily: 'inherit',
-                          }} onClick={() => setHeadModal(dept.id)}>
-                            + Désigner
-                          </button>
-                        )}
-                      </td>
-                      {/* Surveillants — plusieurs possibles pour un même service */}
-                      <td style={{ padding: '12px 16px' }}>
-                        {(() => {
-                          // `supervisors` est agrégé par le backend ; `supervisor_id`
-                          // reste renseigné avec le premier pour compatibilité.
-                          const sup = Array.isArray(dept.supervisors) ? dept.supervisors
-                            : (dept.supervisor_id
-                              ? [{ id: dept.supervisor_id, firstName: dept.supervisor_first_name, lastName: dept.supervisor_last_name }]
-                              : []);
-                          return (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                              {sup.map(s => (
-                                <span key={s.id} style={{
-                                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-                                  background: 'var(--color-info-10, #0EA5E920)', color: 'var(--color-info)',
-                                }}>
-                                  {s.firstName} {s.lastName}
-                                  <span
-                                    title="Retirer ce surveillant"
-                                    onClick={() => {
-                                      if (window.confirm(`Retirer ${s.firstName} ${s.lastName} des surveillants de "${dept.name}" ?`))
-                                        removeSuperv.mutate({ deptId: dept.id, userId: s.id });
-                                    }}
-                                    style={{ cursor: 'pointer', opacity: .65, fontWeight: 800, lineHeight: 1 }}
-                                  >×</span>
-                                </span>
-                              ))}
-                              <button style={{
-                                fontSize: 11, padding: '3px 10px', borderRadius: 6,
-                                border: '1px dashed var(--color-info)', background: 'transparent',
-                                color: 'var(--color-info)', cursor: 'pointer', fontFamily: 'inherit',
-                              }} onClick={() => setSupervModal(dept.id)}>
-                                {sup.length ? '+ Ajouter' : '+ Désigner'}
-                              </button>
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                        <span style={{
-                          fontWeight: 700, fontSize: 'var(--font-sm)',
-                          color: 'var(--color-primary)',
-                        }}>{dept.member_count || 0}</span>
-                      </td>
-                      {/* Actions */}
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button title="Modifier" onClick={() => openEditDept(dept)} style={{
-                            background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-                            borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: 'var(--text-secondary)',
-                          }}><EditIcon /></button>
-                          <button title="Désactiver" onClick={() => {
-                            if (Number(dept.member_count) > 0) { setMigrationDept(dept); setMigrationTarget(''); }
-                            else if (window.confirm(`Désactiver le service "${dept.name}" ?`)) deleteDept.mutate(dept.id);
-                          }} style={{
-                            background: 'var(--color-danger-10)', border: '1px solid var(--color-danger-30)',
-                            borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: 'var(--color-danger)',
-                          }}><TrashIcon /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <GsTable
+                label="Services de l'hôpital"
+                columns={deptColumns}
+                rows={shownDepts}
+                rowKey="id"
+                flagged={(d) => !d.head_id}
+                empty={departments.length === 0 ? (
+                  <div className="gsd-load">
+                    <GsEmpty
+                      icon={<Building2 size={24} strokeWidth={1.6} />}
+                      title="Aucun service dans cet hôpital"
+                      hint="Tant qu'aucun service n'existe, aucun planning de garde ne peut être créé."
+                      actions={(
+                        <button type="button" className="gs-btn is-primary" onClick={() => { setDeptForm({}); setDeptModal('create'); }}>
+                          Créer le premier service
+                        </button>
+                      )}
+                    />
+                  </div>
+                ) : (
+                  <div className="gsd-load">
+                    <GsEmpty
+                      title="Aucun service ne correspond"
+                      hint={`${departments.length} service(s) existent, mais aucun ne passe le filtre et la recherche en cours.`}
+                      actions={(
+                        <button type="button" className="gs-btn is-quiet" onClick={() => { setDeptScope('all'); setDeptSearch(''); }}>
+                          <RotateCcw size={13} strokeWidth={2} /> Tout afficher
+                        </button>
+                      )}
+                    />
+                  </div>
+                )}
+              />
             )}
-          </div>
-        </div>
-      )}
+          </GsPanel>
+        )}
 
-      {/* ══ TAB : PERSONNEL ══ */}
-      {activeTab === 'staff' && (
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">
-              <UserIcon /> Personnel & Gestion des Comptes
-            </h3>
-            <button className="btn btn-primary" onClick={() => { setUserForm({}); setUserModal('create'); }}>
-              <PlusIcon /> Nouveau compte
-            </button>
-          </div>
-
-          {/* Filtres */}
-          <div style={{
-            padding: '12px 20px', display: 'flex', gap: 12, flexWrap: 'wrap',
-            borderBottom: '1px solid var(--border-subtle)',
-          }}>
-            <input placeholder="🔍 Rechercher…" value={staffFilter.search}
-              onChange={e => setStaffFilter(f => ({ ...f, search: e.target.value }))}
-              style={{
-                flex: 1, minWidth: 200, background: 'var(--bg-input)', border: '1px solid var(--border-default)',
-                borderRadius: 8, padding: '7px 12px', color: 'var(--text-primary)', fontSize: 'var(--font-sm)',
-                outline: 'none',
-              }} />
-            <Select value={staffFilter.roleCode}
-              onChange={e => setStaffFilter(f => ({ ...f, roleCode: e.target.value }))}
-              style={{ width: 180 }}>
-              <option value="">Tous les rôles</option>
-              {availableRoles.map(r => (
-                <option key={r.id} value={r.code}>{r.name}</option>
-              ))}
-            </Select>
-            <Select value={staffFilter.personnelType || ''}
-              onChange={e => setStaffFilter(f => ({ ...f, personnelType: e.target.value }))}
-              style={{ width: 190 }}>
-              <option value="">Tous types de personnel</option>
-              <option value="medical">Personnel médical</option>
-              <option value="administrative">Personnel administratif</option>
-              <option value="auxiliary">Personnel auxiliaire</option>
-            </Select>
-            <Select value={staffFilter.departmentId}
-              onChange={e => setStaffFilter(f => ({ ...f, departmentId: e.target.value }))}
-              style={{ width: 190 }}>
-              <option value="">Tous les services</option>
-              {departments.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </Select>
-            <Select value={staffFilter.isActive}
-              onChange={e => setStaffFilter(f => ({ ...f, isActive: e.target.value }))}
-              style={{ width: 150 }}>
-              <option value="">Tous statuts</option>
-              <option value="true">Actifs</option>
-              <option value="false">Clôturés</option>
-            </Select>
-          </div>
-
-          <div style={{ overflowX: 'auto' }}>
-            {staff.length === 0 ? (
-              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-                Aucun résultat
+        {/* ══ PERSONNEL ══ */}
+        {activeTab === 'staff' && (
+          <GsPanel
+            flush
+            icon={<Users size={14} strokeWidth={2} />}
+            title="Registre du personnel"
+            sub="Un compte clôturé reste consultable : l'historique d'un agent ne s'efface pas."
+            tools={(
+              <button type="button" className="gs-btn is-primary" onClick={() => { setUserForm({}); setUserModal('create'); }}>
+                <UserPlus size={13} strokeWidth={2.2} /> Nouveau compte
+              </button>
+            )}
+          >
+            <div className="gsd-filters">
+              <label className="gsd-field">
+                <span>Recherche</span>
+                <input
+                  type="search"
+                  className="form-control"
+                  placeholder="Nom, matricule ou courriel"
+                  value={staffFilter.search}
+                  onChange={(e) => setStaffFilter((f) => ({ ...f, search: e.target.value }))}
+                />
+              </label>
+              <label className="gsd-field">
+                <span>Rôle d'accès</span>
+                <select
+                  className="form-control"
+                  value={staffFilter.roleCode}
+                  onChange={(e) => setStaffFilter((f) => ({ ...f, roleCode: e.target.value }))}
+                >
+                  <option value="">Tous les rôles</option>
+                  {availableRoles.map((r) => <option key={r.id} value={r.code}>{r.name}</option>)}
+                </select>
+              </label>
+              <label className="gsd-field">
+                <span>Type du personnel</span>
+                <select
+                  className="form-control"
+                  value={staffFilter.personnelType || ''}
+                  onChange={(e) => setStaffFilter((f) => ({ ...f, personnelType: e.target.value }))}
+                >
+                  <option value="">Tous les types</option>
+                  <option value="medical">Personnel médical</option>
+                  <option value="administrative">Personnel administratif</option>
+                  <option value="auxiliary">Personnel auxiliaire</option>
+                </select>
+              </label>
+              <label className="gsd-field">
+                <span>Service</span>
+                <select
+                  className="form-control"
+                  value={staffFilter.departmentId}
+                  onChange={(e) => setStaffFilter((f) => ({ ...f, departmentId: e.target.value }))}
+                >
+                  <option value="">Tous les services</option>
+                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </label>
+              <label className="gsd-field">
+                <span>Statut</span>
+                <select
+                  className="form-control"
+                  value={staffFilter.isActive}
+                  onChange={(e) => setStaffFilter((f) => ({ ...f, isActive: e.target.value }))}
+                >
+                  <option value="">Tous statuts</option>
+                  <option value="true">Actifs</option>
+                  <option value="false">Clôturés</option>
+                </select>
+              </label>
+              {/* Accès plateforme : la vue d'ensemble ouvre cet onglet avec ce
+                  filtre déjà posé. Sans ce sélecteur, le directeur verrait une
+                  liste restreinte sans savoir pourquoi ni comment revenir. */}
+              <label className="gsd-field">
+                <span>Accès plateforme</span>
+                <select
+                  className="form-control"
+                  value={staffFilter.canLogin}
+                  onChange={(e) => setStaffFilter((f) => ({ ...f, canLogin: e.target.value }))}
+                >
+                  <option value="">Tous accès</option>
+                  <option value="true">Avec accès</option>
+                  <option value="false">Sans accès</option>
+                </select>
+              </label>
+              <div className="gsd-filters-reset">
+                <button
+                  type="button"
+                  className="gs-btn is-quiet"
+                  disabled={!staffFilterActive}
+                  onClick={() => setStaffFilter(EMPTY_STAFF_FILTER)}
+                >
+                  <RotateCcw size={13} strokeWidth={2} /> Réinitialiser
+                </button>
               </div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
-                    {['Matricule','Nom','Rôle / Fonction','Service(s)','Type du personnel','Accès','Statut','Actions'].map(h => (
-                      <th key={h} style={{
-                        padding: '10px 16px', textAlign: 'left', fontSize: 11,
-                        fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase',
-                      }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {staff.map(u => (
-                    <tr key={u.id} style={{ borderBottom: '1px solid var(--border-subtle)', opacity: u.is_active ? 1 : 0.55 }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                      <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>
-                        {u.matricule || '—'}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ fontWeight: 600, fontSize: 'var(--font-sm)' }}>
-                          {u.first_name} {u.last_name}
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{u.email}</div>
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <RoleBadge code={u.role_code} name={u.role_name} />
-                        {u.job_title && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-primary)', marginTop: 4 }}>{u.job_title}</div>}
-                        {/* « Chef de service » est un titre : le rôle métier réel
-                            s'affiche à côté quand il est renseigné. */}
-                        {u.secondary_role_name && (
-                          <div style={{ marginTop: 4 }}>
-                            <span style={{
-                              fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-                              background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
-                              border: '1px dashed var(--border-default)',
-                            }} title="Rôle métier cumulé avec le titre de chef de service">
-                              + {u.secondary_role_name}
-                            </span>
-                          </div>
-                        )}
-                      </td>
-                      {/* Service(s) d'appartenance */}
-                      <td style={{ padding: '12px 16px' }}>
-                        {(() => {
-                          const depts = Array.isArray(u.departments) ? u.departments : [];
-                          if (!depts.length) {
-                            return <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>Aucun service</span>;
-                          }
-                          return (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
-                              {depts.map(d => (
-                                <span key={d.id} style={{
-                                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-                                  background: d.isHead ? '#FEF3C7' : 'var(--bg-elevated)',
-                                  color: d.isHead ? '#B45309' : 'var(--text-secondary)',
-                                }} title={d.isHead ? `Chef du service ${d.name}` : d.name}>
-                                  {d.isHead && '⭐'}{d.name}
-                                </span>
-                              ))}
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <PersonnelTypeBadge category={u.personnel_category} label={u.personnel_category_label} />
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        {u.can_login ? (
-                          <span style={{ fontSize: 11, color: 'var(--color-success)', fontWeight: 700 }}>✓ Connecté</span>
-                        ) : (
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sans accès</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                          fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                          background: u.is_active ? '#05966920' : '#EF444420',
-                          color: u.is_active ? '#059669' : '#EF4444',
-                        }}>
-                          {u.is_active ? '● Actif' : '○ Clôturé'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <button onClick={() => openEditUser(u)} title="Modifier les informations" style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 5,
-                            fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-                            background: 'var(--color-primary-10)', border: '1px solid var(--color-primary-30)',
-                            color: 'var(--color-primary)', fontFamily: 'inherit', fontWeight: 700,
-                          }}><EditIcon /> Modifier</button>
-                          {u.id !== user?.id && (u.is_active ? (
-                            <button onClick={() => {
-                              if (window.confirm(`Clôturer le compte de ${u.first_name} ${u.last_name} ?`))
-                                deactivate.mutate(u.id);
-                            }} style={{
-                              fontSize: 11, padding: '4px 12px', borderRadius: 6, cursor: 'pointer',
-                              background: 'var(--color-danger-10)', border: '1px solid var(--color-danger-30)',
-                              color: 'var(--color-danger)', fontFamily: 'inherit', fontWeight: 600,
-                            }}>Clôturer</button>
-                          ) : (
-                            <button onClick={() => activate.mutate(u.id)} style={{
-                              fontSize: 11, padding: '4px 12px', borderRadius: 6, cursor: 'pointer',
-                              background: '#05966920', border: '1px solid #05966944',
-                              color: '#059669', fontFamily: 'inherit', fontWeight: 600,
-                            }}>Réactiver</button>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
+            </div>
 
-      {/* ══ MODAL : Créer / Modifier Service ══ */}
+            {loadingStaff ? (
+              <div className="gsd-load"><GsSkeleton variant="rows" count={5} /></div>
+            ) : (
+              <GsTable
+                label="Personnel de l'hôpital"
+                columns={staffColumns}
+                rows={staff}
+                rowKey="id"
+                empty={(
+                  <div className="gsd-load">
+                    <GsEmpty
+                      icon={<Users size={24} strokeWidth={1.6} />}
+                      title={staffFilterActive ? 'Aucun agent ne correspond' : 'Aucun compte enregistré'}
+                      hint={staffFilterActive
+                        ? `Sur ${totalStaff} agent(s) de l'hôpital, aucun ne passe les filtres en cours.`
+                        : "Créez le premier compte pour que l'hôpital puisse produire des plannings."}
+                      actions={staffFilterActive ? (
+                        <button type="button" className="gs-btn is-quiet" onClick={() => setStaffFilter(EMPTY_STAFF_FILTER)}>
+                          <RotateCcw size={13} strokeWidth={2} /> Réinitialiser les filtres
+                        </button>
+                      ) : (
+                        <button type="button" className="gs-btn is-primary" onClick={() => { setUserForm({}); setUserModal('create'); }}>
+                          Créer un compte
+                        </button>
+                      )}
+                    />
+                  </div>
+                )}
+              />
+            )}
+          </GsPanel>
+        )}
+
+        {/* ══ CONGÉS ══ */}
+        {activeTab === 'conges' && <LeavesPanel />}
+
+        {/* ══ CALENDRIER (lecture seule) ══ */}
+        {activeTab === 'calendrier' && (
+          <div className="gsd-section">
+            <p className="gsd-note">
+              Lecture seule, sur les tableurs de garde de tous les services de l'hôpital.
+              Les affectations se modifient dans le service qui les a produites.
+            </p>
+            <HospitalGuardCalendar title="Calendrier des gardes de l'hôpital" />
+          </div>
+        )}
+
+        {/* ══ STATISTIQUES ══ */}
+        {activeTab === 'stats' && (
+          <div className="gsd-section">
+            <ScopedStatsPanel title="Statistiques de l'hôpital" />
+          </div>
+        )}
+
+        {/* ══ PRÊTS DE PERSONNEL ══ */}
+        {activeTab === 'loan-stats' && (
+          <div className="gsd-section">
+            <p className="gsd-note">
+              Vue de l'établissement. La décision sur un prêt appartient au chef du service
+              qui prête : elle se prend depuis « Prêts de personnel ».
+            </p>
+            <StaffLoanStatsPanel title="Prêts de personnel — statistiques de l'hôpital" />
+          </div>
+        )}
+
+        {/* ══ HISTORIQUE (immuable) ══ */}
+        {activeTab === 'historique' && <StaffHistoryPanel />}
+      </div>
+
+      {/* ══ MODALE : créer / modifier un service ══ */}
       {deptModal && (
-        <Modal title={deptModal === 'create' ? 'Nouveau service' : `Modifier — ${deptModal.name}`}
-          onClose={() => { setDeptModal(null); setDeptForm({}); }} wide>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Field label="Code" required>
-              <Input value={deptForm.code || ''} onChange={e => setDeptForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
-                placeholder="URG, CHI, MED…" disabled={deptModal !== 'create'} />
-            </Field>
-            <Field label="Type">
-              <Select value={deptForm.departmentType || 'other'}
-                onChange={e => setDeptForm(f => ({ ...f, departmentType: e.target.value }))}>
+        <DirModal
+          wide
+          title={deptModal === 'create' ? 'Nouveau service' : `Modifier — ${deptModal.name}`}
+          onClose={() => { setDeptModal(null); setDeptForm({}); }}
+          footer={(
+            <>
+              <button type="button" className="gs-btn is-quiet" onClick={() => { setDeptModal(null); setDeptForm({}); }}>
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="gs-btn is-primary"
+                onClick={submitDept}
+                disabled={createDept.isPending || updateDept.isPending}
+              >
+                {(createDept.isPending || updateDept.isPending) ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
+            </>
+          )}
+        >
+          <div className="gsd-modal-grid">
+            <Fld label="Code" required hint={deptModal !== 'create' ? 'Le code ne se modifie pas après création.' : undefined}>
+              <input
+                className="form-control"
+                value={deptForm.code || ''}
+                onChange={(e) => setDeptForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+                placeholder="URG, CHI, MED…"
+                disabled={deptModal !== 'create'}
+              />
+            </Fld>
+            <Fld label="Type">
+              <select
+                className="form-control"
+                value={deptForm.departmentType || 'other'}
+                onChange={(e) => setDeptForm((f) => ({ ...f, departmentType: e.target.value }))}
+              >
                 <option value="emergency">Urgences</option>
                 <option value="surgery">Chirurgie</option>
-                <option value="icu">Réanimation / ICU</option>
+                <option value="icu">Réanimation</option>
                 <option value="internal">Médecine interne</option>
                 <option value="pediatrics">Pédiatrie</option>
                 <option value="radiology">Radiologie</option>
                 <option value="other">Autre</option>
-              </Select>
-            </Field>
-            <Field label="Nom (français)" required>
-              <Input value={deptForm.name || ''} onChange={e => setDeptForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="Urgences" />
-            </Field>
-            <Field label="Nom (arabe)">
-              <Input value={deptForm.nameAr || ''} onChange={e => setDeptForm(f => ({ ...f, nameAr: e.target.value }))}
-                placeholder="المستعجلات" dir="rtl" />
-            </Field>
-            <Field label="Étage / Localisation">
-              <Input value={deptForm.floor || ''} onChange={e => setDeptForm(f => ({ ...f, floor: e.target.value }))}
-                placeholder="RDC, 1er, 2e…" />
-            </Field>
-            <Field label="Aile / Bâtiment">
-              <Input value={deptForm.wing || ''} onChange={e => setDeptForm(f => ({ ...f, wing: e.target.value }))}
-                placeholder="Bâtiment A…" />
-            </Field>
-            <Field label="Téléphone">
-              <Input value={deptForm.phone || ''} onChange={e => setDeptForm(f => ({ ...f, phone: e.target.value }))}
-                placeholder="+213 21 …" />
-            </Field>
-            <Field label="Nb. lits">
-              <Input type="number" min="0" value={deptForm.bedCount || ''} onChange={e => setDeptForm(f => ({ ...f, bedCount: e.target.value }))} />
-            </Field>
+              </select>
+            </Fld>
+            <Fld label="Nom (français)" required>
+              <input
+                className="form-control"
+                value={deptForm.name || ''}
+                onChange={(e) => setDeptForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Urgences"
+              />
+            </Fld>
+            <Fld label="Nom (arabe)">
+              <input
+                className="form-control"
+                dir="rtl"
+                value={deptForm.nameAr || ''}
+                onChange={(e) => setDeptForm((f) => ({ ...f, nameAr: e.target.value }))}
+                placeholder="المستعجلات"
+              />
+            </Fld>
+            <Fld label="Étage">
+              <input
+                className="form-control"
+                value={deptForm.floor || ''}
+                onChange={(e) => setDeptForm((f) => ({ ...f, floor: e.target.value }))}
+                placeholder="RDC, 1er, 2e…"
+              />
+            </Fld>
+            <Fld label="Aile / Bâtiment">
+              <input
+                className="form-control"
+                value={deptForm.wing || ''}
+                onChange={(e) => setDeptForm((f) => ({ ...f, wing: e.target.value }))}
+                placeholder="Bâtiment A…"
+              />
+            </Fld>
+            <Fld label="Téléphone">
+              <input
+                className="form-control"
+                value={deptForm.phone || ''}
+                onChange={(e) => setDeptForm((f) => ({ ...f, phone: e.target.value }))}
+                placeholder="+216 71 …"
+              />
+            </Fld>
+            <Fld label="Nombre de lits">
+              <input
+                type="number"
+                min="0"
+                className="form-control"
+                value={deptForm.bedCount || ''}
+                onChange={(e) => setDeptForm((f) => ({ ...f, bedCount: e.target.value }))}
+              />
+            </Fld>
+            <Fld label="Gardes minimum par jour" hint="Sert de seuil aux contrôles du tableur.">
+              <input
+                type="number"
+                min="1"
+                max="20"
+                className="form-control"
+                value={deptForm.minGuardCount || 1}
+                onChange={(e) => setDeptForm((f) => ({ ...f, minGuardCount: e.target.value }))}
+              />
+            </Fld>
           </div>
-          <Field label="Gardes min. par jour">
-            <Input type="number" min="1" max="20" value={deptForm.minGuardCount || 1}
-              onChange={e => setDeptForm(f => ({ ...f, minGuardCount: e.target.value }))}
-              style={{ width: 120 }} />
-          </Field>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
-            <button className="btn btn-secondary" onClick={() => { setDeptModal(null); setDeptForm({}); }}>Annuler</button>
-            <button className="btn btn-primary"
-              onClick={submitDept}
-              disabled={createDept.isPending || updateDept.isPending}>
-              {(createDept.isPending || updateDept.isPending) ? 'Enregistrement…' : 'Enregistrer'}
-            </button>
-          </div>
-        </Modal>
+        </DirModal>
       )}
 
-      {/* ══ MODAL : Désigner Chef de Service ══ */}
+      {/* ══ MODALE : désigner le chef de service ══ */}
       {headModal && (
-        <Modal title="Désigner le Chef de Service" onClose={() => setHeadModal(null)}>
-          <p style={{ fontSize: 'var(--font-sm)', color: 'var(--text-secondary)', marginBottom: 16 }}>
-            Sélectionnez l'acteur qui sera Chef de Service. Son rôle sera automatiquement mis à jour.
-          </p>
-          <Field label="Personnel du service" required>
-            <Select value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)}>
-              <option value="">— Choisir —</option>
-              {deptCandidates(deptDetail?.members).map(m => (
-                <option key={m.id} value={m.id}>
-                  {m.first_name} {m.last_name} ({m.role_name})
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {!deptDetail?.members?.length && (
-            <p style={{ fontSize: 'var(--font-xs)', color: 'var(--color-warning)', marginTop: 8 }}>
-              ⚠️ Ce service n'a pas encore de membres. Ajoutez d'abord du personnel.
-            </p>
+        <DirModal
+          title="Désigner le chef de service"
+          onClose={() => setHeadModal(null)}
+          footer={(
+            <>
+              <button type="button" className="gs-btn is-quiet" onClick={() => setHeadModal(null)}>Annuler</button>
+              <button
+                type="button"
+                className="gs-btn is-primary"
+                disabled={!selectedUserId || setHead.isPending}
+                onClick={() => { setHead.mutate({ deptId: headModal, userId: selectedUserId }); setSelectedUserId(''); }}
+              >
+                {setHead.isPending ? 'En cours…' : 'Confirmer'}
+              </button>
+            </>
           )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
-            <button className="btn btn-secondary" onClick={() => setHeadModal(null)}>Annuler</button>
-            <button className="btn btn-primary"
-              disabled={!selectedUserId || setHead.isPending}
-              onClick={() => { setHead.mutate({ deptId: headModal, userId: selectedUserId }); setSelectedUserId(''); }}>
-              {setHead.isPending ? 'En cours…' : 'Confirmer'}
-            </button>
+        >
+          <div className="gsd-rule is-seal">
+            <Info size={14} strokeWidth={2} aria-hidden="true" />
+            <p>
+              Un service n'a qu'<strong>un seul chef</strong>. Le rôle de la personne choisie est
+              mis à jour automatiquement, et elle devient responsable des plannings du service.
+            </p>
           </div>
-        </Modal>
-      )}
 
-      {/* ══ MODAL : Désigner Surveillant ══ */}
-      {supervModal && (
-        <Modal title="Désigner un Surveillant de Service" onClose={() => setSupervModal(null)}>
-          <p style={{ fontSize: 'var(--font-sm)', color: 'var(--text-secondary)', marginBottom: 8 }}>
-            Sélectionnez l'acteur qui sera Surveillant de ce service.
-          </p>
-          <div style={{
-            background: 'var(--color-info-10, #0EA5E915)', border: '1px solid var(--color-info-30, #0EA5E940)',
-            borderRadius: 8, padding: '8px 12px', marginBottom: 16,
-            fontSize: 'var(--font-xs)', color: 'var(--color-info)',
-          }}>
-            ℹ️ Un service ne peut avoir qu'<strong>un seul chef</strong>, mais il peut compter
-            <strong> plusieurs surveillants</strong>. Désigner une personne ici l'<strong>ajoute</strong> à
-            la liste sans retirer le rôle aux surveillants déjà en place.
-          </div>
-          {/* Surveillants déjà en place */}
-          {(() => {
-            const dept = departments.find(d => d.id === supervModal);
-            const sup  = Array.isArray(dept?.supervisors) ? dept.supervisors : [];
-            if (!sup.length) return null;
-            return (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 'var(--font-xs)', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                  Surveillants actuels ({sup.length})
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {sup.map(s => (
-                    <span key={s.id} style={{
-                      fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
-                      background: 'var(--bg-elevated)', color: 'var(--text-primary)',
-                    }}>{s.firstName} {s.lastName}</span>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-          <Field label="Personnel du service" required>
-            <Select value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)}>
+          <Fld label="Personnel du service" required>
+            <select className="form-control" value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
               <option value="">— Choisir —</option>
-              {deptCandidates(deptDetail?.members).map(m => (
-                <option key={m.id} value={m.id}>
-                  {m.first_name} {m.last_name} ({m.role_name})
-                </option>
+              {deptCandidates(deptDetail?.members).map((m) => (
+                <option key={m.id} value={m.id}>{m.first_name} {m.last_name} ({m.role_name})</option>
               ))}
-            </Select>
-          </Field>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
-            <button className="btn btn-secondary" onClick={() => setSupervModal(null)}>Annuler</button>
-            <button className="btn btn-primary"
-              disabled={!selectedUserId || setSuperv.isPending}
-              onClick={() => { setSuperv.mutate({ deptId: supervModal, userId: selectedUserId }); setSelectedUserId(''); }}>
-              {setSuperv.isPending ? 'En cours…' : 'Confirmer'}
-            </button>
-          </div>
-        </Modal>
+            </select>
+          </Fld>
+
+          {!deptDetail?.members?.length && (
+            <div className="gsd-rule is-alert">
+              <AlertTriangle size={14} strokeWidth={2} aria-hidden="true" />
+              <p>
+                Ce service n'a encore <strong>aucun membre</strong> : affectez d'abord du personnel
+                depuis le registre du personnel, puis revenez désigner son chef.
+              </p>
+            </div>
+          )}
+        </DirModal>
       )}
 
-      {/* ══ MODAL : Créer / Modifier un compte ══ */}
-      {userModal && (
-        <Modal title={userModal === 'create' ? 'Créer un compte' : `Modifier — ${userModal.first_name} ${userModal.last_name}`}
-          onClose={() => { setUserModal(null); setUserForm({}); }} wide>
-          {userModal === 'create' && <div style={{
-            background: 'var(--color-primary-10)', border: '1px solid var(--color-primary-20)',
-            borderRadius: 8, padding: '10px 14px', marginBottom: 20,
-            fontSize: 'var(--font-xs)', color: 'var(--color-primary-light)',
-          }}>
-            ℹ️ Selectionnez un <strong>role</strong> (avec acces plateforme) ou un <strong>titre de poste</strong> (ambulancier, ORL, pharmacien...) dans le champ ci-dessous.
-            Le mot de passe initial sera <strong>GardeSante@2025</strong> — les titres de poste n'ont pas d'acces plateforme.
-          </div>}
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Field label="Prénom" required>
-              <Input value={userForm.firstName || ''} onChange={e => setUserForm(f => ({ ...f, firstName: e.target.value }))} />
-            </Field>
-            <Field label="Nom" required>
-              <Input value={userForm.lastName || ''} onChange={e => setUserForm(f => ({ ...f, lastName: e.target.value }))} />
-            </Field>
-            <Field label="Prénom (arabe)">
-              <Input value={userForm.firstNameAr || ''} onChange={e => setUserForm(f => ({ ...f, firstNameAr: e.target.value }))} dir="rtl" />
-            </Field>
-            <Field label="Nom (arabe)">
-              <Input value={userForm.lastNameAr || ''} onChange={e => setUserForm(f => ({ ...f, lastNameAr: e.target.value }))} dir="rtl" />
-            </Field>
-            <Field label="Email" required>
-              <Input type="email" value={userForm.email || ''} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))} />
-            </Field>
-            <Field label="Téléphone">
-              <Input value={userForm.phone || ''} onChange={e => setUserForm(f => ({ ...f, phone: e.target.value }))} />
-            </Field>
-            <Field label="Matricule">
-              <Input value={userForm.matricule || ''} onChange={e => setUserForm(f => ({ ...f, matricule: e.target.value }))} />
-            </Field>
+      {/* ══ MODALE : désigner un surveillant ══ */}
+      {supervModal && (
+        <DirModal
+          title="Désigner un surveillant de service"
+          onClose={() => setSupervModal(null)}
+          footer={(
+            <>
+              <button type="button" className="gs-btn is-quiet" onClick={() => setSupervModal(null)}>Annuler</button>
+              <button
+                type="button"
+                className="gs-btn is-primary"
+                disabled={!selectedUserId || setSuperv.isPending}
+                onClick={() => { setSuperv.mutate({ deptId: supervModal, userId: selectedUserId }); setSelectedUserId(''); }}
+              >
+                {setSuperv.isPending ? 'En cours…' : 'Confirmer'}
+              </button>
+            </>
+          )}
+        >
+          <div className="gsd-rule is-seal">
+            <Info size={14} strokeWidth={2} aria-hidden="true" />
+            <p>
+              Un service peut compter <strong>plusieurs surveillants</strong>. Désigner une personne
+              ici l'<strong>ajoute</strong> à la liste sans retirer le rôle aux surveillants en place —
+              le retrait se fait depuis le registre des services.
+            </p>
           </div>
 
-          {/* Role + Titre de poste — champ unifie avec recherche */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', fontSize: 'var(--font-xs)', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-              Rôle d'accès / Fonction du personnel <span style={{ color: 'var(--color-danger)' }}>*</span>
-            </label>
+          {currentSupervisors.length > 0 && (
+            <div className="gsd-standing">
+              <span>Surveillants actuels ({currentSupervisors.length})</span>
+              <div className="gsd-chips">
+                {currentSupervisors.map((s) => (
+                  <span key={s.id} className="gsd-chip">{s.firstName} {s.lastName}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Fld label="Personnel du service" required>
+            <select className="form-control" value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
+              <option value="">— Choisir —</option>
+              {deptCandidates(deptDetail?.members).map((m) => (
+                <option key={m.id} value={m.id}>{m.first_name} {m.last_name} ({m.role_name})</option>
+              ))}
+            </select>
+          </Fld>
+        </DirModal>
+      )}
+
+      {/* ══ MODALE : créer / modifier un compte ══ */}
+      {userModal && (
+        <DirModal
+          wide
+          title={userModal === 'create' ? 'Créer un compte' : `Modifier — ${userModal.first_name} ${userModal.last_name}`}
+          onClose={() => { setUserModal(null); setUserForm({}); }}
+          footer={(
+            <>
+              <button type="button" className="gs-btn is-quiet" onClick={() => { setUserModal(null); setUserForm({}); }}>
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="gs-btn is-primary"
+                onClick={submitUser}
+                disabled={createUser.isPending || updateUser.isPending}
+              >
+                {userModal === 'create'
+                  ? (createUser.isPending ? 'Création…' : 'Créer le compte')
+                  : (updateUser.isPending ? 'Enregistrement…' : 'Enregistrer')}
+              </button>
+            </>
+          )}
+        >
+          {userModal === 'create' && (
+            <div className="gsd-rule is-seal">
+              <Info size={14} strokeWidth={2} aria-hidden="true" />
+              <div>
+                <p>
+                  Choisissez un <strong>rôle d'accès</strong> pour ouvrir un compte sur la plateforme,
+                  ou une <strong>fonction du personnel</strong> (ambulancier, ORL, pharmacien…) pour
+                  inscrire un agent sans accès.
+                </p>
+                <p>Mot de passe initial : <strong>GardeSante@2025</strong>.</p>
+              </div>
+            </div>
+          )}
+
+          <div className="gsd-modal-grid">
+            <Fld label="Prénom" required>
+              <input className="form-control" value={userForm.firstName || ''}
+                onChange={(e) => setUserForm((f) => ({ ...f, firstName: e.target.value }))} />
+            </Fld>
+            <Fld label="Nom" required>
+              <input className="form-control" value={userForm.lastName || ''}
+                onChange={(e) => setUserForm((f) => ({ ...f, lastName: e.target.value }))} />
+            </Fld>
+            <Fld label="Prénom (arabe)">
+              <input className="form-control" dir="rtl" value={userForm.firstNameAr || ''}
+                onChange={(e) => setUserForm((f) => ({ ...f, firstNameAr: e.target.value }))} />
+            </Fld>
+            <Fld label="Nom (arabe)">
+              <input className="form-control" dir="rtl" value={userForm.lastNameAr || ''}
+                onChange={(e) => setUserForm((f) => ({ ...f, lastNameAr: e.target.value }))} />
+            </Fld>
+            <Fld label="Courriel" required>
+              <input type="email" className="form-control" value={userForm.email || ''}
+                onChange={(e) => setUserForm((f) => ({ ...f, email: e.target.value }))} />
+            </Fld>
+            <Fld label="Téléphone">
+              <input className="form-control" value={userForm.phone || ''}
+                onChange={(e) => setUserForm((f) => ({ ...f, phone: e.target.value }))} />
+            </Fld>
+            <Fld label="Matricule">
+              <input className="form-control" value={userForm.matricule || ''}
+                onChange={(e) => setUserForm((f) => ({ ...f, matricule: e.target.value }))} />
+            </Fld>
+            <Fld label="Grade">
+              <input className="form-control" value={userForm.grade || ''}
+                onChange={(e) => setUserForm((f) => ({ ...f, grade: e.target.value }))} />
+            </Fld>
+            <Fld label="Langue de l'interface">
+              <select
+                className="form-control"
+                value={userForm.preferredLanguage || 'fr'}
+                onChange={(e) => setUserForm((f) => ({ ...f, preferredLanguage: e.target.value }))}
+              >
+                <option value="fr">Français</option>
+                <option value="ar">العربية</option>
+              </select>
+            </Fld>
+          </div>
+
+          {/* Rôle d'accès + fonction du personnel — champ unifié avec recherche */}
+          <div className="gsd-field">
+            <span>Rôle d'accès ou fonction du personnel<b className="gsd-req">*</b></span>
             <UnifiedRoleSelect
               roleCode={userForm.roleCode || null}
               jobTitleId={userForm.jobTitleId || null}
               currentRole={userModal !== 'create' ? { code: userModal.role_code, name: userModal.role_name } : null}
               required
               onChange={({ roleCode: rc, jobTitleId: jid }) => {
-                setUserForm(f => ({
+                setUserForm((f) => ({
                   ...f,
-                  roleCode:   rc  || null,
+                  roleCode: rc || null,
                   jobTitleId: jid || null,
-                  // Changer le role principal invalide un eventuel role secondaire
+                  // Changer le rôle principal invalide un éventuel rôle secondaire
                   secondaryRoleCode: rc === 'department_head' ? f.secondaryRoleCode : null,
                 }));
               }}
             />
             {userForm.roleCode === 'autre' && !userForm.jobTitleId && (
-              <div style={{ fontSize: 11, color: '#F59E0B', marginTop: 4, fontWeight: 600 }}>
-                Veuillez choisir une fonction du personnel (ex : Ambulancier, Médecin interne…).
-              </div>
+              <small className="gsd-hint is-alert">
+                Choisissez une fonction du personnel (ambulancier, médecin interne…).
+              </small>
             )}
           </div>
 
-          {/* Role secondaire — « Chef de service » est un TITRE, pas un metier.
-              On garde donc la possibilite de cumuler le titre avec un vrai role
-              metier (medecin senior, resident...). Purement descriptif. */}
+          {/* « Chef de service » est un TITRE, pas un métier : on garde la
+              possibilité de cumuler le titre avec un vrai rôle métier. */}
           {userForm.roleCode === 'department_head' && (
-            <div style={{
-              marginBottom: 16, padding: '10px 14px',
-              background: '#FEF3C7', border: '1px solid #F59E0B55', borderRadius: 8,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 'var(--font-xs)', fontWeight: 700, color: '#92400E' }}>
-                  ⭐ « Chef de service » est un titre, pas un poste
-                </span>
-                <span style={{ fontSize: 10, color: '#B45309', fontWeight: 600 }}>Optionnel</span>
+            <div className="gsd-rule">
+              <Info size={14} strokeWidth={2} aria-hidden="true" />
+              <div>
+                <p>
+                  <strong>« Chef de service » est un titre, pas un métier.</strong> Vous pouvez
+                  indiquer le rôle métier réel de cette personne — par exemple un médecin sénior qui
+                  est chef de service. Ce rôle secondaire n'ouvre aucun accès supplémentaire.
+                </p>
+                <label className="gsd-rule-field">
+                  <select
+                    className="form-control"
+                    value={userForm.secondaryRoleCode || ''}
+                    onChange={(e) => setUserForm((f) => ({ ...f, secondaryRoleCode: e.target.value || null }))}
+                  >
+                    <option value="">— Aucun rôle secondaire —</option>
+                    {(secondaryRoles || []).map((r) => (
+                      <option key={r.id} value={r.code}>{r.name}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
-              <div style={{ fontSize: 11, color: '#92400E', marginBottom: 8 }}>
-                Choisissez le <strong>rôle métier</strong> réel de cette personne (ex : médecin sénior qui est chef de service). Le rôle secondaire n'ouvre aucun accès supplémentaire.
-              </div>
-              <Select
-                value={userForm.secondaryRoleCode || ''}
-                onChange={e => setUserForm(f => ({ ...f, secondaryRoleCode: e.target.value || null }))}
-                style={{ width: '100%', background: '#FFF' }}
-              >
-                <option value="">— Aucun rôle secondaire —</option>
-                {(secondaryRoles || []).map(r => (
-                  <option key={r.id} value={r.code}>{r.name}</option>
-                ))}
-              </Select>
             </div>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Field label="Grade">
-              <Input value={userForm.grade || ''} onChange={e => setUserForm(f => ({ ...f, grade: e.target.value }))} />
-            </Field>
-            <Field label="Langue interface">
-              <Select value={userForm.preferredLanguage || 'fr'} onChange={e => setUserForm(f => ({ ...f, preferredLanguage: e.target.value }))}>
-                <option value="fr">Français</option>
-                <option value="ar">العربية</option>
-              </Select>
-            </Field>
-          </div>
-          {/* Service — pleine largeur si requis. Masqué pour les rôles
-              transversaux : le surveillant général couvre tout l'hôpital. */}
+
+          {/* Service — masqué pour les rôles transversaux : le surveillant
+              général couvre tout l'hôpital, comme le directeur. */}
           {roleIsHospitalWide ? (
-            <div style={{
-              background: 'var(--color-info-10, #0EA5E915)', border: '1px solid var(--color-info-30, #0EA5E940)',
-              borderRadius: 8, padding: '10px 14px',
-              fontSize: 'var(--font-xs)', color: 'var(--color-info)',
-            }}>
-              ℹ️ Le <strong>surveillant général</strong> couvre l'hôpital entier, comme le directeur :
-              il n'est rattaché à <strong>aucun service</strong>.
+            <div className="gsd-rule is-seal">
+              <Info size={14} strokeWidth={2} aria-hidden="true" />
+              <p>
+                Le <strong>surveillant général</strong> couvre l'hôpital entier, comme le directeur :
+                il n'est rattaché à <strong>aucun service</strong>.
+              </p>
             </div>
           ) : (
-          <Field
-            label={personnelNeedsDept ? 'Service (obligatoire *)' : 'Service (optionnel)'}
-            required={personnelNeedsDept}
-          >
-            <Select
-              value={userForm.departmentId || ''}
-              onChange={e => setUserForm(f => ({ ...f, departmentId: e.target.value }))}
-              style={{ borderColor: personnelNeedsDept && !userForm.departmentId ? 'var(--color-danger)' : undefined }}
+            <Fld
+              label={personnelNeedsDept ? 'Service' : 'Service (optionnel)'}
+              required={personnelNeedsDept}
+              hint={personnelNeedsDept
+                ? 'Ce rôle exige un service. Un seul chef par service, mais plusieurs surveillants sont possibles.'
+                : undefined}
+              hintTone={personnelNeedsDept && !userForm.departmentId ? 'alert' : undefined}
             >
-              <option value="">— Choisir un service —</option>
-              {departments.map(d => (
+              <select
+                className="form-control"
+                value={userForm.departmentId || ''}
+                onChange={(e) => setUserForm((f) => ({ ...f, departmentId: e.target.value }))}
+              >
+                <option value="">— Choisir un service —</option>
+                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </Fld>
+          )}
+        </DirModal>
+      )}
+
+      {/* ══ MODALE : migrer le personnel avant désactivation ══ */}
+      {migrationDept && (
+        <DirModal
+          title={`Migrer le personnel de ${migrationDept.name}`}
+          onClose={() => setMigrationDept(null)}
+          footer={(
+            <>
+              <button type="button" className="gs-btn is-quiet" onClick={() => setMigrationDept(null)}>Annuler</button>
+              <button
+                type="button"
+                className="gs-btn is-danger"
+                disabled={!migrationTarget || migrateDept.isPending}
+                onClick={() => migrateDept.mutate()}
+              >
+                {migrateDept.isPending ? 'Migration…' : 'Migrer et désactiver'}
+              </button>
+            </>
+          )}
+        >
+          <div className="gsd-rule is-alert">
+            <AlertTriangle size={14} strokeWidth={2} aria-hidden="true" />
+            <p>
+              Ce service compte <strong>{migrationDept.member_count}</strong> agent(s). Ils doivent
+              tous être affectés à un autre service avant la désactivation — aucun agent ne reste
+              sans service.
+            </p>
+          </div>
+
+          <Fld label="Service de destination" required>
+            <select className="form-control" value={migrationTarget} onChange={(e) => setMigrationTarget(e.target.value)}>
+              <option value="">— Choisir le service cible —</option>
+              {departments.filter((d) => d.id !== migrationDept.id).map((d) => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
-            </Select>
-            {personnelNeedsDept && (
-              <div style={{ fontSize: 11, color: '#F59E0B', marginTop: 4, fontWeight: 600 }}>
-                Ce role necessite un service. Un seul chef de service par service, mais plusieurs surveillants sont possibles.
-              </div>
-            )}
-          </Field>
-          )}
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
-            <button className="btn btn-secondary" onClick={() => { setUserModal(null); setUserForm({}); }}>Annuler</button>
-            <button className="btn btn-primary" onClick={submitUser} disabled={createUser.isPending || updateUser.isPending}>
-              {userModal === 'create'
-                ? (createUser.isPending ? 'Création…' : 'Créer le compte')
-                : (updateUser.isPending ? 'Enregistrement…' : 'Enregistrer les modifications')}
-            </button>
-          </div>
-        </Modal>
+            </select>
+          </Fld>
+        </DirModal>
       )}
-
-      {migrationDept && (
-        <Modal title={`Migrer le personnel de ${migrationDept.name}`} onClose={() => setMigrationDept(null)}>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
-            Ce service contient {migrationDept.member_count} personnel(s). Ils doivent tous être affectés à un autre service avant la désactivation.
-          </p>
-          <Field label="Service de destination" required>
-            <Select value={migrationTarget} onChange={(e) => setMigrationTarget(e.target.value)}>
-              <option value="">— Choisir le service cible —</option>
-              {departments.filter((d) => d.id !== migrationDept.id).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </Select>
-          </Field>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
-            <button className="btn btn-secondary" onClick={() => setMigrationDept(null)}>Annuler</button>
-            <button className="btn btn-danger" disabled={!migrationTarget || migrateDept.isPending} onClick={() => migrateDept.mutate()}>
-              {migrateDept.isPending ? 'Migration…' : 'Migrer et désactiver'}
-            </button>
-          </div>
-        </Modal>
-      )}
-
-      {/* ══ TAB : CALENDRIER HÔPITAL (lecture seule) ══ */}
-      {activeTab === 'calendrier' && (
-        <HospitalGuardCalendar title="Calendrier des gardes de l'hôpital" />
-      )}
-
-      {/* ══ TAB : STATISTIQUES DE L'HÔPITAL ══ */}
-      {activeTab === 'stats' && (
-        <ScopedStatsPanel title="Statistiques de l'hôpital" />
-      )}
-
-      {/* ══ TAB : STATISTIQUES DES PRÊTS DE PERSONNEL ══ */}
-      {activeTab === 'loan-stats' && (
-        <StaffLoanStatsPanel title="Prêts de personnel — statistiques de l'hôpital" />
-      )}
-
-      {/* ══ TAB : CONGÉS DU PERSONNEL ══ */}
-      {activeTab === 'conges' && <LeavesPanel />}
-
-      {/* ══ TAB : HISTORIQUE DU PERSONNEL (immuable) ══ */}
-      {activeTab === 'historique' && <StaffHistoryPanel />}
     </div>
   );
 }

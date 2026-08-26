@@ -96,7 +96,7 @@ export default function StepTeam({
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
             <thead>
-              <tr style={{ textAlign: 'left', color: 'var(--text-muted)' }}>
+              <tr style={{ textAlign: 'left', color: 'var(--gs-ink-faint)' }}>
                 <th style={{ padding: '6px 8px', width: 34 }}></th>
                 <th style={{ padding: '6px 8px' }}>Agent</th>
                 <th style={{ padding: '6px 8px' }}>Disponibilité</th>
@@ -113,21 +113,21 @@ export default function StepTeam({
                 const row = pickedOf(m.id);
                 const myLeaves = leavesByUser.get(m.id) || [];
                 return (
-                  <tr key={m.id} style={{ borderTop: '1px solid var(--border-subtle)', opacity: picked ? 1 : 0.65 }}>
+                  <tr key={m.id} style={{ borderTop: '1px solid var(--gs-rule)', opacity: picked ? 1 : 0.65 }}>
                     <td style={{ padding: '8px' }}>
                       <input type="checkbox" checked={picked} onChange={() => toggle(m)} />
                     </td>
                     <td style={{ padding: '8px' }}>
-                      <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{m.firstName} {m.lastName}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.roleName}</div>
+                      <div style={{ fontWeight: 700, color: 'var(--gs-ink)' }}>{m.firstName} {m.lastName}</div>
+                      <div style={{ fontSize: 11, color: 'var(--gs-ink-faint)' }}>{m.roleName}</div>
                     </td>
                     <td style={{ padding: '8px' }}>
                       {myLeaves.length === 0 ? (
-                        <span style={{ fontSize: 11.5, color: '#059669', fontWeight: 700 }}>Disponible</span>
+                        <span style={{ fontSize: 11.5, color: 'var(--gs-duty)', fontWeight: 700 }}>Disponible</span>
                       ) : (
                         myLeaves.map((l, i) => (
-                          <div key={i} style={{ fontSize: 11, color: '#D97706', fontWeight: 600 }}>
-                            🌴 {l.typeName || 'Congé'} · {fmt(l.startDate || l.start_date)} → {fmt(l.endDate || l.end_date)}
+                          <div key={i} style={{ fontSize: 11, color: 'var(--gs-alert)', fontWeight: 600 }}>
+                            {l.typeName || 'Congé'} · {fmt(l.startDate || l.start_date)} → {fmt(l.endDate || l.end_date)}
                           </div>
                         ))
                       )}
@@ -154,14 +154,14 @@ export default function StepTeam({
                     </td>
                     <td style={{ padding: '8px' }}>
                       {picked && (
-                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: row.atHome === true ? '#7C3AED' : 'var(--text-muted)' }}
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: row.atHome === true ? 'var(--gs-id-7)' : 'var(--gs-ink-faint)' }}
                           title={row.atHome === true
                             ? 'Garde à domicile (astreinte) — décochez pour une garde à l’hôpital'
                             : 'Garde à l’hôpital, en présence — cochez pour une garde à domicile'}>
                           <input type="checkbox" checked={row.atHome === true}
                             onChange={(e) => patch(m.id, { atHome: e.target.checked })}
-                            style={{ cursor: 'pointer', accentColor: '#7C3AED', margin: 0 }} />
-                          {row.atHome === true ? '🏠 Oui' : 'Non'}
+                            style={{ cursor: 'pointer', accentColor: 'var(--gs-id-7)', margin: 0 }} />
+                          {row.atHome === true ? 'Oui' : 'Non'}
                         </label>
                       )}
                     </td>
@@ -174,8 +174,8 @@ export default function StepTeam({
                               <span key={d.value} onClick={() => toggleDay(m.id, d.value)}
                                 style={{
                                   padding: '2px 6px', borderRadius: 6, cursor: 'pointer', fontSize: 10.5, fontWeight: 700,
-                                  background: off ? '#FEE2E2' : 'var(--border-subtle)',
-                                  color: off ? '#DC2626' : 'var(--text-muted)',
+                                  background: off ? 'var(--gs-alert-wash)' : 'var(--gs-rule)',
+                                  color: off ? 'var(--gs-alert-strong)' : 'var(--gs-ink-faint)',
                                   textDecoration: off ? 'line-through' : 'none',
                                 }}>
                                 {d.label}
@@ -190,7 +190,7 @@ export default function StepTeam({
                         <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                           <span onClick={() => move(m.id, -1)} style={{ cursor: 'pointer', fontSize: 13 }} title="Monter">▲</span>
                           <span onClick={() => move(m.id, 1)} style={{ cursor: 'pointer', fontSize: 13 }} title="Descendre">▼</span>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>
+                          <span style={{ fontSize: 11, color: 'var(--gs-ink-faint)', fontWeight: 700 }}>
                             {selected.findIndex((s) => s.userId === m.id) + 1}
                           </span>
                         </div>
@@ -203,7 +203,7 @@ export default function StepTeam({
           </table>
         </div>
         {staff.length === 0 && (
-          <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
+          <div style={{ textAlign: 'center', padding: 20, color: 'var(--gs-ink-faint)', fontSize: 13 }}>
             Aucun personnel actif dans ce service.
           </div>
         )}
@@ -240,7 +240,7 @@ export default function StepTeam({
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 12.5, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!requirements.noConsecutiveShifts}
             onChange={(e) => req('noConsecutiveShifts', e.target.checked)} />
-          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Interdire deux gardes consécutives</span>
+          <span style={{ color: 'var(--gs-ink)', fontWeight: 600 }}>Interdire deux gardes consécutives</span>
         </label>
       </Section>
     </>

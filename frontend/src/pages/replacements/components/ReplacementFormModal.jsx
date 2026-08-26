@@ -1,379 +1,77 @@
-/**
- * ReplacementFormModal — création d'un remplacement sur une garde courante.
- *
- * Portées : toute la période · une période · un jour · une durée horaire.
- * Un ou plusieurs personnels remplacés, chacun par un personnel du même
- * hôpital (même service ou autre service).
- */
 import React, { useMemo, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowRight, CalendarDays, Check, Clock3, Search, ShieldAlert, UserRound, UserRoundCheck, X } from 'lucide-react';
 import { replacementsAPI, schedulesAPI } from '../../../api';
 import toast from 'react-hot-toast';
+import './Replacements.css';
 
 const SCOPES = [
-  { key: 'full_period', label: 'Toute la période', emoji: '📆', hint: 'Sur tout le planning' },
-  { key: 'date_range',  label: 'Une période',      emoji: '🗓️', hint: 'Du … au …' },
-  { key: 'single_day',  label: 'Un jour',          emoji: '📅', hint: 'Une seule date' },
-  { key: 'time_slot',   label: 'Une durée',        emoji: '⏱️', hint: 'Ex. 14h → 16h' },
+  { key: 'full_period', label: 'Toute la garde', hint: 'Du début à la fin', icon: CalendarDays },
+  { key: 'date_range', label: 'Une période', hint: 'Choisir plusieurs jours', icon: CalendarDays },
+  { key: 'single_day', label: 'Un seul jour', hint: 'Une date précise', icon: Check },
+  { key: 'time_slot', label: 'Un créneau', hint: 'Jour et horaires', icon: Clock3 },
 ];
-
-const fullName = (p) => `${p.last_name || ''} ${p.first_name || ''}`.trim();
-
-/** 'YYYY-MM-DD' lu en UTC par `new Date()` décale d'un jour : on force le local. */
-const fmtLong = (d) => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || '').slice(0, 10));
-  const dt = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(d);
-  return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('fr-FR');
+const fullName = (person) => `${person.last_name || ''} ${person.first_name || ''}`.trim();
+const fmtLong = (value) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').slice(0, 10));
+  const date = match ? new Date(+match[1], +match[2] - 1, +match[3]) : new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
 };
 
 export default function ReplacementFormModal({ schedule, isChef, onClose }) {
-  const qc = useQueryClient();
-
+  const queryClient = useQueryClient();
   const [scope, setScope] = useState('full_period');
   const [startDate, setStartDate] = useState(schedule?.start_date?.slice(0, 10) || '');
   const [endDate, setEndDate] = useState(schedule?.end_date?.slice(0, 10) || '');
   const [startTime, setStartTime] = useState('08:00');
-  const [endTime, setEndTime] = useState('10:00');
+  const [endTime, setEndTime] = useState('16:00');
   const [reason, setReason] = useState('');
-  const [pairs, setPairs] = useState([]);        // [{ absentUserId, replacementUserId }]
-  const [search, setSearch] = useState('');
+  const [pairs, setPairs] = useState([]);
+  const [originSearch, setOriginSearch] = useState('');
+  const [replacementSearch, setReplacementSearch] = useState('');
 
-  // Personnel du tableur = les remplaçables
-  const { data: staffRes, isLoading: staffLoading } = useQuery({
-    queryKey: ['replacement-schedule-staff', schedule?.id],
-    queryFn: () => replacementsAPI.getScheduleStaff(schedule.id).then(r => r.data),
-    enabled: !!schedule?.id,
-  });
-  const scheduleStaff = staffRes?.data || [];
+  const { data: staffResponse, isLoading: staffLoading } = useQuery({ queryKey: ['replacement-schedule-staff', schedule?.id], queryFn: () => replacementsAPI.getScheduleStaff(schedule.id).then((response) => response.data), enabled: !!schedule?.id });
+  const scheduleStaff = useMemo(() => staffResponse?.data || [], [staffResponse?.data]);
+  const { data: hospitalResponse } = useQuery({ queryKey: ['hospital-staff-replacement', replacementSearch], queryFn: () => schedulesAPI.getHospitalStaff({ search: replacementSearch || undefined, limit: 200 }).then((response) => response.data) });
+  const hospitalStaff = useMemo(() => hospitalResponse?.data || [], [hospitalResponse?.data]);
+  const selectedIds = useMemo(() => new Set(pairs.map((pair) => pair.absentUserId)), [pairs]);
+  const filteredScheduleStaff = useMemo(() => {
+    const needle = originSearch.trim().toLowerCase();
+    if (!needle) return scheduleStaff;
+    return scheduleStaff.filter((person) => `${fullName(person)} ${person.role_name || ''} ${person.department_name || ''}`.toLowerCase().includes(needle));
+  }, [originSearch, scheduleStaff]);
 
-  // Tout le personnel de l'hôpital = les remplaçants possibles
-  const { data: hospitalRes } = useQuery({
-    queryKey: ['hospital-staff-replacement', search],
-    queryFn: () => schedulesAPI.getHospitalStaff({ search: search || undefined, limit: 200 }).then(r => r.data),
-  });
-  const hospitalStaff = hospitalRes?.data || [];
-
-  const selectedAbsentIds = useMemo(() => pairs.map(p => p.absentUserId), [pairs]);
-
-  const toggleAbsent = (userId) => {
-    setPairs(prev => prev.some(p => p.absentUserId === userId)
-      ? prev.filter(p => p.absentUserId !== userId)
-      : [...prev, { absentUserId: userId, replacementUserId: '' }]);
-  };
-
-  const setReplacer = (absentUserId, replacementUserId) => {
-    setPairs(prev => prev.map(p => p.absentUserId === absentUserId ? { ...p, replacementUserId } : p));
-  };
-
+  const toggleOrigin = (userId) => setPairs((current) => current.some((pair) => pair.absentUserId === userId) ? current.filter((pair) => pair.absentUserId !== userId) : [...current, { absentUserId: userId, replacementUserId: '' }]);
+  const setReplacer = (absentUserId, replacementUserId) => setPairs((current) => current.map((pair) => pair.absentUserId === absentUserId ? { ...pair, replacementUserId } : pair));
   const mutation = useMutation({
-    mutationFn: (payload) => replacementsAPI.createOverlay(payload).then(r => r.data),
-    onSuccess: (res) => {
-      toast.success(res.message || 'Remplacement enregistré');
-      (res.warnings || []).forEach(w => toast(w.message, { icon: '⚠️', duration: 6000 }));
-      qc.invalidateQueries({ queryKey: ['overlay-replacements'] });
-      qc.invalidateQueries({ queryKey: ['eligible-schedules'] });
-      onClose?.();
-    },
-    onError: (err) => {
-      toast.error(err?.response?.data?.message || 'Échec de l\'enregistrement');
-    },
+    mutationFn: (payload) => replacementsAPI.createOverlay(payload).then((response) => response.data),
+    onSuccess: (response) => { toast.success(response.message || 'Remplacement enregistré'); (response.warnings || []).forEach((warning) => toast(warning.message, { icon: '!', duration: 6000 })); queryClient.invalidateQueries({ queryKey: ['overlay-replacements'] }); queryClient.invalidateQueries({ queryKey: ['eligible-schedules'] }); onClose?.(); },
+    onError: (error) => toast.error(error?.response?.data?.message || "Échec de l'enregistrement"),
   });
-
-  const handleSubmit = () => {
+  const submit = () => {
     if (!pairs.length) return toast.error('Sélectionnez au moins un personnel à remplacer.');
-    const incomplete = pairs.find(p => !p.replacementUserId);
-    if (incomplete) {
-      const who = scheduleStaff.find(s => s.id === incomplete.absentUserId);
-      return toast.error(`Choisissez un remplaçant pour ${who ? fullName(who) : 'chaque personnel'}.`);
-    }
+    const incomplete = pairs.find((pair) => !pair.replacementUserId);
+    if (incomplete) return toast.error(`Choisissez un remplaçant pour ${fullName(scheduleStaff.find((person) => person.id === incomplete.absentUserId) || {})}.`);
     if (scope !== 'full_period' && !startDate) return toast.error('La date est requise.');
-    if (scope === 'date_range' && !endDate) return toast.error('La date de fin est requise.');
-    if (scope === 'time_slot' && (!startTime || !endTime)) return toast.error('Les heures sont requises.');
-
-    mutation.mutate({
-      scheduleId: schedule.id,
-      scope,
-      startDate: scope === 'full_period' ? undefined : startDate,
-      endDate: scope === 'date_range' ? endDate : (scope === 'time_slot' ? startDate : undefined),
-      startTime: scope === 'time_slot' ? startTime : undefined,
-      endTime: scope === 'time_slot' ? endTime : undefined,
-      reason: reason || undefined,
-      items: pairs,
-    });
-  };
-
-  const inputStyle = {
-    padding: '8px 10px', borderRadius: 8, fontSize: 'var(--font-sm)',
-    border: '1px solid var(--border-default)', background: 'var(--bg-card)',
-    color: 'var(--text-primary)', width: '100%',
-  };
-  const labelStyle = {
-    display: 'block', fontSize: 11, fontWeight: 700, marginBottom: 4,
-    color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 0.3,
+    if (scope === 'date_range' && (!endDate || endDate < startDate)) return toast.error('La période sélectionnée est invalide.');
+    if (scope === 'time_slot' && (!startTime || !endTime || endTime <= startTime)) return toast.error('Les horaires sélectionnés sont invalides.');
+    mutation.mutate({ scheduleId: schedule.id, scope, startDate: scope === 'full_period' ? undefined : startDate, endDate: scope === 'date_range' ? endDate : scope === 'time_slot' ? startDate : undefined, startTime: scope === 'time_slot' ? startTime : undefined, endTime: scope === 'time_slot' ? endTime : undefined, reason: reason || undefined, items: pairs });
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 1000, padding: 20,
-      }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-card)', borderRadius: 14,
-          border: '1px solid var(--border-default)', boxShadow: 'var(--shadow-xl)',
-          width: '100%', maxWidth: 880, maxHeight: '92vh',
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        }}
-      >
-        {/* En-tête */}
-        <div style={{
-          padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)',
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16,
-        }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 'var(--font-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>
-              🔄 Nouveau remplacement
-            </h3>
-            <p style={{ margin: '4px 0 0', fontSize: 'var(--font-sm)', color: 'var(--text-muted)' }}>
-              {schedule?.name} · {schedule?.department_name}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-              border: '1px solid var(--border-default)', background: 'var(--bg-base)',
-              color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1,
-            }}
-            aria-label="Fermer"
-          >
-            ✕
-          </button>
+    <div className="replacement-modal-backdrop" onClick={onClose}>
+      <div className="replacement-dialog replacement-form-dialog" onClick={(event) => event.stopPropagation()}>
+        <div className="replacement-dialog__header"><div><span className="replacement-dialog__eyebrow"><ShieldAlert size={14} /> Nouvelle surcouche</span><h3>Organiser un remplacement</h3><p>{schedule?.name} · {schedule?.department_name}</p></div><button className="replacement-icon-button" onClick={onClose} title="Fermer"><X size={18} /></button></div>
+        {!isChef && <div className="replacement-dialog__notice is-warning"><Clock3 size={17} /> Votre proposition sera visible après confirmation du chef de service.</div>}
+        <div className="replacement-dialog__body replacement-form-body">
+          <section className="replacement-form-section"><div className="replacement-form-section__heading"><span className="replacement-step">1</span><div><h4>Quand le remplacement s'applique-t-il ?</h4><p>La sélection reste limitée à la période de cette garde.</p></div></div><div className="replacement-scope-grid">{SCOPES.map((item) => { const Icon = item.icon; return <button type="button" key={item.key} className={`replacement-scope-card ${scope === item.key ? 'is-selected' : ''}`} onClick={() => setScope(item.key)}><Icon size={19} /><strong>{item.label}</strong><small>{item.hint}</small></button>; })}</div>{scope !== 'full_period' && <div className={`replacement-date-fields ${scope === 'time_slot' ? 'has-time' : ''}`}><label className="replacement-label">{scope === 'date_range' ? 'Du' : 'Date'}<input className="replacement-input" type="date" value={startDate} min={schedule?.start_date?.slice(0, 10)} max={schedule?.end_date?.slice(0, 10)} onChange={(event) => setStartDate(event.target.value)} /></label>{scope === 'date_range' && <label className="replacement-label">Au<input className="replacement-input" type="date" value={endDate} min={startDate || schedule?.start_date?.slice(0, 10)} max={schedule?.end_date?.slice(0, 10)} onChange={(event) => setEndDate(event.target.value)} /></label>}{scope === 'time_slot' && <><label className="replacement-label">De<input className="replacement-input" type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label><label className="replacement-label">À<input className="replacement-input" type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label></>}</div>}{scope === 'full_period' && <div className="replacement-period-note"><CalendarDays size={16} /> Du {fmtLong(schedule?.start_date)} au {fmtLong(schedule?.end_date)}</div>}</section>
+
+          <section className="replacement-form-section"><div className="replacement-form-section__heading"><span className="replacement-step">2</span><div><h4>Qui doit être remplacé ? <b>{pairs.length}</b></h4><p>Sélectionnez une ou plusieurs personnes de la garde d'origine.</p></div></div><div className="replacement-search"><Search size={17} /><input value={originSearch} onChange={(event) => setOriginSearch(event.target.value)} placeholder="Rechercher par nom, rôle ou service" /></div>{staffLoading ? <div className="replacement-loading-line">Chargement du personnel affecté...</div> : <div className="replacement-origin-list">{filteredScheduleStaff.map((person) => { const selected = selectedIds.has(person.id); return <button type="button" className={`replacement-origin-row ${selected ? 'is-selected' : ''}`} key={person.id} onClick={() => toggleOrigin(person.id)}><span className="replacement-check">{selected && <Check size={15} />}</span><span className="replacement-avatar">{person.first_name?.[0]}{person.last_name?.[0]}</span><span className="replacement-person-copy"><strong>{fullName(person)}</strong><small>{person.role_name || 'Personnel'}{person.department_name ? ` · ${person.department_name}` : ''}</small></span>{selected && <UserRoundCheck size={17} />}</button>; })}{!filteredScheduleStaff.length && <div className="replacement-list-empty">Aucun personnel correspondant.</div>}</div>}</section>
+
+          {!!pairs.length && <section className="replacement-form-section"><div className="replacement-form-section__heading"><span className="replacement-step">3</span><div><h4>Associer chaque remplaçant</h4><p>Les personnes de tous les services de l'hôpital sont disponibles.</p></div></div><div className="replacement-search"><Search size={17} /><input value={replacementSearch} onChange={(event) => setReplacementSearch(event.target.value)} placeholder="Rechercher un remplaçant" /></div><div className="replacement-assignment-list">{pairs.map((pair) => { const origin = scheduleStaff.find((person) => person.id === pair.absentUserId); const chosen = hospitalStaff.find((person) => person.id === pair.replacementUserId); return <div className="replacement-assignment" key={pair.absentUserId}><div className="replacement-assignment__origin"><span className="replacement-avatar">{origin?.first_name?.[0]}{origin?.last_name?.[0]}</span><span><strong>{fullName(origin || {})}</strong><small>Personnel d'origine</small></span></div><ArrowRight className="replacement-assignment__arrow" size={19} /><div className="replacement-assignment__select"><UserRound size={16} /><select value={pair.replacementUserId} onChange={(event) => setReplacer(pair.absentUserId, event.target.value)}><option value="">Choisir le remplaçant</option>{hospitalStaff.filter((person) => person.id !== pair.absentUserId).map((person) => <option key={person.id} value={person.id}>{fullName(person)}{person.dept_name ? ` · ${person.dept_name}` : ''}</option>)}</select>{chosen?.dept_name && origin?.department_id && chosen.dept_id !== origin.department_id && <small className="replacement-cross-service">Autre service · {chosen.dept_name}</small>}</div></div>; })}</div></section>}
+          <section className="replacement-form-section"><label className="replacement-label">Motif ou précision <span>(facultatif)</span><textarea className="replacement-input" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ex. congé exceptionnel, formation, mission..." /></label></section>
         </div>
-
-        {!isChef && (
-          <div style={{
-            padding: '10px 20px', background: '#FEF3C7', borderBottom: '1px solid #FDE68A',
-            fontSize: 'var(--font-sm)', color: '#92400E',
-          }}>
-            ⏳ Ce remplacement devra être confirmé par le chef de service avant de devenir effectif.
-          </div>
-        )}
-
-        <div style={{ flex: 1, overflow: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* Portée */}
-          <div>
-            <label style={labelStyle}>1 · Portée du remplacement</label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
-              {SCOPES.map(s => (
-                <button
-                  key={s.key}
-                  onClick={() => setScope(s.key)}
-                  style={{
-                    padding: '10px 12px', borderRadius: 10, textAlign: 'left', cursor: 'pointer',
-                    border: `1.5px solid ${scope === s.key ? 'var(--color-primary)' : 'var(--border-default)'}`,
-                    background: scope === s.key ? 'rgba(37,99,235,0.06)' : 'var(--bg-base)',
-                  }}
-                >
-                  <div style={{
-                    fontSize: 'var(--font-sm)', fontWeight: 700,
-                    color: scope === s.key ? 'var(--color-primary)' : 'var(--text-primary)',
-                  }}>
-                    {s.emoji} {s.label}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{s.hint}</div>
-                </button>
-              ))}
-            </div>
-
-            {/* Champs selon la portée */}
-            {scope !== 'full_period' && (
-              <div style={{
-                marginTop: 12, display: 'grid', gap: 12,
-                gridTemplateColumns: scope === 'time_slot' ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)',
-              }}>
-                <div>
-                  <label style={labelStyle}>{scope === 'single_day' || scope === 'time_slot' ? 'Date' : 'Du'}</label>
-                  <input
-                    type="date" value={startDate} style={inputStyle}
-                    min={schedule?.start_date?.slice(0, 10)}
-                    max={schedule?.end_date?.slice(0, 10)}
-                    onChange={e => setStartDate(e.target.value)}
-                  />
-                </div>
-                {scope === 'date_range' && (
-                  <div>
-                    <label style={labelStyle}>Au</label>
-                    <input
-                      type="date" value={endDate} style={inputStyle}
-                      min={startDate || schedule?.start_date?.slice(0, 10)}
-                      max={schedule?.end_date?.slice(0, 10)}
-                      onChange={e => setEndDate(e.target.value)}
-                    />
-                  </div>
-                )}
-                {scope === 'time_slot' && (
-                  <>
-                    <div>
-                      <label style={labelStyle}>De</label>
-                      <input type="time" value={startTime} style={inputStyle}
-                        onChange={e => setStartTime(e.target.value)} />
-                    </div>
-                    <div>
-                      <label style={labelStyle}>À</label>
-                      <input type="time" value={endTime} style={inputStyle}
-                        onChange={e => setEndTime(e.target.value)} />
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {scope === 'full_period' && (
-              <p style={{ marginTop: 8, fontSize: 'var(--font-sm)', color: 'var(--text-muted)' }}>
-                Du {fmtLong(schedule?.start_date)} au {fmtLong(schedule?.end_date)}
-              </p>
-            )}
-          </div>
-
-          {/* Personnels remplacés */}
-          <div>
-            <label style={labelStyle}>2 · Personnel à remplacer ({selectedAbsentIds.length} sélectionné{selectedAbsentIds.length > 1 ? 's' : ''})</label>
-            {staffLoading ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>Chargement…</p>
-            ) : !scheduleStaff.length ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-sm)' }}>
-                Aucun personnel affecté sur ce tableau.
-              </p>
-            ) : (
-              <div style={{
-                display: 'flex', flexWrap: 'wrap', gap: 6,
-                maxHeight: 140, overflowY: 'auto', padding: 8,
-                border: '1px solid var(--border-subtle)', borderRadius: 10, background: 'var(--bg-base)',
-              }}>
-                {scheduleStaff.map(p => {
-                  const on = selectedAbsentIds.includes(p.id);
-                  return (
-                    <button
-                      key={p.id}
-                      onClick={() => toggleAbsent(p.id)}
-                      style={{
-                        padding: '6px 12px', borderRadius: 999, cursor: 'pointer',
-                        fontSize: 'var(--font-sm)', fontWeight: on ? 700 : 500,
-                        border: `1px solid ${on ? 'var(--color-primary)' : 'var(--border-default)'}`,
-                        background: on ? 'var(--color-primary)' : 'var(--bg-card)',
-                        color: on ? '#fff' : 'var(--text-secondary)',
-                      }}
-                    >
-                      {on ? '✓ ' : ''}{fullName(p)}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Remplaçants */}
-          {!!pairs.length && (
-            <div>
-              <label style={labelStyle}>3 · Remplaçant pour chacun</label>
-              <input
-                placeholder="🔎 Filtrer le personnel de l'hôpital…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                style={{ ...inputStyle, marginBottom: 10 }}
-              />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {pairs.map(pair => {
-                  const absent = scheduleStaff.find(s => s.id === pair.absentUserId);
-                  const chosen = hospitalStaff.find(h => h.id === pair.replacementUserId);
-                  const isCross = chosen && absent && chosen.dept_id && chosen.dept_id !== absent.department_id;
-                  return (
-                    <div
-                      key={pair.absentUserId}
-                      style={{
-                        display: 'grid', gridTemplateColumns: '1fr auto 1.2fr', alignItems: 'center', gap: 10,
-                        padding: '10px 12px', borderRadius: 10,
-                        border: '1px solid var(--border-subtle)', background: 'var(--bg-base)',
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 'var(--font-sm)', color: 'var(--text-primary)' }}>
-                          {absent ? fullName(absent) : '—'}
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                          {absent?.role_name}
-                        </div>
-                      </div>
-
-                      <span style={{ color: 'var(--color-primary)', fontWeight: 700 }}>→</span>
-
-                      <div>
-                        <select
-                          value={pair.replacementUserId}
-                          onChange={e => setReplacer(pair.absentUserId, e.target.value)}
-                          style={inputStyle}
-                        >
-                          <option value="">— Choisir un remplaçant —</option>
-                          {hospitalStaff
-                            .filter(h => h.id !== pair.absentUserId)
-                            .map(h => (
-                              <option key={h.id} value={h.id}>
-                                {fullName(h)}{h.dept_name ? ` · ${h.dept_name}` : ''}
-                              </option>
-                            ))}
-                        </select>
-                        {isCross && (
-                          <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>
-                            ↔ Autre service : {chosen.dept_name}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Motif */}
-          <div>
-            <label style={labelStyle}>Motif (facultatif)</label>
-            <textarea
-              value={reason}
-              onChange={e => setReason(e.target.value)}
-              rows={2}
-              placeholder="Ex. formation, congé exceptionnel, mission…"
-              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
-            />
-          </div>
-        </div>
-
-        {/* Pied */}
-        <div style={{
-          padding: '12px 20px', borderTop: '1px solid var(--border-subtle)',
-          display: 'flex', justifyContent: 'flex-end', gap: 10, background: 'var(--bg-base)',
-        }}>
-          <button onClick={onClose} className="btn" style={{
-            padding: '8px 18px', border: '1px solid var(--border-default)',
-            background: 'var(--bg-card)', color: 'var(--text-secondary)', borderRadius: 8, cursor: 'pointer',
-          }}>
-            Annuler
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={mutation.isPending}
-            className="btn btn-primary"
-            style={{ padding: '8px 22px', opacity: mutation.isPending ? 0.6 : 1 }}
-          >
-            {mutation.isPending ? 'Enregistrement…' : (isChef ? 'Enregistrer' : 'Proposer')}
-          </button>
-        </div>
+        <div className="replacement-dialog__footer"><span className="replacement-footer-hint"><ShieldAlert size={15} /> Le tableur d'origine restera consultable.</span><div><button className="replacement-secondary-button" onClick={onClose}>Annuler</button><button className="replacement-primary-button" disabled={mutation.isPending} onClick={submit}>{mutation.isPending ? 'Enregistrement...' : isChef ? 'Enregistrer le remplacement' : 'Envoyer la proposition'}</button></div></div>
       </div>
     </div>
   );

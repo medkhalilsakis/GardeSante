@@ -1,31 +1,60 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   INCIDENTS — harmonisation couleurs et typographie
+   La structure, les sélecteurs et le balisage ne changent pas.
+
+   L'écran classait la gravité en quatre rangs — information, avertissement,
+   erreur, critique — et donnait à chacun sa propre teinte, comme s'il
+   s'agissait de quatre sujets distincts. Or ces rangs ne sont pas quatre
+   catégories : ils forment une échelle. Ce qui les sépare est une quantité,
+   pas une nature.
+
+   Une échelle se lit donc par l'intensité, non par le coloris. Les trois
+   rangs qui appellent une action partagent le ton de l'alerte et se
+   distinguent par deux gradients simultanés : l'encre s'y mêle de plus en
+   plus, le fond s'y fait de plus en plus dense. Avertissement, erreur,
+   critique se suivent ainsi sans qu'aucun nouveau coloris entre dans la
+   plate-forme, et l'ordre reste lisible dans les deux thèmes — en clair
+   chaque rang s'assombrit, en sombre chaque rang s'éclaircit, l'écart au
+   papier grandissant dans les deux cas. Le rang « information » sort de
+   l'échelle : il ne demande rien, il porte le sceau. Le pouls réservé au
+   rang critique reste le seul mouvement de la liste.
+
+   Retirés au passage : le contour de focus local, dont l'opacité au cinquième
+   le rendait quasi invisible sur fond clair et qui, par sa spécificité de
+   descendance, désactivait l'anneau franc du calque de jetons sur toute la
+   page ; les deux halos colorés du bouton principal, remplacés par les ombres
+   portées de la plate-forme ; et la remise à zéro de l'interlettrage par
+   sélecteur universel, conservée en héritage pour que chaque descendant
+   puisse régler le sien.
+
+   Jetons employés : gs-ink, gs-ink-soft, gs-ink-faint, gs-paper,
+   gs-paper-alt, gs-rule, gs-rule-strong, gs-seal, gs-seal-wash, gs-duty,
+   gs-duty-wash, gs-alert, gs-alert-wash, gs-display, gs-shadow-card,
+   gs-shadow-lift.
+   ══════════════════════════════════════════════════════════════════════════ */
+
 .incidents-page {
-  --incident-info: #2563eb;
-  --incident-info-soft: #eff6ff;
-  --incident-warning: #b45309;
-  --incident-warning-soft: #fffbeb;
-  --incident-danger: #dc2626;
-  --incident-danger-soft: #fef2f2;
-  --incident-critical: #991b1b;
-  --incident-critical-soft: #fee2e2;
-  --incident-teal: #0f766e;
-  --incident-teal-soft: #f0fdfa;
+  /* Hors échelle : une information n'appelle aucune action. */
+  --incident-info: var(--gs-seal);
+  --incident-info-soft: var(--gs-seal-wash);
+
+  /* Les trois rangs qui appellent une action, du plus léger au plus grave. */
+  --incident-warning: var(--gs-alert);
+  --incident-warning-soft: var(--gs-alert-wash);
+  --incident-danger: color-mix(in srgb, var(--gs-alert) 84%, var(--gs-ink));
+  --incident-danger-soft: color-mix(in srgb, var(--gs-alert) 20%, transparent);
+  --incident-critical: color-mix(in srgb, var(--gs-alert) 66%, var(--gs-ink));
+  --incident-critical-soft: color-mix(in srgb, var(--gs-alert) 32%, transparent);
+
+  /* Ce qui est traité, donc en cours de vie normale. */
+  --incident-teal: var(--gs-duty);
+  --incident-teal-soft: var(--gs-duty-wash);
+
   display: grid;
   gap: 20px;
   min-width: 0;
   padding-bottom: 20px;
-}
-
-.incidents-page,
-.incidents-page * {
   letter-spacing: 0;
-}
-
-.incidents-page button:focus-visible,
-.incidents-page input:focus-visible,
-.incidents-page textarea:focus-visible,
-.incidents-page select:focus-visible {
-  outline: 3px solid var(--color-primary-20);
-  outline-offset: 2px;
 }
 
 .incidents-header {
@@ -34,7 +63,7 @@
   justify-content: space-between;
   gap: 20px;
   padding: 4px 0 20px;
-  border-bottom: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--gs-rule);
 }
 
 .incidents-header-copy {
@@ -46,10 +75,11 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-display);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0;
+  letter-spacing: .16em;
   line-height: 1.2;
   text-transform: uppercase;
 }
@@ -59,8 +89,8 @@
   height: 7px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: var(--color-success);
-  box-shadow: 0 0 0 3px var(--color-success-10);
+  background: var(--gs-duty);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gs-duty) 12%, transparent);
 }
 
 .incidents-title-line {
@@ -77,17 +107,17 @@
   height: 42px;
   flex: 0 0 42px;
   place-items: center;
-  border: 1px solid rgba(27, 79, 202, 0.22);
+  border: 1px solid color-mix(in srgb, var(--gs-seal) 24%, transparent);
   border-radius: 8px;
-  background: var(--color-primary-10);
-  color: var(--color-primary);
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
 }
 
 .incidents-title-line h1,
 .incident-filter-topline h2,
 .incident-alerts-heading h2,
 .incident-declaration-head h2 {
-  color: var(--text-primary);
+  color: var(--gs-ink);
   letter-spacing: 0;
 }
 
@@ -103,22 +133,22 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 12px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 12px;
   line-height: 1.35;
 }
 
 .incidents-context > svg {
-  color: var(--color-primary);
+  color: var(--gs-seal);
 }
 
 .incidents-context strong {
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-weight: 700;
 }
 
 .incidents-context-separator {
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
 }
 
 .incidents-primary-action,
@@ -129,22 +159,22 @@
   justify-content: center;
   gap: 8px;
   padding: 0 16px;
-  border: 1px solid var(--color-primary);
+  border: 1px solid var(--gs-seal);
   border-radius: 8px;
-  background: var(--color-primary);
-  color: #fff;
+  background: var(--gs-seal);
+  color: var(--gs-on-tone);
   font-size: 13px;
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0;
-  box-shadow: 0 4px 14px rgba(27, 79, 202, 0.2);
+  box-shadow: var(--gs-shadow-card);
   transition: background var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .incidents-primary-action:hover,
 .incidents-submit:hover:not(:disabled) {
-  background: var(--color-primary-dark);
-  box-shadow: 0 6px 18px rgba(27, 79, 202, 0.28);
+  background: color-mix(in srgb, var(--gs-seal) 86%, var(--gs-ink));
+  box-shadow: var(--gs-shadow-lift);
   transform: translateY(-1px);
 }
 
@@ -171,10 +201,10 @@
   align-items: flex-start;
   gap: 11px;
   padding: 14px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-sm);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-card);
 }
 
 .incident-stat-icon {
@@ -193,14 +223,14 @@
 }
 
 .incident-stat-label {
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.25;
 }
 
 .incident-stat-value {
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 25px;
   font-weight: 800;
   line-height: 1.05;
@@ -208,7 +238,7 @@
 
 .incident-stat-detail {
   overflow: hidden;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 10px;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -222,11 +252,11 @@
 
 .incident-declaration {
   overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-top: 3px solid var(--color-primary);
+  border: 1px solid var(--gs-rule);
+  border-top: 3px solid var(--gs-seal);
   border-radius: 8px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-md);
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-lift);
   animation: incident-reveal 180ms ease-out;
 }
 
@@ -240,7 +270,7 @@
 }
 
 .incident-declaration-head {
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--gs-rule);
 }
 
 .incident-declaration-head h2,
@@ -258,16 +288,16 @@
   height: 38px;
   flex: 0 0 38px;
   place-items: center;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .incident-icon-button:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
+  border-color: var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
 }
 
 .incident-form-grid {
@@ -292,14 +322,14 @@
 
 .incident-field > span,
 .incident-severity-field legend {
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.3;
 }
 
 .incident-field b {
-  color: var(--color-danger);
+  color: var(--gs-alert);
 }
 
 .incident-control {
@@ -307,11 +337,11 @@
   min-width: 0;
   min-height: 42px;
   padding: 0 11px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
   outline: none;
-  background: var(--bg-input);
-  color: var(--text-primary);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
   font-family: inherit;
   font-size: 13px;
   line-height: 1.3;
@@ -319,12 +349,12 @@
 }
 
 .incident-control:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-10);
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
 }
 
 .incident-control::placeholder {
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
 }
 
 .incident-textarea {
@@ -355,10 +385,10 @@
   align-items: center;
   column-gap: 7px;
   padding: 9px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-input);
-  color: var(--text-secondary);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
   text-align: start;
   transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast);
 }
@@ -370,8 +400,8 @@
 }
 
 .incident-severity-option:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-elevated);
+  border-color: var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
 }
 
 .incident-severity-option.is-selected {
@@ -387,8 +417,8 @@
 .incident-declaration-footer {
   align-items: center;
   justify-content: flex-end;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  border-top: 1px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
 }
 
 .incident-declaration-footer > div {
@@ -398,8 +428,8 @@
 }
 
 .incident-filters-panel {
-  border-top: 1px solid var(--border-default);
-  border-bottom: 1px solid var(--border-default);
+  border-top: 1px solid var(--gs-rule);
+  border-bottom: 1px solid var(--gs-rule);
   padding: 16px 0 13px;
 }
 
@@ -417,9 +447,9 @@
   align-items: center;
   gap: 7px;
   padding: 0 10px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 12px;
   font-weight: 700;
 }
@@ -448,7 +478,7 @@
   inset-inline-start: 12px;
   top: 13px;
   z-index: 1;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   pointer-events: none;
 }
 
@@ -485,7 +515,7 @@
   inset-inline-start: 10px;
   top: 13px;
   z-index: 1;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   pointer-events: none;
 }
 
@@ -500,9 +530,9 @@
   justify-content: center;
   gap: 6px;
   padding: 0 10px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
@@ -510,9 +540,9 @@
 }
 
 .incident-reset-button:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
+  border-color: var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
 }
 
 .incident-filter-summary {
@@ -521,7 +551,7 @@
   justify-content: space-between;
   gap: 10px;
   margin-top: 11px;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -536,7 +566,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--color-primary);
+  background: var(--gs-seal);
 }
 
 .incident-filter-active-label {
@@ -570,8 +600,8 @@
   justify-content: space-between;
   gap: 12px;
   padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-default);
-  color: var(--text-primary);
+  border-bottom: 1px solid var(--gs-rule);
+  color: var(--gs-ink);
 }
 
 .incident-day-heading > span {
@@ -581,7 +611,7 @@
 }
 
 .incident-day-heading > b {
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -602,15 +632,15 @@
   align-items: flex-start;
   overflow: hidden;
   padding: 13px 14px 13px 0;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--gs-rule);
   border-radius: 8px;
-  background: var(--bg-card);
+  background: var(--gs-paper);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .incident-row:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--gs-rule-strong);
+  box-shadow: var(--gs-shadow-card);
   transform: translateY(-1px);
 }
 
@@ -655,7 +685,7 @@
 
 .incident-row-title-wrap h3 {
   overflow-wrap: anywhere;
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 13px;
   font-weight: 800;
   line-height: 1.35;
@@ -663,7 +693,7 @@
 
 .incident-row-date {
   flex: 0 0 auto;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 10px;
   font-weight: 700;
   line-height: 1.5;
@@ -676,7 +706,7 @@
   gap: 5px;
   min-height: 21px;
   padding: 2px 7px;
-  border-radius: var(--border-radius-full);
+  border-radius: 9999px;
   font-size: 10px;
   font-weight: 800;
   line-height: 1;
@@ -702,7 +732,7 @@
 .incident-row-description {
   margin-top: 7px;
   overflow-wrap: anywhere;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -713,7 +743,7 @@
   flex-wrap: wrap;
   gap: 7px 13px;
   margin-top: 9px;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 10px;
   line-height: 1.25;
 }
@@ -736,21 +766,21 @@
   place-content: center;
   justify-items: center;
   gap: 10px;
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed var(--gs-rule-strong);
   border-radius: 8px;
-  color: var(--text-muted);
+  color: var(--gs-ink-faint);
   font-size: 12px;
   text-align: center;
 }
 
 .incident-history-empty strong {
-  color: var(--text-primary);
+  color: var(--gs-ink);
   font-size: 13px;
 }
 
 .incident-history-empty > span {
   max-width: 310px;
-  color: var(--text-secondary);
+  color: var(--gs-ink-soft);
   line-height: 1.45;
 }
 
@@ -760,15 +790,15 @@
   height: 42px;
   place-items: center;
   border-radius: 8px;
-  background: var(--bg-elevated);
-  color: var(--text-muted);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-faint);
 }
 
 .incident-spinner {
   width: 24px;
   height: 24px;
-  border: 3px solid var(--color-primary-20);
-  border-top-color: var(--color-primary);
+  border: 3px solid color-mix(in srgb, var(--gs-seal) 22%, transparent);
+  border-top-color: var(--gs-seal);
   border-radius: 50%;
   animation: incident-spin 750ms linear infinite;
 }
@@ -778,7 +808,7 @@
   top: calc(var(--header-height) + 16px);
   min-width: 0;
   padding-inline-start: 20px;
-  border-inline-start: 1px solid var(--border-default);
+  border-inline-start: 1px solid var(--gs-rule);
 }
 
 .incident-alerts-heading {
@@ -790,7 +820,7 @@
   height: 38px;
   flex-basis: 38px;
   color: var(--incident-warning);
-  border-color: rgba(180, 83, 9, 0.22);
+  border-color: color-mix(in srgb, var(--incident-warning) 24%, transparent);
   background: var(--incident-warning-soft);
 }
 
@@ -851,8 +881,8 @@
 }
 
 @keyframes incident-critical-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(153, 27, 27, 0.2); }
-  50% { box-shadow: 0 0 0 4px rgba(153, 27, 27, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--incident-critical) 24%, transparent); }
+  50% { box-shadow: 0 0 0 4px transparent; }
 }
 
 @media (max-width: 1180px) {
@@ -876,7 +906,7 @@
   .incident-alerts-panel {
     position: static;
     padding: 20px 0 0;
-    border-top: 1px solid var(--border-default);
+    border-top: 1px solid var(--gs-rule);
     border-inline-start: 0;
   }
 }
@@ -1047,34 +1077,9 @@
     transition: none;
   }
 }
-
-[data-theme="dark"] .incident-stat-blue .incident-stat-icon,
-[data-theme="dark"] .incident-severity-info,
-[data-theme="dark"] .incident-severity-option-info.is-selected {
-  background: rgba(37, 99, 235, 0.16);
-}
-
-[data-theme="dark"] .incident-stat-red .incident-stat-icon,
-[data-theme="dark"] .incident-severity-error,
-[data-theme="dark"] .incident-severity-option-error.is-selected {
-  background: rgba(220, 38, 38, 0.16);
-}
-
-[data-theme="dark"] .incident-stat-amber .incident-stat-icon,
-[data-theme="dark"] .incident-severity-warning,
-[data-theme="dark"] .incident-severity-option-warning.is-selected {
-  background: rgba(180, 83, 9, 0.18);
-}
-
-[data-theme="dark"] .incident-stat-teal .incident-stat-icon {
-  background: rgba(15, 118, 110, 0.17);
-}
-
-[data-theme="dark"] .incident-severity-option-critical.is-selected {
-  background: rgba(153, 27, 27, 0.18);
-}
-
-[data-theme="dark"] .incident-severity-option-info { color: #93c5fd; }
-[data-theme="dark"] .incident-severity-option-warning { color: #fbbf24; }
-[data-theme="dark"] .incident-severity-option-error { color: #fca5a5; }
-[data-theme="dark"] .incident-severity-option-critical { color: #fecaca; }
+/* Aucun bloc [data-theme='dark'] ici : les dix entrées de la palette locale
+   pointent sur des jetons, et les jetons s'inversent d'eux-mêmes. Ce qui se
+   trouvait à cet endroit — cinq fonds translucides et quatre teintes de texte
+   recopiés à la main pour le thème sombre — n'a plus d'objet. L'échelle de
+   gravité s'inverse avec eux, dans le bon ordre, puisque son gradient part
+   de l'encre. */

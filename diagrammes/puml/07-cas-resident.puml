@@ -1,0 +1,103 @@
+' ============================================================================
+' GardeSanté — Cas d'utilisation : Résident (niveau 7, 8 permissions)
+'
+' Sources vérifiées :
+'   role_permissions du rôle `resident` : absences.create, absences.read,
+'   departments.read, replacements.read, schedules.read, shifts.confirm,
+'   shifts.read, stats.read.
+'   Routes : GET /api/schedules, GET /api/shifts, POST /api/absences,
+'   POST /api/leaves (avec pièce jointe), GET /api/replacements.
+' ============================================================================
+@startuml 07-cas-resident
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ActorBorderColor #0F766E
+skinparam ActorBackgroundColor #E6F4F1
+skinparam ActorFontStyle bold
+skinparam UsecaseBorderColor #1B4FCA
+skinparam UsecaseBackgroundColor #EEF2FF
+skinparam usecase {
+BackgroundColor<<hérité>> #F1F5F9
+BorderColor<<hérité>> #94A3B8
+FontColor<<hérité>> #475569
+}
+skinparam PackageBorderColor #94A3B8
+skinparam PackageBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Cas d'utilisation — Résident\nniveau 7 · 8 permissions
+
+left to right direction
+
+actor "Utilisateur\nauthentifié" as U
+actor "Résident" as RES
+U <|-- RES
+
+package "Socle commun\n(hérité)" as P0 {
+  usecase "S'authentifier" as UC_LOGIN <<hérité>>
+  usecase "Changer son mot de passe" as UC_PWD <<hérité>>
+  usecase "Consulter son profil" as UC_PROF <<hérité>>
+  usecase "Demander une modification\nde son profil" as UC_PROF_REQ <<hérité>>
+  usecase "Consulter ses notifications" as UC_NOTIF <<hérité>>
+  usecase "Lire les notes\net circulaires" as UC_NOTE <<hérité>>
+  usecase "Consulter son propre\nhistorique" as UC_HIST <<hérité>>
+}
+
+package "Consultation du planning" as P1 {
+  usecase "Consulter les plannings\nde son service" as UC_PLAN
+  usecase "Consulter ses gardes\nà venir" as UC_GARDE
+  usecase "Confirmer sa présence\nen garde" as UC_CONF
+  usecase "Consulter les remplacements\nle concernant" as UC_REMP
+  usecase "Consulter l'organigramme\ndu service" as UC_DEPT
+  usecase "Consulter les statistiques\nde ses gardes" as UC_STAT
+}
+
+package "Absences et congés" as P2 {
+  usecase "Déclarer une absence" as UC_ABS
+  usecase "Demander un congé" as UC_CONGE
+  usecase "Joindre un justificatif" as UC_JUST
+  usecase "Suivre l'état de\nses demandes" as UC_SUIVI
+}
+
+U --> UC_LOGIN
+U --> UC_PWD
+U --> UC_PROF
+U --> UC_PROF_REQ
+U --> UC_NOTIF
+U --> UC_NOTE
+U --> UC_HIST
+
+RES --> UC_PLAN
+RES --> UC_GARDE
+RES --> UC_CONF
+RES --> UC_REMP
+RES --> UC_DEPT
+RES --> UC_STAT
+RES --> UC_ABS
+RES --> UC_CONGE
+RES --> UC_SUIVI
+
+UC_CONGE ..> UC_JUST : <<include>>
+UC_ABS <.. UC_JUST : <<extend>>
+
+note as N1
+Le Résident n'accède ni au portfolio du service
+ni à la supervision : `portfolio.controller.js`
+refuse tout rôle hors chef, surveillant,
+Surveillant Général, directeur et super admin.
+end note
+
+legend right
+Bleu : cas propres à ce rôle.
+Gris : capacités héritées du rôle parent.
+endlegend
+
+' Ancrage des notes flottantes
+N1 .. UC_PLAN
+
+@enduml

@@ -1,0 +1,199 @@
+' ============================================================================
+' GardeSanté — Diagramme d'activités : Surveillant Général
+'
+' Le SG est le contrepoids du chef de service à l'échelle de l'hôpital. Le
+' modèle de permissions le sépare nettement de lui : ensembles disjoints, l'un
+' élabore, l'autre contrôle. Mais le contrôle ne s'exerce PAS par un visa —
+' il n'existe aucune route d'approbation. Il s'exerce par la proposition de
+' modification, que le chef accepte ou refuse.
+'
+' Sources vérifiées :
+'   backend/src/modules/schedules/schedules.routes.js:18-22
+'     « Il n'y a plus d'approbation ni de refus : l'envoi met le planning en
+'       marche. […] Les permissions `schedules.approve` / `schedules.reject`
+'       restent en base mais ne sont plus rattachées à aucune route. »
+'   backend/src/modules/schedules/schedule-inbox.controller.js
+'     :1-22    la boîte « Planning à consulter » : ni approbation ni refus,
+'              consultation et proposition sont les seules actions
+'     :29-33   ESTABLISHMENT_SCOPE inclut le SG : portée établissement entier
+'     :22      un brouillon n'y figure jamais (status <> 'draft')
+'   backend/src/modules/schedules/schedule-builder.controller.js
+'     :359-370 validateSchedule n'approuve rien : il exécute le moteur de
+'              règles et renvoie l'évaluation — contrôle à blanc
+'     :1240-1260 arbitrage d'une proposition par le chef
+'   backend/src/modules/supervision/supervision.controller.js
+'     SUPERVISION_ROLES = general_supervisor | director | hospital_admin
+'   backend/src/modules/shifts/shifts.routes.js:13-14
+'     shifts.confirm est réellement exposée : /confirm et /absent
+'   backend/src/modules/replacements/replacements-overlay.controller.js
+'     un remplacement déposé par un surveillant part en 'pending_chef'
+'   backend/src/modules/schedules/staff-loans.controller.js:189
+'     WATCHER_ROLES : il suit les prêts, il ne les arbitre pas
+'   ÉCART : absences.approve lui est accordée mais aucune route ne la consomme.
+' ============================================================================
+@startuml 42-activite-surveillant-general
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontColor #0F172A
+  DiamondBackgroundColor #EEF2FF
+  DiamondBorderColor #1B4FCA
+  DiamondFontColor #1B4FCA
+  StartColor #0F766E
+  EndColor #B91C1C
+  BarColor #7A3E9D
+}
+skinparam partition {
+  BackgroundColor #F8FAFC
+  BorderColor #94A3B8
+  FontColor #475569
+  FontStyle bold
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Activités — Surveillant Général : contrôler sans viser, proposer sans réécrire
+
+start
+
+:s'authentifier;
+note right
+  Le SG n'est rattaché à aucun service : son
+  service est nul et sa portée de lecture est
+  l'établissement entier. Il voit tous les
+  services, il n'appartient à aucun.
+end note
+
+partition "Traiter la boîte des plannings" {
+  :ouvrir la boîte\n« Plannings à consulter »;
+  note right
+    Un brouillon n'y figure jamais. Le chef
+    compose à l'abri des regards ; la boîte ne
+    s'ouvre qu'à partir de l'envoi.
+  end note
+
+  if (un planning est-il à examiner ?) then (oui)
+    :examiner la grille\ncouverture, effectifs, jours découverts;
+    :lancer le contrôle des règles\nà blanc;
+    note right
+      Ce contrôle renvoie l'évaluation du moteur
+      de règles. Il n'appose aucun visa et ne
+      change pas l'état du planning : c'est une
+      lecture, pas une décision.
+    end note
+
+    if (la grille appelle-t-elle une correction ?) then (oui)
+      :déposer une proposition\nde modification, motivée;
+      #F3E8FF:la proposition est écrite\nà l'état « en attente »;
+      #E6F4F1:consigner le dépôt au journal;
+      :notifier le chef de service\nen temps réel;
+
+      :attendre l'arbitrage du chef;
+      if (le chef accepte-t-il ?) then (oui)
+        :la grille est amendée\npar le chef lui-même;
+      else (non)
+        #FEE2E2:proposition refusée,\nmotif consigné;
+      endif
+      note right
+        Le SG ne réécrit jamais la grille : il
+        demande. C'est le chef qui applique ou
+        qui écarte — la responsabilité du
+        planning reste au service.
+      end note
+    else (non)
+      :classer le planning comme consulté;
+    endif
+  else (non)
+  endif
+
+  #FEF3C7:viser ou rejeter le planning;
+  note right
+    **Cas déclaré, non implémenté.** Le SG
+    détient schedules.approve et
+    schedules.reject, mais aucune route ne les
+    consomme : l'envoi du chef met le planning
+    en vigueur sans passer par lui. Ce chemin
+    n'existe pas dans le logiciel livré.
+  end note
+  detach
+}
+
+partition "Superviser l'hôpital" {
+  repeat
+    fork
+      :suivre la couverture\nde tous les services;
+      if (une alerte remonte-t-elle ?) then (oui)
+        :prendre l'alerte en compte;
+        #E6F4F1:consigner la prise\nen compte;
+      else (non)
+      endif
+
+    fork again
+      :consulter portfolio,\nannuaire, statistiques;
+      if (un état est-il demandé ?) then (oui)
+        :exporter en Excel,\nPDF ou CSV;
+      else (non)
+      endif
+
+    fork again
+      :faire l'appel du jour;
+      if (l'agent est-il présent ?) then (oui)
+        :confirmer sa présence\nsur la garde;
+      else (non)
+        :le signaler absent;
+        #F3E8FF:la garde passe\nà « absent »;
+      endif
+
+    fork again
+      :déposer un remplacement\nen surcouche;
+      #F3E8FF:écrit « en attente\ndu chef de service »;
+      :attendre la confirmation\ndu chef;
+
+    fork again
+      :suivre les prêts\nde personnel;
+    end fork
+
+    if (une consigne doit-elle être diffusée ?) then (oui)
+      :publier une note à l'hôpital;
+      if (des agents ne l'ont pas lue ?) then (oui)
+        :relancer les lecteurs manquants;
+      else (non)
+      endif
+    else (non)
+    endif
+  repeat while (le service continue) is (oui)
+  -> non;
+}
+
+:lire son propre historique;
+stop
+
+floating note left
+  **Un remplacement déposé par le SG attend quand même le chef.** Même venant de
+  l'échelon supérieur, il est écrit « en attente du chef de service » : la
+  hiérarchie ne court-circuite pas le service. Les prêts de personnel, de même,
+  se suivent en lecture seule — la décision appartient au chef du service qui
+  perd l'agent.
+  ====
+  **Ce que la séparation des rôles produit ici.** Le SG ne détient ni
+  schedules.create, ni schedules.generate, ni schedules.submit : il ne peut pas
+  élaborer le planning qu'il contrôle. Le chef, symétriquement, ne détient ni
+  schedules.approve ni schedules.reject. La séparation est donc inscrite dans le
+  modèle de permissions — mais comme le circuit d'approbation n'a pas été
+  exposé, elle se traduit dans les faits par un pouvoir de proposition, non de
+  blocage.
+end note
+
+legend right
+  Fond teinté vert : écriture au journal. Fond teinté violet : écriture en base.
+  Fond teinté rouge : refus. Fond ambre : cas déclaré en base, sans route qui l'implémente.
+  Le circuit complet de la proposition de modification fait l'objet de la figure 22.
+endlegend
+
+@enduml

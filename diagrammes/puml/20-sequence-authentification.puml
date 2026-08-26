@@ -1,0 +1,188 @@
+' ============================================================================
+' GardeSanté — Diagramme de séquence : authentification, habilitations et
+'                                      renouvellement de session
+'
+' Sources vérifiées :
+'   backend/src/modules/auth/auth.routes.js       (5 routes)
+'   backend/src/modules/auth/auth.controller.js   (login, refreshToken, logout)
+'   backend/src/middleware/auth.js:8-158          (authenticate)
+'   backend/src/config/constants.js:4,6           (accès 24 h, renouvellement 7 j)
+'   backend/src/app.js:71-84                      (rate-limit 500/15 min,
+'                                                  20/15 min sur /auth/login)
+'   backend/index.js:38-59                        (salons socket.io)
+'   frontend/src/api/index.js:18-93               (intercepteurs Axios)
+' ============================================================================
+@startuml 20-sequence-authentification
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 260
+skinparam ParticipantPadding 12
+skinparam BoxPadding 14
+skinparam actor {
+  BackgroundColor #E6F4F1
+  BorderColor #0F766E
+}
+skinparam participant {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontStyle bold
+}
+skinparam database {
+  BackgroundColor #F3E8FF
+  BorderColor #7A3E9D
+}
+skinparam sequence {
+  LifeLineBorderColor #94A3B8
+  LifeLineBackgroundColor #F8FAFC
+  GroupBackgroundColor #EEF2FF
+  GroupBorderColor #1B4FCA
+  GroupHeaderFontColor #1B4FCA
+  DividerBackgroundColor #E6F4F1
+  DividerBorderColor #0F766E
+  DividerFontColor #0F766E
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Séquence — Authentification, habilitations et renouvellement de session
+
+actor "Utilisateur\n(tout rôle)" as U
+participant "SPA React" as SPA
+participant "Client Axios\n(intercepteurs)" as AX
+participant "Express\nhelmet · CORS · rate-limit" as API
+participant "authenticate\n(middleware)" as MW
+participant "Contrôleur\nauth" as AUTH
+database "PostgreSQL" as DB
+participant "socket.io" as WS
+
+== Connexion ==
+
+U -> SPA : saisit e-mail et mot de passe
+SPA -> AX : authAPI.login(email, motDePasse)
+AX -> API : POST /api/auth/login
+note right of API
+  Limite dédiée : 20 tentatives par
+  fenêtre de 15 minutes sur cette seule
+  route, contre 500 pour le reste de l'API.
+end note
+API -> AUTH : login(req, res)
+AUTH -> DB : SELECT utilisateur + rôle + établissement\nWHERE LOWER(email) = $1 AND compte actif AND établissement actif
+DB --> AUTH : ligne, ou aucun résultat
+AUTH -> AUTH : bcrypt.compare(motDePasse, empreinte)
+
+alt aucun compte, ou empreinte non concordante
+  AUTH --> AX : 401 « Identifiants incorrects »
+  note right of AUTH
+    Le même message dans les deux cas :
+    la réponse ne révèle pas si l'adresse
+    existe dans la base.
+  end note
+  AX --> U : message d'erreur
+
+else compte archivé (archived_at renseigné)
+  AUTH --> AX : 403 code ACCOUNT_ARCHIVED
+  note right of AUTH
+    Contrôlé **après** la vérification du
+    mot de passe, pour la même raison.
+    L'archivage est réversible : les
+    données restent intactes.
+  end note
+  AX --> U : « Ce compte est archivé »
+
+else authentification acceptée
+  AUTH -> AUTH : jwt.sign × 2\naccès (24 h) et renouvellement (7 j)\ncharge utile : userId, roleCode, establishmentId
+  AUTH -> DB : UPDATE users SET refresh_token, last_login
+  AUTH -> DB : INSERT activity_logs\naction 'login' · catégorie 'auth' · IP · agent
+  AUTH --> AX : 200 { accessToken, refreshToken, user }
+  AX -> SPA : setAuth(utilisateur, jetons)
+  SPA -> WS : authenticate(userId)
+  WS -> WS : join **user:**<id>
+  SPA -> WS : join-establishment(establishmentId)
+  SPA -> WS : join-department(departmentId)
+  note over WS
+    Trois salons : l'individu, l'établissement,
+    le service. Toute notification poussée par
+    la plateforme visera l'un des trois.
+  end note
+  SPA --> U : tableau de bord correspondant au rôle
+end
+
+== Requête métier authentifiée ==
+
+U -> SPA : ouvre un écran
+SPA -> AX : GET /api/<ressource>
+AX -> AX : intercepteur requête\nAuthorization: Bearer <accès>
+AX -> API : GET /api/<ressource>
+API -> MW : authenticate
+MW -> MW : jwt.verify(jeton, JWT_SECRET)
+MW -> DB : SELECT utilisateur + rôle + établissement
+MW -> DB : SELECT codes de permission du rôle\n(jointure permissions / role_permissions)
+MW -> DB : SELECT service primaire (user_departments)
+MW -> MW : req.user = { id, roleCode, establishmentId,\ndepartmentId, permissions[] }
+note right of MW
+  **Les habilitations ne voyagent pas dans le jeton.**
+  Elles sont relues à chaque requête : retirer un
+  droit à un rôle prend effet immédiatement, sans
+  attendre l'expiration des jetons émis.
+  Le super administrateur reçoit `['*']`.
+end note
+MW -> API : next()
+API --> AX : 200 données du périmètre autorisé
+AX --> SPA : rendu de l'écran
+
+== Expiration du jeton d'accès ==
+
+AX -> API : GET /api/<ressource> (jeton expiré)
+API -> MW : authenticate
+MW --> AX : 401 code TOKEN_EXPIRED
+AX -> AX : intercepteur réponse\nles requêtes concurrentes sont mises en file
+AX -> API : POST /api/auth/refresh { refreshToken }
+API -> AUTH : refreshToken(req, res)
+AUTH -> AUTH : jwt.verify(jeton, JWT_REFRESH_SECRET)
+AUTH -> DB : SELECT refresh_token, is_active, archived_at
+
+alt jeton absent en base, différent de celui présenté, ou compte inactif
+  AUTH --> AX : 401 « Session invalide »
+  AX -> SPA : logout() puis redirection vers /login
+  note right of AX
+    Le jeton de renouvellement est comparé à
+    celui stocké en base : un jeton volé cesse
+    de fonctionner dès la connexion suivante,
+    qui l'écrase.
+  end note
+else renouvellement accepté
+  AUTH -> DB : UPDATE users SET refresh_token = <nouveau>
+  AUTH --> AX : 200 { accessToken, refreshToken }
+  AX -> API : rejoue la requête d'origine
+  AX -> AX : vide la file d'attente
+  AX --> SPA : données
+end
+
+== Déconnexion ==
+
+U -> SPA : se déconnecte
+SPA -> AX : POST /api/auth/logout
+AX -> API : POST /api/auth/logout + Bearer
+API -> MW : authenticate
+API -> AUTH : logout(req, res)
+AUTH -> DB : INSERT activity_logs (action 'logout')
+AUTH -> DB : UPDATE users SET refresh_token = NULL
+AUTH --> SPA : 200 « Déconnecté avec succès »
+SPA -> WS : déconnexion du socket
+note over DB
+  La déconnexion efface le jeton de
+  renouvellement côté serveur ; le jeton
+  d'accès déjà émis expire de lui-même.
+end note
+
+legend right
+  Trait plein : appel. Trait pointillé : réponse.
+  Les habilitations sont relues en base à chaque requête.
+endlegend
+
+@enduml

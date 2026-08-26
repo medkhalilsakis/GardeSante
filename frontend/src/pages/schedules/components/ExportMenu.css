@@ -1,0 +1,77 @@
+/**
+ * ExportMenu — habillage
+ * ══════════════════════
+ * Fichier neuf, préfixe `.gs-menu-`. Volontairement neutre : un export n'est
+ * pas une décision, il ne prend donc aucune couleur.
+ */
+
+.gs-menu { position: relative; }
+
+.gs-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 8px;
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition-fast, .15s), color var(--transition-fast, .15s), background var(--transition-fast, .15s);
+}
+
+.gs-menu-trigger:hover,
+.gs-menu-trigger.is-open {
+  border-color: var(--gs-seal);
+  color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+}
+
+.gs-menu-list {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 40;
+  min-width: 222px;
+  display: grid;
+  padding: 5px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 11px;
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-lift);
+  animation: gs-menu-in .14s ease;
+}
+
+@keyframes gs-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+}
+
+.gs-menu-item {
+  display: grid;
+  gap: 1px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--gs-body);
+}
+
+.gs-menu-item:hover { background: var(--gs-paper-alt); }
+
+.gs-menu-item-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gs-menu-item-hint {
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+}

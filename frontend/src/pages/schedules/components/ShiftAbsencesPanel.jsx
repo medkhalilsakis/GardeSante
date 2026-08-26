@@ -82,14 +82,14 @@ const fullName = (first, last) => `${first || ''} ${last || ''}`.trim();
 // ── Briques d'affichage ──────────────────────────────────────────────────────
 const KPI = ({ label, value, hint, color }) => (
   <div style={{
-    background: 'var(--bg-card)', border: '1px solid var(--border-default)',
+    background: 'var(--gs-paper)', border: '1px solid var(--gs-rule)',
     borderTop: `3px solid ${color}`, borderRadius: 10, padding: '12px 14px', minWidth: 0,
   }}>
-    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: 'var(--gs-ink-faint)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
       {label}
     </p>
-    <p style={{ margin: '3px 0 0', fontSize: 23, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.15 }}>{value}</p>
-    {hint && <p style={{ margin: '2px 0 0', fontSize: 10, color: 'var(--text-muted)' }}>{hint}</p>}
+    <p style={{ margin: '3px 0 0', fontSize: 23, fontWeight: 800, color: 'var(--gs-ink)', lineHeight: 1.15 }}>{value}</p>
+    {hint && <p style={{ margin: '2px 0 0', fontSize: 10, color: 'var(--gs-ink-faint)' }}>{hint}</p>}
   </div>
 );
 
@@ -97,28 +97,31 @@ const Chip = ({ active, onClick, children, title }) => (
   <button type="button" onClick={onClick} title={title}
     style={{
       padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700,
-      border: `1px solid ${active ? 'transparent' : 'var(--border-default)'}`,
-      background: active ? 'var(--color-primary)' : 'var(--bg-card)',
-      color: active ? '#fff' : 'var(--text-muted)',
+      border: `1px solid ${active ? 'transparent' : 'var(--gs-rule)'}`,
+      background: active ? 'var(--gs-seal)' : 'var(--gs-paper)',
+      color: active ? 'var(--gs-on-tone)' : 'var(--gs-ink-faint)',
     }}>
     {children}
   </button>
 );
 
 const TypeChip = ({ row }) => {
-  const color = row.type_color || (isLate(row) ? '#F97316' : '#EF4444');
+  /* La teinte configurée par l'administration prime ; à défaut, le retard
+     avertit et l'absence est déjà fautive. */
+  const color = row.type_color || (isLate(row) ? 'var(--gs-alert)' : 'var(--gs-alert-strong)');
   return (
     <span style={{
       display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700,
-      background: `${color}1A`, color, border: `1px solid ${color}40`, whiteSpace: 'nowrap',
+      background: `color-mix(in srgb, ${color} 12%, transparent)`, color,
+      border: `1px solid color-mix(in srgb, ${color} 34%, transparent)`, whiteSpace: 'nowrap',
     }}>
       {row.type_name || 'Absence'}
     </span>
   );
 };
 
-const th = { padding: '7px 10px', textAlign: 'left', fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.03em', whiteSpace: 'nowrap' };
-const td = { padding: '8px 10px', fontSize: 12.5, color: 'var(--text-primary)', borderTop: '1px solid var(--border-subtle)', verticalAlign: 'middle' };
+const th = { padding: '7px 10px', textAlign: 'left', fontSize: 10.5, fontWeight: 700, color: 'var(--gs-ink-faint)', textTransform: 'uppercase', letterSpacing: '.03em', whiteSpace: 'nowrap' };
+const td = { padding: '8px 10px', fontSize: 12.5, color: 'var(--gs-ink)', borderTop: '1px solid var(--gs-rule)', verticalAlign: 'middle' };
 
 export default function ShiftAbsencesPanel({ departmentId }) {
   const preset = useMemo(PRESETS, []);
@@ -133,9 +136,15 @@ export default function ShiftAbsencesPanel({ departmentId }) {
 
   // Une seule requête : les quatre regroupements et tous les filtres se
   // calculent ensuite en mémoire, ce qui évite un aller-retour par bascule.
+  //
+  // `departmentId` part au serveur : un chef de deux services était borné à son
+  // service **primaire**, donc le filtre local ci-dessous vidait la liste dès
+  // qu'il choisissait le second. Le paramètre est ignoré pour un surveillant
+  // général ou un directeur, qui reçoivent tout l'hôpital et filtrent localement.
   const { data: res, isLoading, isFetching, error } = useQuery({
-    queryKey: ['absences-shift', 'panel', range.from, range.to],
+    queryKey: ['absences-shift', 'panel', departmentId || null, range.from, range.to],
     queryFn: () => absencesShiftAPI.getAll({
+      ...(departmentId ? { departmentId } : {}),
       ...(range.from ? { from: range.from } : {}),
       ...(range.to ? { to: range.to } : {}),
       limit: MAX_ROWS,
@@ -233,7 +242,7 @@ export default function ShiftAbsencesPanel({ departmentId }) {
   const isFiltering = Boolean(scheduleFilter || search.trim());
 
   const card = {
-    background: 'var(--bg-card)', border: '1px solid var(--border-default)',
+    background: 'var(--gs-paper)', border: '1px solid var(--gs-rule)',
     borderRadius: 12, padding: '16px 18px',
   };
 
@@ -242,7 +251,7 @@ export default function ShiftAbsencesPanel({ departmentId }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <div>
           <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Absences signalées à l'appel du jour</h3>
-          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
+          <p style={{ margin: '4px 0 0', color: 'var(--gs-ink-faint)', fontSize: 13 }}>
             Absences et retards déclarés pendant les gardes — par garde, par jour, par période et par année
           </p>
         </div>
@@ -257,9 +266,9 @@ export default function ShiftAbsencesPanel({ departmentId }) {
       </div>
 
       {error ? (
-        <div style={{ ...card, borderLeft: '4px solid #DC2626' }}>
+        <div style={{ ...card, borderLeft: '4px solid var(--gs-alert-strong)' }}>
           <p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>Impossible de charger les signalements</p>
-          <p style={{ margin: '5px 0 0', color: 'var(--text-muted)', fontSize: 12 }}>
+          <p style={{ margin: '5px 0 0', color: 'var(--gs-ink-faint)', fontSize: 12 }}>
             {error?.response?.data?.message || 'Réessayez dans un instant.'}
           </p>
         </div>
@@ -267,11 +276,11 @@ export default function ShiftAbsencesPanel({ departmentId }) {
         <>
           {/* Synthèse de l'intervalle et des filtres en cours. */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 10, marginBottom: 14 }}>
-            <KPI label="Signalements" value={stats.total} hint="absences et retards" color="#EF4444" />
+            <KPI label="Signalements" value={stats.total} hint="absences et retards" color="var(--gs-alert-strong)" />
             <KPI label="Dont retards" value={stats.lates}
-              hint={stats.lateTotal > 0 ? `${durationLabel(stats.lateTotal)} cumulées` : 'aucune durée saisie'} color="#F97316" />
-            <KPI label="Agents concernés" value={stats.agents} hint="personnes distinctes" color="#0EA5E9" />
-            <KPI label="Gardes concernées" value={stats.gardes} hint="plannings distincts" color="var(--color-primary)" />
+              hint={stats.lateTotal > 0 ? `${durationLabel(stats.lateTotal)} cumulées` : 'aucune durée saisie'} color="var(--gs-alert)" />
+            <KPI label="Agents concernés" value={stats.agents} hint="personnes distinctes" color="var(--gs-ink-soft)" />
+            <KPI label="Gardes concernées" value={stats.gardes} hint="plannings distincts" color="var(--gs-seal)" />
           </div>
 
           {/* Barre de filtres : regroupement, garde, intervalle libre, recherche. */}
@@ -299,7 +308,7 @@ export default function ShiftAbsencesPanel({ departmentId }) {
               <input type="date" className="input" style={{ fontSize: 12, padding: '6px 8px', maxWidth: 150 }}
                 value={range.from} max={range.to || undefined}
                 onChange={(e) => setRange({ key: 'custom', from: e.target.value, to: range.to })} />
-              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>→</span>
+              <span style={{ color: 'var(--gs-ink-faint)', fontSize: 12 }}>→</span>
               <input type="date" className="input" style={{ fontSize: 12, padding: '6px 8px', maxWidth: 150 }}
                 value={range.to} min={range.from || undefined}
                 onChange={(e) => setRange({ key: 'custom', from: range.from, to: e.target.value })} />
@@ -319,8 +328,9 @@ export default function ShiftAbsencesPanel({ departmentId }) {
 
           {truncated && (
             <div style={{
-              background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8,
-              padding: '8px 12px', marginBottom: 12, fontSize: 11.5, color: '#92400E',
+              background: 'color-mix(in srgb, var(--gs-alert) 9%, var(--gs-paper))',
+              border: '1px solid color-mix(in srgb, var(--gs-alert) 30%, transparent)', borderRadius: 8,
+              padding: '8px 12px', marginBottom: 12, fontSize: 11.5, color: 'var(--gs-alert-strong)',
             }}>
               Seuls les {MAX_ROWS} signalements les plus récents de l'intervalle sont affichés. Resserrez
               l'intervalle pour voir les plus anciens.
@@ -328,7 +338,7 @@ export default function ShiftAbsencesPanel({ departmentId }) {
           )}
 
           {isLoading ? (
-            <div style={{ ...card, textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)', fontSize: 13 }}>
+            <div style={{ ...card, textAlign: 'center', padding: '36px 20px', color: 'var(--gs-ink-faint)', fontSize: 13 }}>
               Chargement des signalements…
             </div>
           ) : groups.length === 0 ? (
@@ -337,7 +347,7 @@ export default function ShiftAbsencesPanel({ departmentId }) {
               <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
                 {isFiltering ? 'Aucun signalement pour ces filtres' : 'Aucune absence signalée sur cet intervalle'}
               </div>
-              <div style={{ color: 'var(--text-muted)', fontSize: 12.5 }}>
+              <div style={{ color: 'var(--gs-ink-faint)', fontSize: 12.5 }}>
                 {isFiltering
                   ? 'Élargissez la recherche ou changez de garde.'
                   : 'Les absences et retards déclarés à l’appel du jour apparaîtront ici.'}
@@ -354,20 +364,20 @@ export default function ShiftAbsencesPanel({ departmentId }) {
                       onClick={() => setCollapsed((prev) => ({ ...prev, [g.id]: !shut }))}
                       style={{
                         width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px',
-                        background: 'var(--bg-subtle, transparent)', border: 'none', cursor: 'pointer', textAlign: 'left',
+                        background: 'var(--gs-paper-alt)', border: 'none', cursor: 'pointer', textAlign: 'left',
                       }}>
-                      <span style={{ color: 'var(--text-muted)', fontSize: 11, width: 10 }}>{shut ? '▶' : '▼'}</span>
-                      <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-primary)', textTransform: groupBy === 'day' ? 'capitalize' : 'none' }}>
+                      <span style={{ color: 'var(--gs-ink-faint)', fontSize: 11, width: 10 }}>{shut ? '▶' : '▼'}</span>
+                      <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--gs-ink)', textTransform: groupBy === 'day' ? 'capitalize' : 'none' }}>
                         {g.label}
                       </span>
-                      {g.sub && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· {g.sub}</span>}
+                      {g.sub && <span style={{ fontSize: 11, color: 'var(--gs-ink-faint)' }}>· {g.sub}</span>}
                       <span style={{ flex: 1 }} />
                       {lates > 0 && (
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#C2410C', background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 999, padding: '2px 8px' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gs-alert-strong)', background: 'color-mix(in srgb, var(--gs-alert) 10%, var(--gs-paper))', border: '1px solid color-mix(in srgb, var(--gs-alert) 30%, transparent)', borderRadius: 999, padding: '2px 8px' }}>
                           {lates} retard{lates > 1 ? 's' : ''}
                         </span>
                       )}
-                      <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)' }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--gs-ink-faint)' }}>
                         {g.items.length} signalement{g.items.length > 1 ? 's' : ''}
                       </span>
                     </button>
@@ -394,14 +404,14 @@ export default function ShiftAbsencesPanel({ departmentId }) {
                                   <td style={{ ...td, fontWeight: 700 }}>
                                     {fullName(r.first_name, r.last_name) || '—'}
                                     {r.reason && (
-                                      <div style={{ fontWeight: 400, fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                                      <div style={{ fontWeight: 400, fontSize: 11, color: 'var(--gs-ink-faint)', marginTop: 2 }}>
                                         {r.reason}
                                       </div>
                                     )}
                                   </td>
                                   <td style={td}><TypeChip row={r} /></td>
                                   <td style={td}><JustificationBadge value={r.is_justified} /></td>
-                                  <td style={{ ...td, fontWeight: 700, color: minutes !== null ? '#C2410C' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                                  <td style={{ ...td, fontWeight: 700, color: minutes !== null ? 'var(--gs-alert-strong)' : 'var(--gs-ink-faint)', whiteSpace: 'nowrap' }}>
                                     {minutes !== null
                                       ? durationLabel(minutes)
                                       : (isLate(r) ? 'non précisée' : '—')}
@@ -414,12 +424,12 @@ export default function ShiftAbsencesPanel({ departmentId }) {
                                   <td style={td}>
                                     {fullName(r.reporter_first_name, r.reporter_last_name) || '—'}
                                     {r.reported_by_role && (
-                                      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                                      <div style={{ fontSize: 10.5, color: 'var(--gs-ink-faint)', marginTop: 2 }}>
                                         {ROLE_LABELS[r.reported_by_role] || r.reported_by_role}
                                       </div>
                                     )}
                                   </td>
-                                  <td style={{ ...td, color: 'var(--text-muted)', fontSize: 11.5, whiteSpace: 'nowrap' }}>
+                                  <td style={{ ...td, color: 'var(--gs-ink-faint)', fontSize: 11.5, whiteSpace: 'nowrap' }}>
                                     {r.declared_date ? SHORT_DATE.format(atNoon(r.declared_date)) : '—'}
                                     {r.declared_hour ? ` · ${r.declared_hour}` : ''}
                                   </td>

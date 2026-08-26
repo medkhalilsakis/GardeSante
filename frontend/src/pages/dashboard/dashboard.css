@@ -1,0 +1,441 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   « Ma journée » — l'écran d'atterrissage (`/dashboard`)
+   ───────────────────────────────────────────────────────────────────────────
+   Préfixe unique `gsj-`, jetons `--gs-*` seulement, aucune valeur
+   hexadécimale. Le kit `components/gs/` porte l'en-tête, les panneaux, le
+   filet de mesure, le tableau, les pastilles, le vide et l'attente : il ne
+   reste ici que la mise en colonnes et les quatre listes propres à l'écran.
+
+   Une seule couleur d'autorité (`--gs-seal`, sur les liens et les barres de
+   charge), `--gs-duty` pour ce qui est de service, `--gs-alert` pour ce qui
+   attend. Aucun dégradé, aucune lueur portée.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gsj-wrap {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Le temps de la redirection du Super Admin et du directeur : une ligne, pas
+   un écran de chargement. */
+.gsj-hold {
+  margin: 0;
+  padding: 28px 4px;
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Colonnes ──────────────────────────────────────────────────────────────
+   Ce qui se fait maintenant à gauche, ce qui se surveille à droite. Une
+   seule colonne en dessous de 1080 px : la lecture reste dans l'ordre des
+   priorités. `min-width: 0` sur les deux colonnes — sans lui, un tableau
+   large repousse la grille et la page déborde. */
+
+.gsj-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  min-width: 0;
+}
+
+.gsj-col {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
+}
+
+@media (min-width: 1080px) {
+  .gsj-grid { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
+  .gsj-span { grid-column: 1 / -1; }
+}
+
+/* ── Listes : la réglure commune ───────────────────────────────────────────
+   Les quatre listes de l'écran partagent une seule mécanique — pas de puce,
+   un filet entre les lignes, et le lien de la ligne étiré sur toute sa
+   surface pour que la souris et le clavier visent la même cible. */
+
+.gsj-queue,
+.gsj-vig,
+.gsj-plan,
+.gsj-notes,
+.gsj-bars {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.gsj-queue > li,
+.gsj-vig > li,
+.gsj-plan > li,
+.gsj-notes > li,
+.gsj-bars > li {
+  position: relative;
+  min-width: 0;
+  padding: 10px 0;
+}
+
+.gsj-queue > li + li,
+.gsj-vig > li + li,
+.gsj-plan > li + li,
+.gsj-notes > li + li,
+.gsj-bars > li + li {
+  border-top: 1px solid var(--gs-rule);
+}
+
+.gsj-queue > li:first-child,
+.gsj-vig > li:first-child,
+.gsj-plan > li:first-child,
+.gsj-notes > li:first-child,
+.gsj-bars > li:first-child { padding-top: 2px; }
+
+.gsj-queue > li:last-child,
+.gsj-vig > li:last-child,
+.gsj-plan > li:last-child,
+.gsj-notes > li:last-child,
+.gsj-bars > li:last-child { padding-bottom: 2px; }
+
+.gsj-queue a,
+.gsj-plan-name,
+.gsj-note-title {
+  color: var(--gs-ink);
+  text-decoration: none;
+}
+
+.gsj-queue a::after,
+.gsj-plan-name::after,
+.gsj-note-title::after {
+  content: '';
+  position: absolute;
+  inset: 2px -6px;
+  border-radius: 7px;
+}
+
+.gsj-queue li:hover a,
+.gsj-plan li:hover .gsj-plan-name,
+.gsj-notes li:hover .gsj-note-title {
+  color: var(--gs-seal);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gsj-queue a:focus-visible,
+.gsj-plan-name:focus-visible,
+.gsj-note-title:focus-visible { outline: 0; }
+
+.gsj-queue a:focus-visible::after,
+.gsj-plan-name:focus-visible::after,
+.gsj-note-title:focus-visible::after {
+  outline: 2px solid var(--gs-seal);
+  outline-offset: 0;
+}
+
+/* ── Ce qui m'attend ───────────────────────────────────────────────────────
+   Un libellé, ce qu'il implique, et le nombre en attente. Une file vide
+   reste affichée mais s'efface : savoir qu'il n'y a rien à décider est une
+   information, la mettre au même niveau qu'une file chargée serait faux. */
+
+.gsj-queue > li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.gsj-queue-label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--gs-ink);
+}
+
+.gsj-queue-hint {
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--gs-ink-faint);
+  max-width: 52ch;
+}
+
+.gsj-queue-count {
+  flex-shrink: 0;
+  min-width: 2ch;
+  text-align: right;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--gs-seal);
+}
+
+.gsj-queue > li[data-idle='true'] .gsj-queue-count { color: var(--gs-ink-faint); }
+.gsj-queue > li[data-idle='true'] .gsj-queue-label { font-weight: 500; color: var(--gs-ink-soft); }
+
+/* ── Qui est de service ────────────────────────────────────────────────────
+   Deux lignes dans une cellule de tableau : le nom porte l'identité, le
+   grade la lit. Le tableau lui-même vient du kit. */
+
+.gsj-who {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gsj-who > b {
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gsj-who > span {
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+}
+
+.gsj-post {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-family: var(--gs-body);
+  font-size: 12px;
+  color: var(--gs-ink-soft);
+}
+
+/* L'appel n'est pas encore lu : ni « pointé » ni « à pointer », rien
+   d'affirmé. */
+.gsj-wait {
+  font-family: var(--gs-data);
+  font-size: 13px;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Points de vigilance ───────────────────────────────────────────────────
+   Anomalies de planning et alertes ouvertes dans un seul fil, trié par
+   gravité : elles répondent à la même question. L'origine reste nommée pour
+   savoir où aller corriger. */
+
+.gsj-vig > li {
+  display: grid;
+  gap: 4px;
+}
+
+.gsj-vig-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.gsj-vig-origin {
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsj-vig-title {
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--gs-ink);
+}
+
+/* Le détail d'une anomalie énumère parfois vingt dates : il est borné à trois
+   lignes, et l'infobulle porte le texte entier. Une colonne latérale ne se
+   laisse pas remplir par une énumération. */
+.gsj-vig-detail {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.gsj-vig-when {
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Mes plannings en cours ────────────────────────────────────────────── */
+
+.gsj-plan > li {
+  display: grid;
+  gap: 4px;
+}
+
+.gsj-plan-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.gsj-plan-name {
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gsj-plan-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+}
+
+.gsj-plan-dept {
+  font-family: var(--gs-body);
+  padding-left: 8px;
+  border-left: 1px solid var(--gs-rule-strong);
+}
+
+/* ── Notes et circulaires ──────────────────────────────────────────────── */
+
+.gsj-notes > li { display: grid; gap: 3px; }
+
+.gsj-note-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.gsj-note-title {
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  min-width: 0;
+}
+
+/* Non lue : le titre porte le poids, pas une couleur de plus. */
+.gsj-notes > li[data-unread='true'] .gsj-note-title { font-weight: 700; }
+
+.gsj-note-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsj-note-flag { color: var(--gs-seal); }
+
+/* ── Charge du mois ────────────────────────────────────────────────────────
+   Le filet de mesure du kit pour les quatre agrégats, puis une barre par
+   agent : un aplat de la couleur d'autorité sur une réglure, proportionnel à
+   l'agent le plus sollicité. Pas d'axe, pas de légende — la question est
+   « qui porte le plus », et le nombre reste écrit à droite. */
+
+.gsj-load { display: grid; gap: 14px; min-width: 0; }
+
+.gsj-bars > li {
+  display: grid;
+  grid-template-columns: minmax(96px, 1.1fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+}
+
+.gsj-bars-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gsj-bars-name > span {
+  font-weight: 500;
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gsj-bar {
+  display: block;
+  height: 8px;
+  min-width: 0;
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.gsj-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--gs-seal);
+}
+
+.gsj-bars-count {
+  min-width: 3ch;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gsj-load-note {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Étroit ────────────────────────────────────────────────────────────────
+   Sur un téléphone, la charge passe sur deux lignes plutôt que d'écraser la
+   barre à quelques pixels. */
+
+@media (max-width: 640px) {
+  .gsj-bars > li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 12px;
+  }
+
+  .gsj-bars-name { grid-column: 1; }
+  .gsj-bars-count { grid-column: 2; grid-row: 1; }
+  .gsj-bar { grid-column: 1 / -1; }
+
+  .gsj-queue > li { gap: 10px; }
+  .gsj-queue-count { font-size: 17px; }
+}

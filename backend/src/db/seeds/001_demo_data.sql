@@ -99,7 +99,7 @@ INSERT INTO users (
   '00000000-0000-0000-0000-000000000000',
   'aaaa0001-0000-0000-0000-000000000001',
   'SA-001', 'Super', 'Admin', 'المدير', 'العام',
-  'admin@gardesante.dz',
+  'admin@gardesante.tn',
   '$2b$10$4kUNvogP0X1XoyWKGFLLw.P4dApb.LBCUPtg.l46CbDDf2CR3db56',
   'Super Administrateur', TRUE, TRUE
 ) ON CONFLICT (id) DO UPDATE

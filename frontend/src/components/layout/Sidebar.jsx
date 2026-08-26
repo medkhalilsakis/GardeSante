@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore, useUIStore } from '../../store';
 import { useTranslation } from '../../utils/helpers';
@@ -8,7 +8,18 @@ import '../../styles/layout.css';
 
 const API_BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
 
-// Icônes SVG inline
+/**
+ * Le sprite d'icônes de la coque.
+ *
+ * Il était incomplet : sept entrées de menu se distinguaient par un émoji en
+ * tête de libellé (`📋 📝 👥 🤝 🩺 🏥 📅`) parce que deux d'entre elles
+ * partageaient la même icône. Les émojis partent — ils ne suivent ni l'encre du
+ * thème ni la graisse du trait — et quatre glyphes manquants les remplacent :
+ * `portfolio` (la carte d'effectif), `loans` (le passage d'un agent d'un service
+ * à l'autre), `stethoscope` (la surveillance de terrain) et `hospital`
+ * (l'établissement entier). Chacun est désormais lisible seul, ce qui compte :
+ * sous 1024 px la barre se réduit à ses icônes.
+ */
 const Icon = ({ name, size = 20 }) => {
   const icons = {
     dashboard:    <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />,
@@ -37,20 +48,31 @@ const Icon = ({ name, size = 20 }) => {
     notes:       <><path d="M3 11l18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 11-5.8-1.6"/></>,
     incidents:   <><path d="M10.3 2.9L1.8 17a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 2.9a2.5 2.5 0 00-4.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>,
     map:         <><polygon points="1 6 8 2 16 6 23 2 23 18 16 22 8 18 1 22 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/><circle cx="12" cy="11" r="2"/></>,
+    // L'établissement entier — un bâtiment à la croix.
+    hospital:    <><path d="M4 21V8a2 2 0 012-2h12a2 2 0 012 2v13"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="2" y1="21" x2="22" y2="21"/></>,
+    // La surveillance de terrain — le stéthoscope.
+    stethoscope: <><path d="M4.5 3v5.5a4 4 0 008 0V3"/><path d="M8.5 12.5V15a4.5 4.5 0 009 0v-2.2"/><circle cx="17.5" cy="10.5" r="2.2"/></>,
+    // L'effectif du service — une carte d'agent.
+    portfolio:   <><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="8" cy="10" r="2.2"/><path d="M4.6 16.6a3.6 3.6 0 016.8 0"/><line x1="14" y1="9" x2="19" y2="9"/><line x1="14" y1="13" x2="19" y2="13"/></>,
+    // Le prêt de personnel — un agent qui passe d'un service à l'autre.
+    loans:       <><circle cx="5.5" cy="6.5" r="2.5"/><circle cx="18.5" cy="6.5" r="2.5"/><path d="M2 19v-1.5a3.5 3.5 0 013.5-3.5"/><path d="M22 19v-1.5a3.5 3.5 0 00-3.5-3.5"/><line x1="9" y1="17" x2="15" y2="17"/><polyline points="13,15 15,17 13,19"/></>,
+    close:       <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true">
       {icons[name] || null}
     </svg>
   );
 };
 
-export default function Sidebar({ unreadCount = 0 }) {
+export default function Sidebar({ unreadCount = 0, navOpen = false, onCloseNav }) {
   const { user, logout } = useAuthStore();
   const { sidebarCollapsed, toggleSidebar, language, setLanguage } = useUIStore();
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const closeRef = useRef(null);
 
   const hasPermission  = useAuthStore((s) => s.hasPermission);
   const isSuperAdmin   = user?.roleCode === 'super_admin';
@@ -68,16 +90,26 @@ export default function Sidebar({ unreadCount = 0 }) {
     ? (user.avatarUrl.startsWith('http') ? user.avatarUrl : `${API_BASE}${user.avatarUrl}`)
     : null;
 
+  // Le tiroir s'ouvre sous 900 px : la première tabulation doit tomber dedans,
+  // pas rester derrière le voile sur la page.
+  useEffect(() => {
+    if (navOpen) closeRef.current?.focus();
+  }, [navOpen]);
+
   // Navigation super admin : uniquement gestion plateforme
   const superAdminNav = [
     { key: 'platform', label: 'Plateforme', items: [
       { to: '/admin',                      icon: 'dashboard',   label: 'Tableau de bord', end: true },
       { to: '/admin/carte',                icon: 'map',         label: 'Carte des hôpitaux' },
-      { to: '/admin/profile-requests',     icon: 'review',      label: 'Demandes profil' },
+      { to: '/admin/profile-requests',     icon: 'review',      label: 'Demandes de profil' },
+      // Les circulaires nationales avaient un compositeur mais aucune entrée de
+      // menu : l'écran /notes n'était atteignable qu'en tapant l'URL. Le suivi
+      // de diffusion reste dans l'onglet « Notes » du tableau de bord.
+      { to: '/notes',                      icon: 'notes',       label: 'Notes et circulaires' },
     ]},
     { key: 'personal', label: 'Mon espace', items: [
       { to: '/notifications', icon: 'notifications', label: 'Notifications' },
-      { to: '/history', icon: 'history', label: 'Mon historique' },
+      { to: '/history', icon: 'history', label: 'Historique' },
     ]},
   ];
 
@@ -92,50 +124,48 @@ export default function Sidebar({ unreadCount = 0 }) {
     ]},
     // Un écran par métier : le chef garde le tableur, le surveillant reçoit le
     // suivi des gardes courantes, le surveillant général la supervision hôpital.
-    { key: 'chef', label: 'Mon Service', show: isChef, items: [
-      { to: '/chef-de-service',          icon: 'planning',  label: '📋 Planning des Gardes' },
-      { to: '/appel-du-jour',            icon: 'appel',     label: '📝 Appel du jour' },
-      { to: '/incidents',                 icon: 'incidents', label: 'Alertes et incidents' },
+    { key: 'chef', label: 'Mon service', show: isChef, items: [
+      { to: '/chef-de-service',          icon: 'planning',     label: 'Planning des gardes' },
+      { to: '/appel-du-jour',            icon: 'appel',        label: 'Appel du jour' },
+      { to: '/incidents',                icon: 'incidents',    label: 'Alertes et incidents' },
       // Consultation de tout l'effectif du service (point 5) — lecture seule.
-      { to: '/portfolio',                icon: 'personnel', label: '👥 Portfolio du service' },
-      { to: '/staff-loans',              icon: 'personnel', label: '🤝 Prêts de personnel' },
+      { to: '/portfolio',                icon: 'portfolio',    label: 'Portfolio du service' },
+      { to: '/staff-loans',              icon: 'loans',        label: 'Prêts de personnel' },
     ]},
-    { key: 'surveillance', label: 'Mon Service', show: isServiceSupervisor, items: [
-      { to: '/surveillant',              icon: 'planning',  label: '🩺 Surveillance du Service' },
-      { to: '/appel-du-jour',            icon: 'appel',     label: '📝 Appel du jour' },
-      { to: '/incidents',                 icon: 'incidents', label: 'Alertes et incidents' },
-      { to: '/planning-a-consulter',     icon: 'review',    label: '📅 Planning à Consulter' },
+    { key: 'surveillance', label: 'Mon service', show: isServiceSupervisor, items: [
+      { to: '/surveillant',              icon: 'stethoscope',  label: 'Surveillance du service' },
+      { to: '/appel-du-jour',            icon: 'appel',        label: 'Appel du jour' },
+      { to: '/incidents',                icon: 'incidents',    label: 'Alertes et incidents' },
+      { to: '/planning-a-consulter',     icon: 'review',       label: 'Planning à consulter' },
     ]},
     { key: 'supervision', label: 'Supervision', show: isGeneralSupervisor, items: [
-      { to: '/supervision',              icon: 'dashboard', label: '🏥 Supervision Générale' },
-      { to: '/chef-de-service',          icon: 'planning',  label: '📋 Plannings de l\'Hôpital' },
-      { to: '/appel-du-jour',            icon: 'appel',     label: '📝 Appel du jour' },
-      { to: '/incidents',                 icon: 'incidents', label: 'Alertes et incidents' },
-      { to: '/planning-a-consulter',     icon: 'review',    label: '📅 Planning à Consulter' },
-      { to: '/staff-loans',              icon: 'personnel', label: '🤝 Prêts de personnel' },
-      { to: '/surveillant',              icon: 'shifts',    label: '🩺 Suivi des Gardes' },
+      { to: '/supervision',              icon: 'hospital',     label: 'Supervision générale' },
+      { to: '/chef-de-service',          icon: 'planning',     label: 'Plannings de l\'hôpital' },
+      { to: '/appel-du-jour',            icon: 'appel',        label: 'Appel du jour' },
+      { to: '/incidents',                icon: 'incidents',    label: 'Alertes et incidents' },
+      { to: '/planning-a-consulter',     icon: 'review',       label: 'Planning à consulter' },
+      { to: '/staff-loans',              icon: 'loans',        label: 'Prêts de personnel' },
+      { to: '/surveillant',              icon: 'stethoscope',  label: 'Suivi des gardes' },
     ]},
     { key: 'analytics', label: 'Analytique', show: isManagement, items: [
       { to: '/statistics', icon: 'statistics', label: t('nav.statistics') },
     ]},
     { key: 'director', label: 'Gestion', show: isDirector, items: [
-      { to: '/supervision',        icon: 'dashboard', label: '🏥 Supervision Hôpital' },
-      { to: '/appel-du-jour',      icon: 'appel',     label: '📝 Appel du jour' },
-      { to: '/director/personnel', icon: 'personnel', label: 'Gestion des personnels' },
-      { to: '/director/services',  icon: 'services',  label: 'Gestion des services' },
-      { to: '/staff-loans',        icon: 'personnel', label: '🤝 Prêts de personnel' },
+      { to: '/supervision',        icon: 'hospital',   label: 'Supervision de l\'hôpital' },
+      { to: '/appel-du-jour',      icon: 'appel',      label: 'Appel du jour' },
+      { to: '/director/personnel', icon: 'personnel',  label: 'Gestion des personnels' },
+      { to: '/director/services',  icon: 'services',   label: 'Gestion des services' },
+      { to: '/staff-loans',        icon: 'loans',      label: 'Prêts de personnel' },
     ]},
     { key: 'personal', label: 'Mon espace', items: [
       { to: '/notifications', icon: 'notifications', label: 'Notifications' },
       // Les notes quittent le planning des gardes et deviennent un écran à part
       // (point 7). Visible pour tous : le serveur filtre déjà ce que chacun voit.
-      { to: '/notes', icon: 'notes', label: '📢 Notes et circulaires' },
+      { to: '/notes', icon: 'notes', label: 'Notes et circulaires' },
       { to: '/history', icon: 'history', label: 'Historique' },
       { to: '/profile', icon: 'profile', label: 'Mon profil' },
     ]},
   ];
-
-
 
   const handleLogout = async () => {
     try { await import('../../api').then(m => m.authAPI.logout()); } catch {}
@@ -144,14 +174,28 @@ export default function Sidebar({ unreadCount = 0 }) {
   };
 
   return (
-    <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-      {/* Logo */}
+    <aside
+      id="gs-nav"
+      className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}
+      aria-label="Navigation principale"
+    >
+      {/* Le cachet du registre : le nom de la plateforme, et sous lui le code de
+          l'établissement — une donnée, donc au registre. */}
       <div className="sidebar-logo">
-        <div className="logo-icon"><Icon name="pulse" size={18} /></div>
+        <div className="logo-icon"><Icon name="pulse" size={17} /></div>
         <div className="logo-text">
           <span className="logo-name">GardeSante</span>
-          <span className="logo-sub">{user?.establishmentCode || 'Platform'}</span>
+          <span className="logo-sub">{user?.establishmentCode || 'PLATEFORME'}</span>
         </div>
+        <button
+          type="button"
+          ref={closeRef}
+          className="gsh-nav-close"
+          onClick={onCloseNav}
+          aria-label="Fermer le menu"
+        >
+          <Icon name="close" size={17} />
+        </button>
       </div>
 
       {/* Contexte d'appartenance — hôpital et service(s). Bloc frère du logo :
@@ -166,81 +210,87 @@ export default function Sidebar({ unreadCount = 0 }) {
           const visible = section.items.filter(i => i.show !== false);
           if (!visible.length) return null;
           return (
-            <div key={section.key}>
+            <div key={section.key} className="gsh-nav-group">
               {!sidebarCollapsed && <p className="nav-section-title">{section.label}</p>}
-              {visible.map((item) => (
-                <NavLink key={item.to} to={item.to} end={item.end}
-                  className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                  title={sidebarCollapsed ? item.label : ''}>
-                  <span className="nav-icon"><Icon name={item.icon} size={18} /></span>
-                  <span className="nav-label">{item.label}</span>
-                  {item.to === '/notifications' && unreadCount > 0 && (
-                    <span className="nav-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
-                  )}
-                </NavLink>
-              ))}
+              <ul className="gsh-nav-list">
+                {visible.map((item) => (
+                  <li key={item.to}>
+                    <NavLink to={item.to} end={item.end}
+                      className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                      title={sidebarCollapsed ? item.label : undefined}>
+                      <span className="nav-icon"><Icon name={item.icon} size={18} /></span>
+                      <span className="nav-label">{item.label}</span>
+                      {item.to === '/notifications' && unreadCount > 0 && (
+                        <span className="nav-badge" title={`${unreadCount} notification(s) non lue(s)`}>
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      )}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
             </div>
           );
         })}
       </nav>
 
-      {/* Footer */}
+      {/* Pied de la tranche */}
       <div className="sidebar-footer">
-        {/* Toggle langue */}
+        {/* Langue — deux états lisibles au lieu d'une bascule dont le libellé
+            annonçait la langue d'arrivée sans jamais dire laquelle était active. */}
         {!sidebarCollapsed && (
-          <button onClick={() => setLanguage(language === 'fr' ? 'ar' : 'fr')} style={{
-            width:'100%', background:'var(--bg-elevated)', border:'1px solid var(--border-subtle)',
-            borderRadius:'var(--border-radius-sm)', color:'var(--text-secondary)',
-            fontSize:'var(--font-xs)', fontWeight:600, padding:'6px', cursor:'pointer',
-            marginBottom:'8px', fontFamily:'inherit', transition:'all var(--transition-fast)',
-          }}>
-            {language === 'fr' ? '🇩🇿 العربية' : '🇫🇷 Français'}
-          </button>
+          <div className="gsh-lang" role="group" aria-label="Langue de l'interface">
+            <button type="button" aria-pressed={language === 'fr'} onClick={() => setLanguage('fr')}>
+              Français
+            </button>
+            <button type="button" aria-pressed={language === 'ar'} onClick={() => setLanguage('ar')} lang="ar">
+              العربية
+            </button>
+          </div>
         )}
 
-        {/* User card — clic → profil | icône logout */}
-        <div className="user-info" style={{ position:'relative' }}>
-          {/* Zone clic → profil */}
-          <div style={{ display:'flex', alignItems:'center', gap:'var(--space-3)', flex:1, cursor:'pointer', overflow:'hidden' }}
-            onClick={() => !isSuperAdmin && navigate('/profile')}
-            title={sidebarCollapsed ? `${user?.firstName} ${user?.lastName}` : (isSuperAdmin ? '' : 'Mon profil')}>
+        <div className="user-info">
+          {/* Le Super Admin n'a pas de fiche de profil à ouvrir : le bouton est
+              alors désactivé plutôt que muet au clic. */}
+          <button
+            type="button"
+            className="gsh-me-open"
+            disabled={isSuperAdmin}
+            onClick={() => navigate('/profile')}
+            title={isSuperAdmin ? undefined : 'Ouvrir mon profil'}
+          >
             <Avatar
               avatarUrl={avatarUrl}
               firstName={user?.firstName}
               lastName={user?.lastName}
               size="sm"
-              style={{ flexShrink:0 }}
+              style={{ flexShrink: 0 }}
             />
-            <div className="user-details">
-              <p className="user-name">{user?.firstName} {user?.lastName}</p>
-              <p className="user-role">{t(`roles.${user?.roleCode}`) || user?.roleName}</p>
-            </div>
-          </div>
+            <span className="user-details">
+              <span className="user-name">{user?.firstName} {user?.lastName}</span>
+              <span className="user-role">{t(`roles.${user?.roleCode}`) || user?.roleName}</span>
+            </span>
+          </button>
 
-          {/* Bouton déconnexion séparé */}
           {!sidebarCollapsed && (
-            <button onClick={handleLogout} title="Déconnexion" style={{
-              background:'none', border:'none', cursor:'pointer', color:'var(--text-muted)',
-              padding:'4px', display:'flex', borderRadius:6, flexShrink:0,
-              transition:'color 0.15s',
-            }}
-              onMouseEnter={e => e.target.style.color='var(--color-danger)'}
-              onMouseLeave={e => e.target.style.color='var(--text-muted)'}>
-              <Icon name="logout" size={16} />
+            <button type="button" className="gsh-logout" onClick={handleLogout} title="Se déconnecter" aria-label="Se déconnecter">
+              <Icon name="logout" size={15} />
             </button>
           )}
         </div>
 
-        {/* Collapse toggle */}
-        <button onClick={toggleSidebar} style={{
-          marginTop:'8px', width:'100%', background:'transparent',
-          border:'1px solid var(--border-subtle)', borderRadius:'var(--border-radius-sm)',
-          color:'var(--text-muted)', padding:'6px', cursor:'pointer',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          transition:'all var(--transition-fast)',
-          transform: sidebarCollapsed ? 'rotate(180deg)' : 'none',
-        }} title={sidebarCollapsed ? 'Agrandir' : 'Réduire'}>
-          <Icon name="chevron" size={16} />
+        {/* Repli manuel — sans objet sous 1024 px, où la largeur décide seule ;
+            la feuille de la coque le masque à ces tailles. */}
+        <button
+          type="button"
+          className="gsh-collapse"
+          onClick={toggleSidebar}
+          aria-expanded={!sidebarCollapsed}
+          aria-controls="gs-nav"
+          title={sidebarCollapsed ? 'Déplier le menu' : 'Replier le menu'}
+        >
+          <Icon name="chevron" size={14} />
+          {!sidebarCollapsed && <span>Replier</span>}
         </button>
       </div>
     </aside>

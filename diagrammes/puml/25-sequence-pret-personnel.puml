@@ -1,0 +1,187 @@
+' ============================================================================
+' GardeSanté — Diagramme de séquence : prêt de personnel entre services
+'
+' Règle II. Un chef qui inscrit dans son tableur un agent relevant d'un autre
+' service déclenche une demande de prêt auprès du chef propriétaire. La demande
+' ne bloque jamais l'enregistrement : c'est le refus, plus tard, qui retire la
+' ligne.
+'
+' Sources vérifiées :
+'   backend/src/app.js:135                        app.use('/api/staff-loans', …)
+'   backend/src/modules/schedules/staff-loans.controller.js
+'     :21-50    checkLoanRequirement — aucun service ⇒ pas de demande ;
+'               déjà dans le service demandeur ⇒ pas de demande
+'     :56-176   requestLoan — 403 non-chef, 400 champs manquants,
+'               200 sur doublon vivant, 409 service sans chef désigné
+'     :276-381  decideLoan — 403 sauf chef propriétaire, 409 déjà traitée,
+'               refus ⇒ removeStaffFromSchedule + announceStaffRemoval
+'     :189      WATCHER_ROLES — directeur, SG et admin lisent sans décider
+'   backend/src/modules/schedules/external-staff.js
+'     :127-212  syncExternalStaffLoans — appelée à CHAQUE sauvegarde du tableur,
+'               enveloppée d'un try/catch : « le tableur doit s'enregistrer même
+'               si la couche d'approbation échoue »
+'     :151-167  service propriétaire sans chef ⇒ auto_approved, jamais en attente
+'     :221-255  removeStaffFromSchedule — retire la ligne du registre,
+'               DELETE shifts + schedule_staff_assignments de CET agent
+'     :267-283  announceStaffRemoval — salon du service + chef demandeur
+'   frontend/src/hooks/useRealtime.js  staff-loan:requested|decided,
+'                                      schedule:staff-removed
+' ============================================================================
+@startuml 25-sequence-pret-personnel
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 280
+skinparam ParticipantPadding 12
+skinparam BoxPadding 14
+skinparam actor {
+  BackgroundColor #E6F4F1
+  BorderColor #0F766E
+}
+skinparam participant {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontStyle bold
+}
+skinparam database {
+  BackgroundColor #F3E8FF
+  BorderColor #7A3E9D
+}
+skinparam sequence {
+  LifeLineBorderColor #94A3B8
+  LifeLineBackgroundColor #F8FAFC
+  GroupBackgroundColor #EEF2FF
+  GroupBorderColor #1B4FCA
+  GroupHeaderFontColor #1B4FCA
+  DividerBackgroundColor #E6F4F1
+  DividerBorderColor #0F766E
+  DividerFontColor #0F766E
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Séquence — Prêter un agent d'un autre service : demande, décision, retrait
+
+actor "Chef demandeur" as CD
+actor "Chef propriétaire" as CP
+participant "Tableur\n(SmartSpreadsheet)" as TAB
+participant "API\nschedule-builder" as SB
+participant "API\nstaff-loans" as SL
+database "PostgreSQL" as DB
+participant "socket.io" as WS
+
+== La demande naît de la saisie ==
+
+CD -> TAB : ajoute au tableur un agent\nd'un autre service
+TAB -> SB : PUT /schedule-builder/:id/draft
+SB -> DB : enregistre la grille
+note right of SB
+  **L'enregistrement passe d'abord.** La demande
+  de prêt est déclenchée après coup, dans un
+  bloc protégé : « le tableur doit s'enregistrer
+  même si la couche d'approbation échoue ». Une
+  panne de la couche de prêt ne fait pas perdre
+  au chef la grille qu'il vient de saisir.
+end note
+SB -> SL : pour chaque agent de la grille,\nrelève-t-il d'un autre service ?
+
+alt l'agent n'appartient à aucun service
+  SL -> DB : INSERT prêt « approuvé d'office »
+  note right of SL
+    Exception explicite : un agent sans service
+    de rattachement n'a pas de chef à consulter.
+  end note
+else l'agent est déjà du service demandeur
+  SL -> SL : aucune demande à formuler
+else le service propriétaire n'a pas de chef désigné
+  SL -> DB : INSERT prêt « approuvé d'office »\nmotif : aucun chef désigné
+  note right of SL
+    Sans destinataire, une demande resterait en
+    attente indéfiniment et bloquerait la ligne.
+    On tranche dans le sens qui laisse travailler.
+  end note
+else une demande est déjà vivante pour cet agent
+  SL -> SL : on ne re-sollicite pas le chef\nà chaque sauvegarde
+else agent d'un autre service, chef joignable
+  SL -> DB : INSERT staff_loan_requests\nstatut « en attente »
+  SL -> DB : INSERT notifications (chef propriétaire)
+  SL -> WS : emit staff-loan:requested\nvers le chef propriétaire
+  WS --> CP : la demande apparaît sans rechargement
+end
+
+SB -> DB : INSERT activity_logs (auteur, IP, agent)
+SB --> TAB : 200 grille enregistrée,\nla ligne est signalée en attente
+note right of TAB
+  La ligne existe dans le tableur et s'y
+  affiche, distinguée visuellement tant que
+  la réponse n'est pas venue. Le chef continue
+  de composer son planning.
+end note
+
+== Décision du chef propriétaire ==
+
+CP -> SL : POST /staff-loans/:id/decision
+SL -> DB : SELECT la demande
+
+alt l'acteur n'est pas le chef propriétaire
+  SL --> CP : 403 « seul le chef du service\npropriétaire peut répondre »
+  note right of SL
+    Le directeur, le surveillant général et
+    l'administrateur **voient** les prêts de
+    leur hôpital, mais ne les arbitrent pas :
+    la décision appartient au service qui
+    perd l'agent.
+  end note
+else demande déjà traitée
+  SL --> CP : 409 « demande déjà traitée »
+else décision recevable
+
+  alt acceptée
+    SL -> DB : UPDATE statut « acceptée »\n+ horodatage
+    note right of DB
+      La ligne du tableur ne change pas :
+      elle cesse simplement d'être signalée
+      en attente. Rien n'est réécrit.
+    end note
+  else refusée
+    SL -> DB : UPDATE statut « refusée » + motif
+    group retrait de la seule ligne concernée
+      SL -> DB : retire la ligne de l'agent du registre
+      SL -> DB : DELETE shifts et affectations\nde CET agent uniquement
+    end
+    note right of DB
+      Le planning **garde son état** — brouillon,
+      envoyé ou en cours — et le reste de la
+      grille est intact. Un refus ne défait pas
+      le travail du chef demandeur, il en retire
+      une ligne.
+    end note
+    SL -> WS : emit schedule:staff-removed\nsalon du service **et** chef demandeur
+    WS --> CD : la ligne disparaît du tableur\nsans rechargement
+  end
+
+  SL -> DB : INSERT activity_logs
+  SL -> DB : INSERT notifications (chef demandeur)
+  SL -> WS : emit staff-loan:decided
+  WS --> CD : décision reçue sans rechargement
+  SL --> CP : 200 décision enregistrée
+end
+
+note over CD, WS
+  Deux portes d'entrée pour une même demande : la saisie du tableur la crée
+  d'elle-même, et un appel direct à `POST /api/staff-loans` permet de la
+  formuler à l'avance. Les deux chemins écrivent la même table et sont
+  soumis aux mêmes contrôles.
+end note
+
+legend right
+  Trait plein : appel. Trait pointillé : réponse.
+  La demande de prêt ne bloque jamais l'enregistrement du tableur : c'est le refus qui retire la ligne.
+  Un agent prêté puis absent se remplace comme un autre : figures 23 et 24.
+endlegend
+
+@enduml

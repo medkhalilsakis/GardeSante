@@ -3,6 +3,8 @@ const PDFDocument = require('pdfkit');
 const { query } = require('../../config/database');
 const { log, getIp } = require('../history/history.controller');
 const { normalizePeriods } = require('./periods');
+// Règle de lecture unique du tableur : « de service / pas de service ».
+const { rowOnDuty } = require('./spreadsheet-reader');
 
 const dateKey = (value) => {
   if (!value) return '';
@@ -53,7 +55,9 @@ async function loadSpreadsheet(scheduleId, establishmentId) {
   );
 
   const metadata = schedule.metadata || {};
-  const savedRows = Array.isArray(metadata.spreadsheet?.rows) ? metadata.spreadsheet.rows : [];
+  // An explicit rows array, including [], is authoritative for the Tableur.
+  const hasSpreadsheet = Array.isArray(metadata.spreadsheet?.rows);
+  const savedRows = hasSpreadsheet ? metadata.spreadsheet.rows : [];
   const customColumns = Array.isArray(metadata.spreadsheet?.customCols) ? metadata.spreadsheet.customCols : [];
   const configuredDates = metadata.special_days_only && Array.isArray(metadata.special_dates)
     ? metadata.special_dates.map(dateKey).filter(Boolean)
@@ -82,11 +86,15 @@ async function loadSpreadsheet(scheduleId, establishmentId) {
   };
 
   savedRows.forEach(row => addRow(row));
-  shiftResult.rows.forEach(shift => addRow({ userId: shift.user_id }, shift));
-  shiftResult.rows.forEach(shift => {
-    const target = rowsByPerson.get(shift.user_id);
-    if (target) target.shifts[dateKey(shift.shift_date)] = String(shift.shift_code || 'G').charAt(0).toUpperCase();
-  });
+  if (!hasSpreadsheet) {
+    shiftResult.rows.forEach(shift => addRow({ userId: shift.user_id }, shift));
+    shiftResult.rows.forEach(shift => {
+      const target = rowsByPerson.get(shift.user_id);
+    // Le tableur n'alimente plus `shifts` ; les lignes héritées restent lues et
+    // valent « de service » ce jour-là, sans plus aucune notion de code.
+      if (target) target.shifts[dateKey(shift.shift_date)] = true;
+    });
+  }
 
   return { schedule, dates, rows: [...rowsByPerson.values()], customColumns };
 }
@@ -94,6 +102,24 @@ async function loadSpreadsheet(scheduleId, establishmentId) {
 const isSpecialSchedule = schedule => schedule.schedule_type === 'special_weekend_holiday'
   || schedule.metadata?.schedule_kind === 'weekend_holiday'
   || schedule.metadata?.special_days_only === true;
+
+/** Marque portée par une colonne de jour : « X » quand l'agent est de service. */
+const DUTY_MARK = 'X';
+
+/**
+ * Contexte d'arbitrage d'un planning, à passer à `rowOnDuty`.
+ *
+ * Gain au passage : jusqu'ici ces colonnes ne montraient que les cases codées,
+ * donc restaient vides pour tout planning exprimé par périodes — c'est-à-dire la
+ * quasi-totalité. Elles portent désormais les bonnes journées.
+ */
+const dutyContext = schedule => ({
+  isSpecial: isSpecialSchedule(schedule),
+  scheduleStart: dateKey(schedule.start_date),
+  scheduleEnd: dateKey(schedule.end_date),
+});
+
+const dutyCell = (row, date, context) => (rowOnDuty(row, date, context) ? DUTY_MARK : '');
 
 function spreadsheetHeaders(customColumns, dates, schedule) {
   return [
@@ -107,12 +133,13 @@ function spreadsheetHeaders(customColumns, dates, schedule) {
 
 function spreadsheetValues(data) {
   const { rows, customColumns, dates, schedule } = data;
+  const context = dutyContext(schedule);
   return rows.map((row, index) => [
     index + 1, row.lastName, row.firstName, row.phone, row.matricule, row.roleName,
     ...(isSpecialSchedule(schedule) ? [] : [row.periods.map(period => `${period.startDate} au ${period.endDate}`).join('; ')]),
     row.shiftStart, row.shiftEnd,
     ...customColumns.map(column => row.custom?.[column.key] || ''),
-    ...dates.map(date => row.shifts?.[date] || ''),
+    ...dates.map(date => dutyCell(row, date, context)),
   ]);
 }
 
@@ -208,6 +235,7 @@ async function exportPDF(req, res) {
     doc.fillColor('#64748B').font('Helvetica').fontSize(8).text(`${dateKey(schedule.start_date)} au ${dateKey(schedule.end_date)} | ${rows.length} personnel(s)`, 24, 57, { width: pageWidth - 48, align: 'center' });
     drawTableHeader(doc, 24, startY, columns);
   };
+  const context = dutyContext(schedule);
   let y = 88;
   drawPage(y);
   y += 22;
@@ -219,7 +247,7 @@ async function exportPDF(req, res) {
       let value = '';
       if (column.key === 'index') value = String(index + 1);
       else if (column.key.startsWith('custom:')) value = row.custom?.[column.key.slice(7)] || '';
-      else if (column.key.startsWith('date:')) value = row.shifts?.[column.key.slice(5)] || '';
+      else if (column.key.startsWith('date:')) value = dutyCell(row, column.key.slice(5), context);
       else if (column.key === 'periods') value = row.periods.map(period => `${period.startDate} au ${period.endDate}`).join('; ');
       else value = row[column.key] || '';
       doc.fillColor(column.key.startsWith('date:') && value ? '#1B4FCA' : '#1F2937').font(value && column.key.startsWith('date:') ? 'Helvetica-Bold' : 'Helvetica').fontSize(6.5)
@@ -238,6 +266,7 @@ async function exportDetailedCalendarPDF(req, res) {
   const { schedule, dates, rows } = data;
   const palette = ['#2563EB', '#7C3AED', '#059669', '#D97706', '#DB2777', '#0891B2', '#4F46E5', '#EA580C', '#0D9488', '#DC2626'];
   const personnel = rows.map((row, index) => ({ ...row, color: palette[index % palette.length] }));
+  const context = dutyContext(schedule);
   const pageWidth = Math.min(1800, Math.max(842, dates.length > 30 ? 1500 : 1120));
   const doc = new PDFDocument({ size: [pageWidth, 595], layout: 'landscape', margin: 24 });
   const filename = `Calendrier_detaille_${safeName(schedule.name)}.pdf`;
@@ -264,7 +293,7 @@ async function exportDetailedCalendarPDF(req, res) {
     const column = index % columns;
     if (column === 0 && y + cardHeight > 570) { doc.addPage(); drawHeader(); y = 84; }
     const x = 24 + column * (cardWidth + gap);
-    const assigned = personnel.filter(person => person.shifts?.[date] && person.shifts[date] !== 'R');
+    const assigned = personnel.filter(person => rowOnDuty(person, date, context));
     doc.roundedRect(x, y, cardWidth, cardHeight, 8).fillAndStroke('#F8FAFC', '#CBD5E1');
     doc.fillColor('#1E293B').font('Helvetica-Bold').fontSize(10).text(displayDate(date), x + 10, y + 10);
     doc.fillColor('#64748B').font('Helvetica').fontSize(7).text(`${assigned.length} agent(s) affecté(s)`, x + 10, y + 25);
@@ -272,7 +301,7 @@ async function exportDetailedCalendarPDF(req, res) {
       const py = y + 43 + rowIndex * 12;
       doc.circle(x + 14, py + 3, 4).fill(person.color);
       doc.fillColor('#1F2937').font('Helvetica-Bold').fontSize(7).text(`${person.lastName} ${person.firstName}`.trim(), x + 23, py, { width: cardWidth - 68, lineBreak: false });
-      doc.fillColor('#1B4FCA').fontSize(7).text(person.shifts[date], x + cardWidth - 28, py, { width: 18, align: 'center' });
+      doc.fillColor('#1B4FCA').fontSize(7).text(DUTY_MARK, x + cardWidth - 28, py, { width: 18, align: 'center' });
     });
     if (assigned.length > 5) doc.fillColor('#64748B').fontSize(7).text(`+ ${assigned.length - 5} autre(s)`, x + 10, y + 101);
     if (column === columns - 1) y += cardHeight + gap;

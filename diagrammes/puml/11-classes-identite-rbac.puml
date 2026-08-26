@@ -1,0 +1,255 @@
+' ============================================================================
+' GardeSanté — Diagramme de classes : identité, habilitations et organisation
+'
+' Sources vérifiées (information_schema + pg_constraint) :
+'   establishments(4), roles(22), permissions(39), role_permissions(390),
+'   users(47), user_departments(42), departments(9), job_titles(448),
+'   profile_change_requests(0), establishment_configs(18).
+'
+' Convention : les colonnes de clé étrangère ne sont PAS reprises comme
+' attributs — elles sont matérialisées par les associations. Les entités sont
+' des entités de persistance : le backend est un ensemble de contrôleurs
+' Express sans couche ORM, il n'y a donc pas de méthodes à modéliser.
+' ============================================================================
+@startuml 11-classes-identite-rbac
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam classAttributeIconSize 0
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  HeaderBackgroundColor #EEF2FF
+  FontStyle bold
+  AttributeFontSize 10
+  AttributeFontColor #334155
+  BackgroundColor<<référentiel>> #FFFFFF
+  BorderColor<<référentiel>> #0F766E
+  HeaderBackgroundColor<<référentiel>> #E6F4F1
+  BackgroundColor<<association>> #FFFFFF
+  BorderColor<<association>> #7A3E9D
+  HeaderBackgroundColor<<association>> #F3E8FF
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+hide circle
+hide methods
+
+title Diagramme de classes — Identité, habilitations et organisation
+
+class Établissement <<référentiel>> {
+  + id : UUID
+  --
+  code : VARCHAR(20) «unique»
+  nom : VARCHAR(255)
+  nomAr : VARCHAR(255)
+  type : VARCHAR(50) = 'hospital'
+  gouvernorat : VARCHAR(100)
+  délégation : VARCHAR(120)
+  adresse : TEXT
+  ville : VARCHAR(100)
+  codePostal : VARCHAR(20)
+  latitude : NUMERIC
+  longitude : NUMERIC
+  téléphone : VARCHAR(30)
+  courriel : VARCHAR(150)
+  logoUrl : TEXT
+  actif : BOOL = true
+  crééLe : TIMESTAMPTZ
+  modifiéLe : TIMESTAMPTZ
+}
+
+class Rôle <<référentiel>> {
+  + id : UUID
+  --
+  code : VARCHAR(50)
+  nom : VARCHAR(100)
+  nomAr : VARCHAR(100)
+  niveau : INT
+  systeme : BOOL = false
+  description : TEXT
+}
+
+class Permission <<référentiel>> {
+  + id : UUID
+  --
+  code : VARCHAR(100) «module.action»
+  module : VARCHAR(50)
+  action : VARCHAR(50)
+  description : TEXT
+  descriptionAr : TEXT
+}
+
+class Utilisateur {
+  + id : UUID
+  --
+  matricule : VARCHAR(50)
+  prénom : VARCHAR(100)
+  nom : VARCHAR(100)
+  prénomAr : VARCHAR(100)
+  nomAr : VARCHAR(100)
+  courriel : VARCHAR(150) «unique»
+  téléphone : VARCHAR(30)
+  empreinteMotDePasse : TEXT «bcrypt»
+  spécialité : VARCHAR(100)
+  grade : VARCHAR(100)
+  --
+  actif : BOOL = true
+  enCongé : BOOL = false
+  peutSeConnecter : BOOL = true
+  langue : VARCHAR(5) = 'fr'
+  avatarUrl : TEXT
+  --
+  dateNaissance : DATE
+  genre : VARCHAR(20)
+  adresse : TEXT
+  ville : VARCHAR(100)
+  numéroCIN : VARCHAR(50)
+  expirationCIN : DATE
+  dateRecrutement : DATE
+  biographie : TEXT
+  --
+  tauxHoraire : NUMERIC
+  salaireBase : NUMERIC
+  --
+  jetonRafraîchissement : TEXT
+  jetonRéinitialisation : TEXT
+  expirationJeton : TIMESTAMPTZ
+  dernièreConnexion : TIMESTAMPTZ
+  dernièreActivité : TIMESTAMPTZ
+  --
+  archivéLe : TIMESTAMPTZ
+  motifArchivage : TEXT
+}
+
+class Service {
+  + id : UUID
+  --
+  code : VARCHAR(30)
+  nom : VARCHAR(150)
+  nomAr : VARCHAR(150)
+  typeService : VARCHAR(50)
+  étage : VARCHAR(30)
+  aile : VARCHAR(30)
+  téléphone : VARCHAR(30)
+  nombreDeLits : INT
+  effectifMinimalDeGarde : INT = 1
+  actif : BOOL = true
+}
+
+class Affectation <<association>> {
+  chefDeService : BOOL = false
+  servicePrincipal : BOOL = true
+  affectéLe : DATE
+}
+
+class Fonction <<référentiel>> {
+  + id : UUID
+  --
+  nom : VARCHAR(200)
+  nomAr : VARCHAR(200)
+  catégorie : VARCHAR(50)
+  libelléCatégorie : VARCHAR(100)
+  systeme : BOOL = false
+  active : BOOL = true
+  ordre : INT
+}
+
+class DemandeModificationProfil {
+  + id : UUID
+  --
+  état : VARCHAR(20) = 'pending'
+  donnéesActuelles : JSONB
+  donnéesDemandées : JSONB
+  champsModifiés : TEXT[]
+  soumiseLe : TIMESTAMPTZ
+  examinéeLe : TIMESTAMPTZ
+  motifRejet : TEXT
+}
+
+class ParamètreÉtablissement <<référentiel>> {
+  + id : UUID
+  --
+  clé : VARCHAR(100)
+  valeur : TEXT
+  typeValeur : VARCHAR(20)
+  description : TEXT
+  modifiéLe : TIMESTAMPTZ
+}
+
+Établissement "1" *-- "0..*" Utilisateur : emploie
+Établissement "1" *-- "0..*" Service : organise
+Établissement "1" *-- "0..*" ParamètreÉtablissement : paramètre
+Établissement "0..1" o-- "0..*" Rôle : décline
+Établissement "0..1" o-- "0..*" Fonction : décline
+
+Service "0..1" o-- "0..*" Service : sous-service\nparent_id
+
+Utilisateur "0..*" --> "1" Rôle : rôle principal
+Utilisateur "0..*" --> "0..1" Rôle : rôle secondaire
+Utilisateur "0..*" --> "0..1" Fonction : intitulé de poste
+Utilisateur "0..1" --> "0..*" Utilisateur : a archivé
+
+Rôle "0..*" -- "0..*" Permission : habilite
+
+Utilisateur "1" -- "0..*" Affectation
+Affectation "0..*" -- "1" Service
+
+Utilisateur "1" *-- "0..*" DemandeModificationProfil : soumet
+DemandeModificationProfil "0..*" --> "0..1" Utilisateur : examinée par
+
+note as N1
+  **La table `roles` est dupliquée par établissement.**
+  22 lignes pour 8 rôles fonctionnels : les rôles système
+  appartiennent au compte plateforme
+  (`establishment_id` nul) et chaque établissement créé
+  reçoit sa propre copie lors de l'amorçage. Un code de
+  rôle n'est donc unique qu'au sein d'un établissement,
+  ce qui explique que le serveur raisonne partout sur
+  `role.code` et non sur `role.id`.
+end note
+
+note as N2
+  **`permissions` est globale : sans `establishment_id`.**
+  39 lignes pour tout le système. La matrice
+  d'habilitation est portée par `role_permissions`
+  (390 lignes observées). C'est de l'inclusion de ces
+  ensembles qu'est dérivée la hiérarchie d'acteurs des
+  diagrammes de cas d'utilisation.
+end note
+
+note as N3
+  **`Affectation` est une classe-association.**
+  `user_departments` est une table de liaison à clé
+  primaire composite portant trois attributs propres.
+  `chefDeService` y désigne le responsable du service :
+  c'est cette colonne, et non le rôle, qui rattache un
+  chef à son périmètre.
+end note
+
+note as N4
+  Aucun mot de passe n'est stocké en clair :
+  `empreinteMotDePasse` est un condensat bcrypt.
+  `jetonRafraîchissement` conserve le jeton de
+  renouvellement en base pour permettre sa révocation.
+end note
+
+N1 .. Rôle
+N2 .. Permission
+N3 .. Affectation
+N4 .. Utilisateur
+
+legend right
+  Vert : référentiels de paramétrage.
+  Violet : classe-association.
+  Losange plein : composition (la suppression du tout
+  supprime la partie — ON DELETE CASCADE).
+  Losange creux : agrégation (ON DELETE SET NULL).
+  Les colonnes de clé étrangère ne figurent pas comme
+  attributs : elles sont portées par les associations.
+endlegend
+
+@enduml

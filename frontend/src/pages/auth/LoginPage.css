@@ -1,0 +1,578 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Écran de connexion — GardeSante
+   ──────────────────────────────────────────────────────────────────────────
+   Deux volets : à gauche l'identité de la plateforme, à droite la connexion.
+   Le volet d'identité est sombre en toute circonstance — c'est un choix, pas
+   un oubli de thème. Il portait pour cela sa propre palette : trois bleus
+   marine inventés, un halo flou animé, deux aplats de marque en dégradé et un
+   titre au dégradé découpé dans le texte. Rien de tout cela n'existait
+   ailleurs dans la plateforme.
+
+   Il ne recopie plus rien. L'attribut `data-theme='dark'` posé sur `.lp-aside`
+   dans le JSX fait descendre les jetons du thème sombre dans tout le volet,
+   depuis leur unique déclaration. Une palette recopiée finit par diverger ;
+   une palette héritée, jamais — et le volet reste sombre quel que soit le
+   thème de la page, ce qui était bien l'intention.
+
+   Ce qui a été retiré, et pourquoi :
+     • le halo de 520 px flouté à 60 px et animé en boucle — la plateforme n'a
+       pas de lueur, et un fond qui bouge sans rien dire n'informe personne ;
+     • le titre en dégradé découpé (`background-clip: text`) — illisible en
+       petit, et c'est la signature la plus reconnaissable d'une maquette
+       produite en série. Un seul mot au bleu du sceau dit la même chose ;
+     • les aplats en dégradé du verrou de marque, de l'icône d'accès rapide et
+       du bouton de connexion — un ton plein tient mieux et se reteinte seul ;
+     • le rouge de l'erreur de connexion : la plateforme n'a pas de rouge. Des
+       identifiants refusés attendent une reprise, donc l'ambre.
+
+   Ce qui reste : la trame de points. C'est un motif, pas un décor — même
+   catégorie que les hachures du ruban de mois : de la matière sans image. Son
+   masque en dégradé l'éteint avant la liste des fonctions, pour que le texte
+   ne se lise jamais sur un fond piqué.
+
+   `#fff` a disparu des aplats de sceau au profit de `--gs-paper` : le sceau du
+   thème sombre est un bleu clair, sur lequel du blanc pur ne tenait plus le
+   contraste — l'encre du papier sombre le tient, et le même mot marche dans
+   les deux thèmes.
+
+   Aucune règle globale : tous les sélecteurs sont préfixés `.lp-`, donc ce
+   fichier ne peut pas déteindre sur le reste de l'application.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.lp-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  background: var(--gs-paper);
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   VOLET GAUCHE — identité de la plateforme
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Le fond n'est pas un bleu marine inventé : c'est le papier sombre teinté au
+   sceau. Une seule couleur, dérivée de la seule qui engage. */
+.lp-aside {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 40px;
+  padding: clamp(32px, 4vw, 56px);
+  background: color-mix(in srgb, var(--gs-seal) 9%, var(--gs-paper));
+  border-inline-end: 1px solid var(--gs-rule-strong);
+  color: var(--gs-ink);
+  isolation: isolate;
+}
+
+/* Trame de points — de la matière sans image. Le masque l'éteint avant la
+   liste des fonctions : aucun texte ne se lit sur un fond piqué. */
+.lp-aside::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--gs-ink) 20%, transparent) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(90% 80% at 30% 20%, black 0%, transparent 75%);
+  -webkit-mask-image: radial-gradient(90% 80% at 30% 20%, black 0%, transparent 75%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Verrou de marque */
+.lp-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lp-brand-mark {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--gs-paper);
+  background: var(--gs-seal);
+}
+
+.lp-brand-name {
+  font-family: var(--gs-display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--gs-ink);
+}
+
+.lp-brand-tag {
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+  margin-block-start: 2px;
+}
+
+/* Accroche */
+.lp-hero {
+  max-width: 30ch;
+}
+
+.lp-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--gs-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gs-seal);
+  padding: 5px 12px;
+  border-radius: 9999px;
+  background: var(--gs-seal-wash);
+  border: 1px solid color-mix(in srgb, var(--gs-seal) 34%, transparent);
+  margin-block-end: 20px;
+}
+
+.lp-hero-title {
+  font-family: var(--gs-display);
+  font-size: clamp(28px, 3.2vw, 40px);
+  font-weight: 700;
+  line-height: 1.14;
+  letter-spacing: -0.025em;
+  color: var(--gs-ink);
+}
+
+/* Le mot qui porte l'accroche. Il était découpé dans un dégradé cyan ; il
+   prend le bleu du sceau — la couleur de ce qui engage, sur une page qui ne
+   parle que d'engagement institutionnel. */
+.lp-hero-title em {
+  font-style: normal;
+  color: var(--gs-seal);
+}
+
+.lp-hero-text {
+  margin-block-start: 16px;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--gs-ink-soft);
+}
+
+/* Ce que fait la plateforme */
+.lp-features {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lp-feature {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--gs-ink) 5%, transparent);
+  border: 1px solid var(--gs-rule);
+}
+
+.lp-feature-icon {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+}
+
+.lp-feature-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.lp-feature-desc {
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+  margin-block-start: 1px;
+}
+
+/* Ligne de registre : version, objet, pays. Le pas fixe convient à ce qui
+   s'apparente à une mention d'ouvrage. */
+.lp-aside-foot {
+  font-family: var(--gs-data);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--gs-ink-faint);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   VOLET DROIT — connexion
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.lp-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(24px, 3vw, 44px);
+  background: var(--gs-paper);
+  overflow-y: auto;
+}
+
+.lp-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-block-end: auto;
+}
+
+.lp-chip {
+  height: 34px;
+  padding-inline: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9999px;
+  border: 1px solid var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+
+.lp-chip:hover {
+  border-color: var(--gs-seal);
+  color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+}
+
+.lp-form-wrap {
+  width: 100%;
+  max-width: 400px;
+  margin-inline: auto;
+  margin-block: 32px auto;
+}
+
+/* `--space-7` n'existe pas dans le calque de variables : cette marge et celle
+   de l'accès rapide se réduisaient silencieusement à zéro, si bien que le
+   titre touchait le formulaire et le filet « Connexion rapide » touchait le
+   bouton. Une valeur littérale ne peut pas manquer à l'appel. */
+.lp-head {
+  margin-block-end: 28px;
+}
+
+.lp-head h2 {
+  font-family: var(--gs-display);
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--gs-ink);
+  line-height: 1.2;
+}
+
+.lp-head p {
+  margin-block-start: 8px;
+  font-size: 13px;
+  color: var(--gs-ink-faint);
+}
+
+.lp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.lp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lp-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--gs-ink-soft);
+  text-transform: uppercase;
+}
+
+.lp-input-shell {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.lp-input-icon {
+  position: absolute;
+  inset-inline-start: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--gs-ink-faint);
+  pointer-events: none;
+  transition: color .15s ease;
+}
+
+.lp-input {
+  width: 100%;
+  height: 48px;
+  padding-inline: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+  font-size: 14px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.lp-input::placeholder { color: var(--gs-ink-faint); }
+
+.lp-input:hover:not(:focus) { border-color: color-mix(in srgb, var(--gs-ink) 32%, transparent); }
+
+/* Le champ ne coupe plus son contour au focus. Il le faisait, en le remplaçant
+   par un halo de 4 px à 8 % d'opacité — invisible sur le papier clair. Le
+   contour du calque de jetons reste donc en place, et le filet du champ change
+   de couleur avec lui : deux signes plutôt qu'un demi. */
+.lp-input:focus {
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
+}
+
+.lp-input-shell:focus-within .lp-input-icon { color: var(--gs-seal); }
+
+.lp-eye {
+  position: absolute;
+  inset-inline-end: 8px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  cursor: pointer;
+  transition: color .15s ease, background .15s ease;
+}
+
+.lp-eye:hover { color: var(--gs-ink); background: var(--gs-paper); }
+
+/* Verrouillage majuscules : une condition qui explique un refus à venir. */
+.lp-caps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gs-alert);
+}
+
+/* Identifiants refusés — affichés en clair, pas seulement en toast. Ambre et
+   non rouge : c'est une reprise à faire, et la plateforme n'a pas de rouge. */
+.lp-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--gs-alert-wash);
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 30%, transparent);
+  color: var(--gs-alert);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.lp-error svg { flex-shrink: 0; margin-block-start: 1px; }
+
+/* Bouton principal — un ton plein, aucune lueur. */
+.lp-submit {
+  height: 50px;
+  margin-block-start: 4px;
+  border: none;
+  border-radius: 12px;
+  background: var(--gs-seal);
+  color: var(--gs-paper);
+  font-family: var(--gs-body);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background .15s ease, transform .15s ease;
+}
+
+.lp-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--gs-seal) 86%, var(--gs-ink));
+}
+
+.lp-submit:active:not(:disabled) { transform: translateY(0); }
+
+.lp-submit:disabled { opacity: 0.62; cursor: progress; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ACCÈS RAPIDE — un seul compte, celui du Super Admin
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.lp-quick {
+  margin-block-start: 28px;
+  padding-block-start: 24px;
+  border-block-start: 1px solid var(--gs-rule);
+}
+
+.lp-quick-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+  margin-block-end: 12px;
+}
+
+.lp-quick-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--gs-rule);
+}
+
+.lp-quick-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  cursor: pointer;
+  font-family: var(--gs-body);
+  text-align: start;
+  transition: border-color .15s ease, background .15s ease,
+              transform .15s ease, box-shadow .15s ease;
+}
+
+.lp-quick-btn:hover:not(:disabled) {
+  border-color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+  transform: translateY(-1px);
+  box-shadow: var(--gs-shadow-card);
+}
+
+.lp-quick-btn:disabled { opacity: 0.7; cursor: progress; }
+
+.lp-quick-icon {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--gs-paper);
+  background: var(--gs-seal);
+}
+
+.lp-quick-text { flex: 1; min-width: 0; }
+
+.lp-quick-role {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+/* Une adresse est une donnée, pas une phrase : pas fixe. */
+.lp-quick-mail {
+  font-family: var(--gs-data);
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lp-quick-arrow { color: var(--gs-seal); flex-shrink: 0; }
+
+.lp-foot {
+  margin-block-start: 32px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ANIMATIONS — deux, et chacune dit quelque chose : ça tourne, ça arrive.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.lp-spin { animation: lp-rotate 0.9s linear infinite; }
+
+@keyframes lp-rotate { to { transform: rotate(360deg); } }
+
+.lp-rise { animation: lp-rise-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes lp-rise-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1024px) {
+  .lp-page { grid-template-columns: 1fr; }
+
+  /* Le volet d'identité devient un bandeau : le filet passe donc du flanc
+     au pied, sinon la séparation des deux volets disparaît. */
+  .lp-aside {
+    gap: 24px;
+    padding: 24px;
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--gs-rule-strong);
+  }
+
+  .lp-hero { max-width: none; }
+  .lp-hero-eyebrow { margin-block-end: 12px; }
+  .lp-hero-text { display: none; }
+  .lp-features { grid-template-columns: 1fr 1fr; }
+  .lp-feature-desc { display: none; }
+  .lp-aside-foot { display: none; }
+
+  .lp-main { padding-block: 32px; }
+  .lp-toolbar { margin-block-end: 24px; }
+  .lp-form-wrap { margin-block: 0 auto; }
+}
+
+@media (max-width: 560px) {
+  .lp-aside { padding: 20px; }
+  .lp-features { display: none; }
+  .lp-main { padding-inline: 20px; }
+  .lp-foot { margin-block-start: 24px; }
+}
+
+/* Le calque de jetons coupe déjà toutes les durées ; ne restent ici que les
+   déplacements au survol, qu'aucune durée ne neutralise. */
+@media (prefers-reduced-motion: reduce) {
+  .lp-spin,
+  .lp-rise { animation: none; }
+
+  .lp-submit:hover:not(:disabled),
+  .lp-quick-btn:hover:not(:disabled) { transform: none; }
+}

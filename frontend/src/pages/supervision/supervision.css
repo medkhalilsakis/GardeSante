@@ -1,0 +1,340 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Supervision générale — `/supervision`
+   ───────────────────────────────────────────────────────────────────────────
+   Préfixe unique `gsp-`, jetons `--gs-*` seulement, aucune valeur
+   hexadécimale. L'écran n'avait aucun fichier CSS : huit cartes de KPI à
+   couleur arbitraire, dix pastilles d'onglets en bleu plein, la
+   couverture en grille de cartes, et des dates ISO brutes dans trois listes.
+
+   Ce que l'écran doit répondre en premier : quels services de l'hôpital sont
+   couverts aujourd'hui, et ce qui, ailleurs, réclame une décision. La
+   couverture devient donc un registre — une ligne par service, les chiffres
+   alignés — parce qu'on la lit en comparant des colonnes, pas en parcourant
+   des cartes.
+
+   La feuille sert aussi les deux composants refondus avec l'écran
+   (`StaffLoansOverview`, `SupervisionReportModal`), dont le premier est
+   également monté par `/staff-loans` pour le directeur : un seul habillage,
+   deux points d'entrée.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gsp-wrap {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.gsp-tab-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Les onglets qui délèguent à un composant déjà habillé (remplacements,
+   personnel, calendrier, statistiques) reçoivent un titre sans carte :
+   emboîter une carte dans une carte ajouterait un filet sans rien dire. */
+.gsp-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* D'où vient la donnée, et ce que l'écran ne fait pas. Une phrase, au ton du
+   registre. */
+.gsp-note {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-faint);
+}
+
+/* Le panneau d'un tableau est `flush` (le registre touche ses bords) :
+   l'attente a donc besoin de sa propre marge, sinon elle colle au filet. */
+.gsp-load { padding: 14px 16px; min-width: 0; }
+
+/* ── Cellules de registre ──────────────────────────────────────────────────
+   Un nom porte l'identité, sa ligne de dessous situe. Même mécanique pour un
+   service et pour un planning : c'est la seule colonne qui contient deux
+   informations, toutes les autres sont des chiffres. */
+
+.gsp-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gsp-name > b {
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gsp-name > span {
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--gs-ink-faint);
+}
+
+/* Un nom de planning est long et n'est pas la donnée principale de la ligne :
+   il se tronque, l'infobulle porte le nom entier. */
+.gsp-clip {
+  display: block;
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Les actions d'une ligne de registre : jamais coupées, jamais empilées — une
+   ligne de tableau se lit horizontalement. */
+.gsp-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.gsp-acts > button { white-space: nowrap; }
+
+/* ── Anomalies ─────────────────────────────────────────────────────────────
+   Le contrôle de cohérence tournait déjà (`/api/supervision/conflicts`) et
+   l'écran n'en affichait que le total : un compteur sans destination. La liste
+   reprend la forme des alertes — un filet de gravité à gauche, la pastille de
+   famille, et l'action qui répare (les propositions de modification du
+   planning concerné). */
+
+.gsp-flaws {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.gsp-flaws > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  min-width: 0;
+  padding: 12px 0 12px 11px;
+  border-left: 3px solid var(--gs-rule);
+}
+
+.gsp-flaws > li + li { border-top: 1px solid var(--gs-rule); }
+
+.gsp-flaws > li[data-tone='alert'] { border-left-color: var(--gs-alert); }
+.gsp-flaws > li[data-tone='watch'] { border-left-color: var(--gs-alert-wash); }
+
+/* La pastille : une icône de famille, un ton, aucune couleur décorative. */
+.gsp-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-faint);
+}
+
+.gsp-mark[data-tone='alert'] {
+  border-color: color-mix(in srgb, var(--gs-alert) 26%, transparent);
+  background: var(--gs-alert-wash);
+  color: var(--gs-alert);
+}
+
+.gsp-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.gsp-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gsp-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.gsp-title {
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--gs-ink);
+}
+
+.gsp-kind {
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsp-desc {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+}
+
+/* Qui est concerné, sur combien de journées, dans quel planning : la
+   traçabilité tient sur une ligne. */
+.gsp-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+}
+
+.gsp-meta > span + span::before {
+  content: '·';
+  margin-right: 7px;
+  color: var(--gs-rule-strong);
+}
+
+.gsp-meta .gs-num { font-size: 10.5px; color: var(--gs-ink-soft); }
+
+.gsp-side {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.gsp-side > button { white-space: nowrap; }
+
+/* ── Prêts de personnel ───────────────────────────────────────────────────
+   Lecture seule, à dessein : la décision revient au chef du service
+   propriétaire. Le filet de gauche porte l'état de la demande — l'ambre pour
+   ce qui attend, le bleu de service pour ce qui est accordé, rien pour un
+   refus, qui est une décision close et non une chose à faire. */
+
+.gsp-loans {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.gsp-loans > li {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 0 12px 11px;
+  border-left: 3px solid var(--gs-rule);
+}
+
+.gsp-loans > li + li { border-top: 1px solid var(--gs-rule); }
+
+.gsp-loans > li[data-status='pending'] { border-left-color: var(--gs-alert); }
+.gsp-loans > li[data-status='approved'],
+.gsp-loans > li[data-status='auto_approved'] { border-left-color: var(--gs-duty); }
+.gsp-loans > li[data-status='rejected'] { border-left-color: var(--gs-rule-strong); opacity: .74; }
+.gsp-loans > li[data-focus='true'] { border-left-color: var(--gs-seal); background: var(--gs-seal-wash); box-shadow: inset 0 0 0 1px var(--gs-seal-wash); }
+
+/* Le mouvement du prêt : service propriétaire, flèche, service demandeur. La
+   flèche est tracée en CSS — elle sépare deux valeurs, elle n'est pas du
+   texte saisi. */
+.gsp-move {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  color: var(--gs-ink-soft);
+}
+
+.gsp-move > span + span::before {
+  content: '→';
+  margin-right: 8px;
+  font-family: var(--gs-data);
+  color: var(--gs-rule-strong);
+}
+
+/* Le motif d'une réponse est la parole d'un chef de service : elle se cite. */
+.gsp-quote {
+  margin: 2px 0 0;
+  padding-left: 9px;
+  border-left: 1px solid var(--gs-rule-strong);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+}
+
+/* ── Rapport à la direction ────────────────────────────────────────────────
+   La modale reprend la coquille commune de la plateforme (`.modal`,
+   `.form-group`, `.form-control`) : elle portait sa propre couche
+   d'assombrissement en `rgba()` et ses libellés en styles en ligne, ce qui la
+   désaccordait des trente autres modales. Seuls son sous-titre et ses
+   consignes passent au vocabulaire du registre. */
+
+.gsp-modal-sub {
+  margin: 3px 0 0;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--gs-ink-faint);
+}
+
+/* `.modal-body` n'apporte qu'un rembourrage et `.form-group` aucune marge
+   basse : sans cette règle, deux champs consécutifs se touchent. Une classe
+   plutôt qu'un style en ligne, et aucune propriété commune avec `.modal-body` —
+   l'ordre des feuilles n'entre donc pas en jeu. */
+.gsp-modal-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.gsp-modal-hint {
+  display: block;
+  margin: 5px 0 0;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Étroit ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 560px) {
+  /* Le placement est rattaché à `.gsp-main` : la même liste sert les anomalies
+     et rien d'autre, mais la borne évite qu'un futur `.gsp-body` imbriqué
+     hérite d'une seconde colonne implicite — le défaut mesuré sur les alertes
+     du surveillant. */
+  .gsp-main { grid-template-columns: minmax(0, 1fr); }
+  .gsp-side { flex-direction: row; }
+  .gsp-side > button { flex: 1; }
+
+  .gsp-clip { max-width: 20ch; }
+  .gsp-acts { justify-content: flex-start; flex-wrap: wrap; }
+}

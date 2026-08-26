@@ -1,0 +1,1008 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Sélection du personnel — tiroir d'ajout au tableur
+   ──────────────────────────────────────────────────────────────────────────
+   Toutes les classes sont préfixées `.hsp-` : ce fichier ne peut pas déteindre
+   sur le reste de l'application.
+
+   Ce tiroir tenait onze teintes inventées, plus cinq recopies pour le thème
+   sombre, plus un bandeau arc-en-ciel de quatre bandes en haut du volet. Il
+   parle maintenant la langue de la plateforme.
+
+   LA CATÉGORIE N'EST PAS UN ÉTAT. Médical, auxiliaire, administratif : c'est
+   une taxonomie d'appartenance, pas un jugement. Elle ne peut donc pas prendre
+   les trois tons sémantiques — le sceau, le service, l'alerte — qui disent
+   respectivement ce qui engage, ce qui est en cours et ce qui réclame un
+   arbitrage. Elle prend l'échelle d'identité, faite pour ça, et en évitant
+   `--gs-id-1`, `--gs-id-2` et `--gs-id-4` qui valent le sceau, le service et
+   l'alerte en thème clair. Une seule propriété, `--hsp-cat`, porte la teinte :
+   cinq déclarations d'une ligne remplacent dix règles et cinq recopies
+   sombres, et le thème sombre reteinte l'ensemble sans une ligne de code.
+
+   « Type à renseigner » sort de cette logique : ce n'est pas une identité, c'est
+   une donnée manquante. Il n'a donc pas de teinte du tout — encre pâle et filet
+   en pointillé, la forme que la plateforme donne partout à ce qui n'est pas
+   arrêté. Une couleur de moins, une information de plus.
+
+   DEUX PASTILLES, DEUX RANGS. « Autre service » et « En congé » étaient toutes
+   deux colorées, donc de même poids. Or une seule bloque : le chef de service
+   ne peut pas affecter en garde un personnel en congé. « En congé » prend donc
+   l'ambre — la couleur de ce qui exige une décision — et « Autre service »
+   redevient ce qu'elle est, un fait d'appartenance : encre douce sur papier.
+   La pastille qui compte ne se noie plus dans celle qui informe.
+
+   Ce qui a été retiré, et pourquoi :
+     • le bandeau de quatre bandes en dégradé (27 % / 31 % / 20 % / 22 %) — ces
+       proportions ne venaient d'aucun décompte réel. Un graphique qui n'affiche
+       aucune donnée est un décor qui se fait passer pour une mesure ;
+     • les lueurs colorées sous le filtre actif et sous le bouton « Terminer » —
+       la plateforme n'a pas de lueur ;
+     • le contour de focus à 3 px et 20 % d'opacité de la fiche : plus faible que
+       celui du calque de jetons, qu'il remplaçait. Le calque reprend la main ;
+     • `outline: 0` sur les listes déroulantes des filtres, pour la même raison.
+       Il reste sur le champ de recherche, qui déporte son anneau sur sa coque.
+
+   La typographie : le fichier descendait à 8 px, ce qui n'est pas une taille de
+   lecture. Le plancher est remonté à 10 px — celui de `.gs-eyebrow` — et la
+   hauteur minimale des fiches suit, sinon la quatrième ligne déborderait. Les
+   graisses 800 passent en 700, la graisse d'affichage du reste de la plateforme.
+
+   Le voile de fond passe sur `--bg-overlay`, le seul jeton d'assombrissement de
+   la plateforme : il s'appuie en thème sombre, ce qu'une valeur figée ne fait
+   pas, et les sept modales cessent d'avoir sept opacités différentes.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.hsp-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  font-family: var(--gs-body);
+}
+
+/* Même voile que les autres modales de la plateforme — l'encre du thème clair,
+   opaque à 55 %, quel que soit le thème : un voile s'assombrit, il n'éclaircit
+   jamais. */
+.hsp-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-overlay);
+  backdrop-filter: blur(4px);
+  animation: hsp-backdrop-in 180ms ease-out both;
+}
+
+.hsp-drawer {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: flex;
+  width: min(560px, calc(100vw - 24px));
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--gs-rule-strong);
+  background: var(--gs-paper);
+  color: var(--gs-ink);
+  /* Ombre portée vers la gauche : le tiroir arrive par la droite, l'ombre doit
+     tomber du côté qu'il recouvre. */
+  box-shadow: -24px 0 64px rgba(16, 26, 46, .20);
+  animation: hsp-drawer-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.hsp-header {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  padding: 24px 22px 14px;
+  border-bottom: 1px solid var(--gs-rule);
+  background: var(--gs-paper);
+}
+
+.hsp-header__topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.hsp-title-block { min-width: 0; }
+
+/* Un surtitre en capitales sans interlettrage est illisible : il prend celui de
+   `.gs-eyebrow`, la même mesure que partout ailleurs. */
+.hsp-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-family: var(--gs-display);
+  color: var(--gs-ink-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.hsp-title-block h2 {
+  overflow-wrap: anywhere;
+  font-family: var(--gs-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  line-height: 1.3;
+  color: var(--gs-ink);
+}
+
+.hsp-title-block p {
+  margin-top: 3px;
+  color: var(--gs-ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.hsp-icon-button {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 7px;
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.hsp-icon-button:hover {
+  border-color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+}
+
+.hsp-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Une contrainte en vigueur sur la liste : seuls les profils compatibles sont
+   montrés. C'est du sceau — ce qui engage la lecture, pas une alerte. */
+.hsp-required-function {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--gs-seal) 28%, transparent);
+  border-radius: 8px;
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+  font-size: 11px;
+}
+
+.hsp-required-function strong { font-size: 11px; font-weight: 700; }
+.hsp-required-function small { width: 100%; color: var(--gs-ink-soft); font-size: 10px; }
+
+.hsp-search {
+  display: flex;
+  min-width: 0;
+  height: 42px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 11px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 7px;
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-faint);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.hsp-search:focus-within {
+  border-color: var(--gs-seal);
+  box-shadow: 0 0 0 3px var(--gs-seal-wash);
+  color: var(--gs-seal);
+}
+
+/* Le champ éteint son propre anneau parce que sa coque le porte à sa place :
+   l'indicateur ne disparaît pas, il change de support. */
+.hsp-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+  font-size: 12px;
+}
+
+.hsp-search input::placeholder { color: var(--gs-ink-faint); }
+.hsp-search input::-webkit-search-cancel-button { display: none; }
+
+.hsp-search button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--gs-ink-faint);
+}
+
+.hsp-search button:hover {
+  background: var(--gs-paper);
+  color: var(--gs-ink);
+}
+
+.hsp-filter-toggle {
+  position: relative;
+  display: inline-flex;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 7px;
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 700;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.hsp-filter-toggle:hover,
+.hsp-filter-toggle.is-active {
+  border-color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+}
+
+.hsp-filter-toggle strong {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--gs-seal);
+  color: var(--gs-paper);
+  font-family: var(--gs-data);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hsp-quick-filters {
+  display: flex;
+  gap: 6px;
+  margin-top: 11px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.hsp-quick-filters::-webkit-scrollbar { display: none; }
+
+.hsp-quick-filters button {
+  display: inline-flex;
+  min-height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 6px;
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.hsp-quick-filters button:hover {
+  border-color: var(--gs-rule-strong);
+  transform: translateY(-1px);
+}
+
+/* Un filtre retenu : aplat plein, aucune lueur. */
+.hsp-quick-filters button.is-active {
+  border-color: var(--gs-seal);
+  background: var(--gs-seal);
+  color: var(--gs-paper);
+}
+
+.hsp-quick-filters button strong {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-data);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hsp-quick-filters button.is-active strong {
+  background: color-mix(in srgb, var(--gs-paper) 26%, transparent);
+  color: var(--gs-paper);
+}
+
+.hsp-advanced-filters {
+  flex: 0 0 auto;
+  padding: 13px 22px 15px;
+  border-bottom: 1px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
+  animation: hsp-filters-in 180ms ease-out both;
+}
+
+.hsp-advanced-filters__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.hsp-advanced-filters__heading > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.hsp-advanced-filters__heading strong {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.hsp-advanced-filters__heading span { color: var(--gs-ink-faint); font-size: 10px; }
+
+.hsp-advanced-filters__heading button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--gs-seal);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.hsp-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.hsp-filter-grid label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hsp-filter-grid label > span {
+  color: var(--gs-ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.hsp-filter-grid__function { grid-column: 1 / -1; }
+
+.hsp-filter-grid select {
+  width: 100%;
+  height: 36px;
+  padding: 0 30px 0 9px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 6px;
+  background: var(--gs-paper);
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+  font-size: 11px;
+}
+
+/* Le filet change de couleur à l'ouverture ; l'anneau du calque de jetons reste
+   en place par-dessus, il n'est plus coupé. */
+.hsp-filter-grid select:focus { border-color: var(--gs-seal); }
+
+/* Le puits de résultats est en retrait : les fiches y reposent sur le papier,
+   le fond du puits est le papier secondaire. */
+.hsp-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 18px 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--gs-paper-alt);
+  scrollbar-color: color-mix(in srgb, var(--gs-ink) 22%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.hsp-results::-webkit-scrollbar { width: 8px; }
+.hsp-results::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--gs-ink) 22%, transparent);
+  background-clip: padding-box;
+}
+
+.hsp-section + .hsp-section { margin-top: 22px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LA TAXONOMIE — appartenance, jamais état
+   `--hsp-cat` porte la teinte ; l'en-tête de section et la pastille de
+   catégorie la lisent tous deux, donc une fiche sortie de sa section garde
+   la même couleur que le groupe dont elle relève. Utile : la section « Votre
+   service » mélange les trois catégories, et la pastille y est le seul signe.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.hsp-section__header--own { --hsp-cat: var(--gs-id-5); }
+.hsp-section__header--medical,
+.hsp-category--medical { --hsp-cat: var(--gs-id-6); }
+.hsp-section__header--auxiliary,
+.hsp-category--auxiliary { --hsp-cat: var(--gs-id-7); }
+.hsp-section__header--administrative,
+.hsp-category--administrative { --hsp-cat: var(--gs-id-3); }
+
+.hsp-section__header {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  margin: 0 2px 9px;
+  color: var(--hsp-cat, var(--gs-ink-faint));
+}
+
+.hsp-section__icon {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+/* « Type à renseigner » n'est pas une catégorie mais un manque. Aucune teinte,
+   et le pointillé de tout ce qui n'est pas arrêté. La pastille reçoit le même
+   traitement, mais plus bas : `.hsp-category` la suit dans l'ordre du fichier
+   et son raccourci `border` remettrait le trait en plein. */
+.hsp-section__header--unknown .hsp-section__icon {
+  border-style: dashed;
+  background: transparent;
+}
+
+.hsp-section__heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.hsp-section__title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.hsp-section__title-row > strong {
+  overflow: hidden;
+  font-family: var(--gs-display);
+  color: var(--gs-ink);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hsp-section__heading > span:last-child {
+  overflow: hidden;
+  color: var(--gs-ink-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hsp-section__count {
+  display: inline-grid;
+  min-width: 27px;
+  height: 24px;
+  place-items: center;
+  padding: 0 7px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 6px;
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-data);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* La pastille « Prioritaire » ne porte plus sa propre couleur : elle hérite
+   celle de sa section. Une teinte de moins à maintenir, et les deux ne peuvent
+   plus diverger. */
+.hsp-priority-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.hsp-staff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* La hauteur suit le plancher typographique remonté : quatre lignes à 10 px
+   minimum ne tiennent plus dans les 94 px d'origine. */
+.hsp-staff-card {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: 100px;
+  grid-template-columns: 16px 40px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 10px 11px 7px;
+  overflow: hidden;
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  background: var(--gs-paper);
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+  text-align: left;
+  animation: hsp-card-in 240ms ease-out both;
+  animation-delay: calc(var(--hsp-item-index, 0) * 22ms);
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease, background 150ms ease;
+}
+
+.hsp-staff-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: transparent;
+  content: '';
+  transition: background 150ms ease;
+}
+
+.hsp-staff-card:hover {
+  z-index: 1;
+  border-color: color-mix(in srgb, var(--gs-seal) 30%, transparent);
+  background: var(--gs-paper-alt);
+  box-shadow: var(--gs-shadow-card);
+  transform: translateY(-1px);
+}
+
+.hsp-staff-card:hover::before { background: var(--gs-seal); }
+
+/* Le contour de focus vient du calque de jetons — 2 px de sceau plein, plus
+   franc que les 3 px à 20 % qu'il y avait ici. Ne reste que le filet, qui
+   accompagne l'anneau au lieu de le remplacer. */
+.hsp-staff-card:focus-visible { border-color: var(--gs-seal); }
+
+/* Ajouté au tableur : c'est engagé, donc le sceau. */
+.hsp-staff-card.is-added {
+  border-color: color-mix(in srgb, var(--gs-seal) 45%, transparent);
+  background: var(--gs-seal-wash);
+}
+
+.hsp-staff-card.is-added::before { background: var(--gs-seal); }
+
+.hsp-staff-card__drag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  color: var(--gs-ink-faint);
+  cursor: grab;
+}
+
+.hsp-staff-card:active .hsp-staff-card__drag { cursor: grabbing; }
+.hsp-staff-card__avatar { outline: 3px solid var(--gs-paper-alt); }
+
+.hsp-staff-card__content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hsp-staff-card__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.hsp-staff-card__name {
+  overflow: hidden;
+  color: var(--gs-ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hsp-loan-badge,
+.hsp-leave-badge {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 2px 5px;
+  overflow: hidden;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* « Autre service » : un fait d'appartenance. L'ajouter déclenchera un prêt,
+   ce qui se dit — mais rien n'est en défaut, donc rien ne s'allume. */
+.hsp-loan-badge {
+  border: 1px solid var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-soft);
+}
+
+/* « En congé » : la seule condition qui interdit l'affectation. C'est la
+   pastille qui doit arrêter l'œil, donc l'ambre, et elle est seule à l'avoir. */
+.hsp-leave-badge {
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 32%, transparent);
+  background: var(--gs-alert-wash);
+  color: var(--gs-alert);
+}
+
+.hsp-staff-card__function {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--gs-seal);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hsp-staff-card__function svg { flex: 0 0 auto; }
+
+.hsp-staff-card__metadata {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.hsp-category,
+.hsp-metadata-item {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.hsp-category {
+  padding: 2px 5px;
+  border: 1px solid currentColor;
+  color: var(--hsp-cat, var(--gs-ink-faint));
+  background: color-mix(in srgb, var(--hsp-cat, var(--gs-ink-faint)) 10%, transparent);
+}
+
+/* Le pendant de la section « Type à renseigner », placé après `.hsp-category`
+   pour que son raccourci `border` ne remette pas le trait en plein. */
+.hsp-category--unknown {
+  border-style: dashed;
+  background: transparent;
+}
+
+.hsp-metadata-item {
+  overflow: hidden;
+  color: var(--gs-ink-soft);
+}
+
+.hsp-metadata-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hsp-metadata-item svg { flex: 0 0 auto; }
+.hsp-metadata-item strong { flex: 0 0 auto; color: var(--gs-seal); }
+
+/* Un matricule est une donnée, pas un mot : pas fixe. */
+.hsp-metadata-item--matricule {
+  flex: 0 0 auto;
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-data);
+}
+
+.hsp-access-role {
+  overflow: hidden;
+  color: var(--gs-ink-faint);
+  font-size: 10px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hsp-staff-card__add {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--gs-seal) 30%, transparent);
+  border-radius: 7px;
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.hsp-staff-card:hover .hsp-staff-card__add {
+  background: var(--gs-seal);
+  color: var(--gs-paper);
+  transform: scale(1.04);
+}
+
+.hsp-staff-card.is-added .hsp-staff-card__add {
+  border-color: var(--gs-seal);
+  background: var(--gs-seal);
+  color: var(--gs-paper);
+}
+
+.hsp-department-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.hsp-department-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 4px 6px;
+  color: var(--gs-ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.hsp-department-group__header span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hsp-department-group__header strong {
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-data);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hsp-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hsp-skeleton {
+  display: block;
+  height: 100px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--gs-paper) 25%, var(--gs-paper-alt) 50%, var(--gs-paper) 75%);
+  background-size: 220% 100%;
+  animation: hsp-skeleton 1.2s linear infinite;
+}
+
+.hsp-empty-state {
+  display: flex;
+  min-height: 330px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 28px;
+  color: var(--gs-ink-faint);
+  text-align: center;
+}
+
+.hsp-empty-state > svg { margin-bottom: 12px; color: var(--gs-seal); }
+.hsp-empty-state--error > svg { color: var(--gs-alert); }
+
+.hsp-empty-state strong {
+  color: var(--gs-ink);
+  font-family: var(--gs-display);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.hsp-empty-state span { max-width: 310px; margin-top: 4px; font-size: 11px; line-height: 1.5; }
+
+.hsp-empty-state button {
+  display: inline-flex;
+  height: 34px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 0 11px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 6px;
+  background: var(--gs-paper);
+  color: var(--gs-seal);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.hsp-empty-state button:hover { border-color: var(--gs-seal); background: var(--gs-seal-wash); }
+
+/* Un plafond de lecture atteint attend une décision : de l'ambre. */
+.hsp-limit-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 16px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 28%, transparent);
+  border-radius: 6px;
+  background: var(--gs-alert-wash);
+  color: var(--gs-alert);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.hsp-limit-notice svg { flex: 0 0 auto; margin-top: 1px; }
+
+.hsp-footer {
+  display: flex;
+  min-height: 62px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--gs-rule);
+  background: var(--gs-paper);
+  box-shadow: 0 -8px 24px rgba(16, 26, 46, .05);
+}
+
+.hsp-footer > div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.hsp-footer > div strong {
+  color: var(--gs-seal);
+  font-family: var(--gs-data);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.hsp-footer > div span {
+  overflow: hidden;
+  color: var(--gs-ink-soft);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Aplat plein, aucune lueur — le bouton qui referme le tiroir. */
+.hsp-footer > button {
+  display: inline-flex;
+  height: 38px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 7px;
+  background: var(--gs-seal);
+  color: var(--gs-paper);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.hsp-footer > button:hover { background: color-mix(in srgb, var(--gs-seal) 86%, var(--gs-ink)); }
+
+.hsp-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
+}
+
+@keyframes hsp-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hsp-drawer-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes hsp-filters-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes hsp-card-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes hsp-skeleton {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (max-width: 640px) {
+  .hsp-drawer { width: 100vw; border-left: 0; }
+  .hsp-header { padding: 21px 14px 12px; }
+  .hsp-search-row { grid-template-columns: minmax(0, 1fr) 42px; }
+  .hsp-filter-toggle { width: 42px; padding: 0; }
+  .hsp-filter-toggle > span { display: none; }
+  .hsp-filter-toggle strong { position: absolute; top: -5px; right: -5px; }
+  .hsp-advanced-filters { padding: 12px 14px; }
+  .hsp-filter-grid { grid-template-columns: 1fr; }
+  .hsp-filter-grid__function { grid-column: auto; }
+  .hsp-results { padding: 14px 10px 22px; }
+  .hsp-staff-card { grid-template-columns: 0 40px minmax(0, 1fr) 32px; gap: 9px; padding-left: 10px; }
+  .hsp-staff-card__drag { width: 0; overflow: hidden; visibility: hidden; }
+  .hsp-metadata-item--matricule { display: none; }
+  .hsp-footer { min-height: 58px; padding: 9px 12px; }
+}
+
+@media (max-width: 410px) {
+  .hsp-title-block h2 { font-size: 17px; }
+  .hsp-staff-card { min-height: 108px; }
+  .hsp-staff-card__metadata { flex-wrap: wrap; }
+  .hsp-footer > div span { max-width: 125px; white-space: normal; }
+}
+
+/* Le calque de jetons coupe déjà toutes les durées ; ne restent ici que les
+   déplacements et l'agrandissement au survol, qu'aucune durée ne neutralise. */
+@media (prefers-reduced-motion: reduce) {
+  .hsp-quick-filters button:hover,
+  .hsp-staff-card:hover { transform: none; }
+  .hsp-staff-card:hover .hsp-staff-card__add { transform: none; }
+}

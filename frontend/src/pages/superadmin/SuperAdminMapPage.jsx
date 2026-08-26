@@ -144,10 +144,9 @@ function getIndicativePosition(establishment) {
 function markerHtml(kind, selected = false) {
   const symbol = kind === 'missing' ? '?' : '+';
   return `
-    <div class="sa-map-marker sa-map-marker--${kind}${selected ? ' sa-map-marker--selected' : ''}">
-      <span class="sa-map-marker__pulse"></span>
-      <span class="sa-map-marker__pin"><span class="sa-map-marker__symbol">${symbol}</span></span>
-      <span class="sa-map-marker__shadow"></span>
+    <div class="gsa-map-marker gsa-map-marker--${kind}${selected ? ' gsa-map-marker--selected' : ''}">
+      <span class="gsa-map-marker__pin"><span class="gsa-map-marker__symbol">${symbol}</span></span>
+      <span class="gsa-map-marker__shadow"></span>
     </div>
   `;
 }
@@ -157,7 +156,7 @@ const MARKER_ICONS = Object.fromEntries(
     [false, true].map((selected) => [
       `${kind}-${selected}`,
       L.divIcon({
-        className: 'sa-map-leaflet-icon',
+        className: 'gsa-map-leaflet-icon',
         html: markerHtml(kind, selected),
         iconSize: [38, 46],
         iconAnchor: [19, 43],
@@ -201,9 +200,9 @@ function MapClickPicker({ active, onPick }) {
 
 function KpiCard({ icon: Icon, tone, label, value, note }) {
   return (
-    <div className={`sa-map-kpi sa-map-kpi--${tone}`}>
-      <div className="sa-map-kpi__icon"><Icon size={20} aria-hidden="true" /></div>
-      <div className="sa-map-kpi__copy">
+    <div className={`gsa-map-kpi gsa-map-kpi--${tone}`}>
+      <div className="gsa-map-kpi__icon"><Icon size={20} aria-hidden="true" /></div>
+      <div className="gsa-map-kpi__copy">
         <span>{label}</span>
         <strong>{value}</strong>
         <small>{note}</small>
@@ -215,7 +214,7 @@ function KpiCard({ icon: Icon, tone, label, value, note }) {
 function StatusBadge({ establishment }) {
   const active = isActive(establishment);
   return (
-    <span className={`sa-map-status sa-map-status--${active ? 'active' : 'inactive'}`}>
+    <span className={`gsa-map-status gsa-map-status--${active ? 'active' : 'inactive'}`}>
       {active ? <Power size={12} aria-hidden="true" /> : <PowerOff size={12} aria-hidden="true" />}
       {active ? 'Actif' : 'Inactif'}
     </span>
@@ -226,7 +225,7 @@ function PositionBadge({ establishment, compact = false }) {
   const state = getCoordinateState(establishment);
   const configured = state.kind === 'located';
   return (
-    <span className={`sa-map-position-badge sa-map-position-badge--${configured ? 'located' : 'missing'}`}>
+    <span className={`gsa-map-position-badge gsa-map-position-badge--${configured ? 'located' : 'missing'}`}>
       {configured
         ? <CheckCircle2 size={12} aria-hidden="true" />
         : <AlertTriangle size={12} aria-hidden="true" />}
@@ -237,7 +236,7 @@ function PositionBadge({ establishment, compact = false }) {
 
 function EmptyState({ hasFilters, onReset }) {
   return (
-    <div className="sa-map-empty">
+    <div className="gsa-map-empty">
       <MapPin size={28} aria-hidden="true" />
       <strong>Aucun établissement trouvé</strong>
       <p>{hasFilters ? 'Ajustez les critères de recherche.' : 'Aucun établissement n’est encore enregistré.'}</p>
@@ -439,13 +438,13 @@ export default function SuperAdminMapPage() {
   };
 
   return (
-    <div className="sa-map-page">
-      <header className="sa-map-header">
-        <div className="sa-map-header__identity">
-          <div className="sa-map-header__icon"><MapIcon size={24} aria-hidden="true" /></div>
+    <div className="gsa-map-page">
+      <header className="gsa-map-header">
+        <div className="gsa-map-header__identity">
+          <div className="gsa-map-header__icon"><MapIcon size={24} aria-hidden="true" /></div>
           <div>
-            <div className="sa-map-header__eyebrow">
-              <span className="sa-map-header__live-dot" aria-hidden="true" /> Réseau national en consultation
+            <div className="gsa-map-header__eyebrow">
+              <span className="gsa-map-header__live-dot" aria-hidden="true" /> Réseau national en consultation
             </div>
             <h1>Carte sanitaire de la Tunisie</h1>
             <p>
@@ -454,25 +453,25 @@ export default function SuperAdminMapPage() {
             </p>
           </div>
         </div>
-        <div className="sa-map-header__status" aria-live="polite">
-          {isFetching && !isLoading ? <LoaderCircle className="sa-map-spin" size={15} aria-hidden="true" /> : <Database size={15} aria-hidden="true" />}
+        <div className="gsa-map-header__status" aria-live="polite">
+          {isFetching && !isLoading ? <LoaderCircle className="gsa-map-spin" size={15} aria-hidden="true" /> : <Database size={15} aria-hidden="true" />}
           {isFetching && !isLoading ? 'Synchronisation…' : 'Données à jour'}
         </div>
       </header>
 
-      <section className="sa-map-kpis" aria-label="Indicateurs du réseau hospitalier">
-        <KpiCard icon={Hospital} tone="blue" label="Établissements" value={totals.total} note="dans le réseau national" />
-        <KpiCard icon={LocateFixed} tone="teal" label="Positionnés" value={totals.located} note={`${totals.total ? Math.round((totals.located / totals.total) * 100) : 0}% avec coordonnées GPS`} />
-        <KpiCard icon={Power} tone="green" label="En activité" value={totals.active} note={`${totals.total - totals.active} établissement(s) inactif(s)`} />
-        <KpiCard icon={Users} tone="violet" label="Personnel suivi" value={totals.personnel.toLocaleString('fr-FR')} note="tous établissements confondus" />
+      <section className="gsa-map-kpis" aria-label="Indicateurs du réseau hospitalier">
+        <KpiCard icon={Hospital} tone="seal" label="Établissements" value={totals.total} note="dans le réseau national" />
+        <KpiCard icon={LocateFixed} tone="duty" label="Positionnés" value={totals.located} note={`${totals.total ? Math.round((totals.located / totals.total) * 100) : 0}% avec coordonnées GPS`} />
+        <KpiCard icon={Power} tone="duty" label="En activité" value={totals.active} note={`${totals.total - totals.active} établissement(s) inactif(s)`} />
+        <KpiCard icon={Users} tone="seal" label="Personnel suivi" value={totals.personnel.toLocaleString('fr-FR')} note="tous établissements confondus" />
       </section>
 
       {totals.needsPosition > 0 && !isLoading && (
-        <section className="sa-map-coordinate-alert" aria-label="Coordonnées à compléter">
-          <div className="sa-map-coordinate-alert__icon"><AlertTriangle size={19} aria-hidden="true" /></div>
+        <section className="gsa-map-coordinate-alert" aria-label="Coordonnées à compléter">
+          <div className="gsa-map-coordinate-alert__icon"><AlertTriangle size={19} aria-hidden="true" /></div>
           <div>
             <strong>{totals.needsPosition} établissement{totals.needsPosition > 1 ? 's' : ''} à positionner précisément</strong>
-            <p>Les repères orange sont indicatifs. Ajoutez leurs coordonnées GPS pour fiabiliser la carte.</p>
+            <p>Les repères sans position vérifiée sont indicatifs. Ajoutez leurs coordonnées GPS pour fiabiliser la carte.</p>
           </div>
           <button type="button" onClick={() => setPositionFilter('needs-position')}>
             Voir la liste <ChevronRight size={15} aria-hidden="true" />
@@ -480,8 +479,8 @@ export default function SuperAdminMapPage() {
         </section>
       )}
 
-      <section className="sa-map-toolbar" aria-label="Filtres cartographiques">
-        <label className="sa-map-search">
+      <section className="gsa-map-toolbar" aria-label="Filtres cartographiques">
+        <label className="gsa-map-search">
           <Search size={17} aria-hidden="true" />
           <span className="sr-only">Rechercher un établissement</span>
           <input
@@ -497,7 +496,7 @@ export default function SuperAdminMapPage() {
           )}
         </label>
 
-        <div className="sa-map-filter-group">
+        <div className="gsa-map-filter-group">
           <SlidersHorizontal size={16} aria-hidden="true" />
           <label>
             <span className="sr-only">Gouvernorat</span>
@@ -525,7 +524,7 @@ export default function SuperAdminMapPage() {
         </div>
 
         {hasFilters && (
-          <button className="sa-map-reset" type="button" onClick={resetFilters} title="Réinitialiser les filtres">
+          <button className="gsa-map-reset" type="button" onClick={resetFilters} title="Réinitialiser les filtres">
             <RotateCcw size={15} aria-hidden="true" />
             Réinitialiser
           </button>
@@ -533,7 +532,7 @@ export default function SuperAdminMapPage() {
       </section>
 
       {isError ? (
-        <section className="sa-map-error" role="alert">
+        <section className="gsa-map-error" role="alert">
           <AlertTriangle size={34} aria-hidden="true" />
           <div>
             <strong>La carte ne peut pas charger les établissements.</strong>
@@ -542,36 +541,36 @@ export default function SuperAdminMapPage() {
           <button type="button" onClick={() => refetch()}>Réessayer</button>
         </section>
       ) : (
-        <section className="sa-map-workspace">
-          <aside className="sa-map-directory" aria-label="Répertoire des établissements">
-            <div className="sa-map-directory__header">
+        <section className="gsa-map-workspace">
+          <aside className="gsa-map-directory" aria-label="Répertoire des établissements">
+            <div className="gsa-map-directory__header">
               <div>
                 <span>Répertoire national</span>
                 <strong>{filteredEstablishments.length} résultat{filteredEstablishments.length > 1 ? 's' : ''}</strong>
               </div>
-              <span className="sa-map-directory__count">{totals.total}</span>
+              <span className="gsa-map-directory__count">{totals.total}</span>
             </div>
 
             {selectedEstablishment && (
-              <article className="sa-map-selection" aria-label={`Établissement sélectionné : ${selectedEstablishment.name}`}>
-                <div className="sa-map-selection__top">
-                  <div className="sa-map-selection__logo"><Hospital size={21} aria-hidden="true" /></div>
-                  <div className="sa-map-selection__title">
+              <article className="gsa-map-selection" aria-label={`Établissement sélectionné : ${selectedEstablishment.name}`}>
+                <div className="gsa-map-selection__top">
+                  <div className="gsa-map-selection__logo"><Hospital size={21} aria-hidden="true" /></div>
+                  <div className="gsa-map-selection__title">
                     <span>{TYPE_LABELS[selectedEstablishment.type] || selectedEstablishment.type || 'Établissement'}</span>
                     <h2>{selectedEstablishment.name}</h2>
                     <small>{selectedEstablishment.code || 'Code non renseigné'}</small>
                   </div>
-                  <button type="button" className="sa-map-icon-button" onClick={() => setSelectedId(null)} title="Fermer la fiche" aria-label="Fermer la fiche">
+                  <button type="button" className="gsa-map-icon-button" onClick={() => setSelectedId(null)} title="Fermer la fiche" aria-label="Fermer la fiche">
                     <X size={16} aria-hidden="true" />
                   </button>
                 </div>
 
-                <div className="sa-map-selection__badges">
+                <div className="gsa-map-selection__badges">
                   <StatusBadge establishment={selectedEstablishment} />
                   <PositionBadge establishment={selectedEstablishment} />
                 </div>
 
-                <div className="sa-map-selection__address">
+                <div className="gsa-map-selection__address">
                   <MapPin size={16} aria-hidden="true" />
                   <p>{[
                     selectedEstablishment.address,
@@ -581,7 +580,7 @@ export default function SuperAdminMapPage() {
                   ].filter(Boolean).join(', ') || 'Adresse non renseignée'}</p>
                 </div>
 
-                <dl className="sa-map-selection__facts">
+                <dl className="gsa-map-selection__facts">
                   <div>
                     <dt><Users size={14} aria-hidden="true" /> Personnel</dt>
                     <dd>{Number.parseInt(selectedEstablishment.user_count, 10) || 0}</dd>
@@ -593,17 +592,17 @@ export default function SuperAdminMapPage() {
                 </dl>
 
                 {(selectedEstablishment.director_first_name || selectedEstablishment.director_last_name) && (
-                  <div className="sa-map-selection__contact">
+                  <div className="gsa-map-selection__contact">
                     <UserRound size={15} aria-hidden="true" />
                     <span>Direction</span>
                     <strong>{[selectedEstablishment.director_first_name, selectedEstablishment.director_last_name].filter(Boolean).join(' ')}</strong>
                   </div>
                 )}
 
-                <div className="sa-map-selection__links">
+                <div className="gsa-map-selection__links">
                   {selectedEstablishment.phone && <a href={`tel:${selectedEstablishment.phone}`} title="Appeler"><Phone size={15} aria-hidden="true" /></a>}
                   {selectedEstablishment.email && <a href={`mailto:${selectedEstablishment.email}`} title="Envoyer un e-mail"><Mail size={15} aria-hidden="true" /></a>}
-                  <span className="sa-map-selection__coordinates">
+                  <span className="gsa-map-selection__coordinates">
                     <Crosshair size={14} aria-hidden="true" />
                     {getCoordinateState(selectedEstablishment).kind === 'located'
                       ? `${Number(selectedEstablishment.latitude).toFixed(4)}, ${Number(selectedEstablishment.longitude).toFixed(4)}`
@@ -611,21 +610,21 @@ export default function SuperAdminMapPage() {
                   </span>
                 </div>
 
-                <div className="sa-map-selection__actions">
-                  <button type="button" className="sa-map-button sa-map-button--secondary" onClick={() => openCoordinateEditor(selectedEstablishment)}>
+                <div className="gsa-map-selection__actions">
+                  <button type="button" className="gsa-map-button gsa-map-button--secondary" onClick={() => openCoordinateEditor(selectedEstablishment)}>
                     <Pencil size={15} aria-hidden="true" /> Corriger la position
                   </button>
-                  <button type="button" className="sa-map-button sa-map-button--primary" onClick={() => navigate(`/admin?establishment=${encodeURIComponent(selectedEstablishment.id)}`)}>
+                  <button type="button" className="gsa-map-button gsa-map-button--primary" onClick={() => navigate(`/admin?establishment=${encodeURIComponent(selectedEstablishment.id)}`)}>
                     Gérer <ExternalLink size={15} aria-hidden="true" />
                   </button>
                 </div>
               </article>
             )}
 
-            <div className="sa-map-directory__list">
+            <div className="gsa-map-directory__list">
               {isLoading ? (
                 Array.from({ length: 6 }, (_, index) => (
-                  <div className="sa-map-list-skeleton" key={index} aria-hidden="true">
+                  <div className="gsa-map-list-skeleton" key={index} aria-hidden="true">
                     <span /><div><i /><i /></div>
                   </div>
                 ))
@@ -635,17 +634,17 @@ export default function SuperAdminMapPage() {
                 const selected = establishment.id === selectedId;
                 const coordinateState = getCoordinateState(establishment);
                 return (
-                  <article className={`sa-map-list-item${selected ? ' sa-map-list-item--selected' : ''}`} key={establishment.id}>
-                    <button type="button" className="sa-map-list-item__main" onClick={() => selectEstablishment(establishment)}>
-                      <span className={`sa-map-list-item__glyph sa-map-list-item__glyph--${isActive(establishment) ? 'active' : 'inactive'}`}>
+                  <article className={`gsa-map-list-item${selected ? ' gsa-map-list-item--selected' : ''}`} key={establishment.id}>
+                    <button type="button" className="gsa-map-list-item__main" onClick={() => selectEstablishment(establishment)}>
+                      <span className={`gsa-map-list-item__glyph gsa-map-list-item__glyph--${isActive(establishment) ? 'active' : 'inactive'}`}>
                         <Hospital size={18} aria-hidden="true" />
                       </span>
-                      <span className="sa-map-list-item__content">
-                        <span className="sa-map-list-item__name">{establishment.name}</span>
-                        <span className="sa-map-list-item__meta">
+                      <span className="gsa-map-list-item__content">
+                        <span className="gsa-map-list-item__name">{establishment.name}</span>
+                        <span className="gsa-map-list-item__meta">
                           {establishment.code || 'Sans code'} · {establishment.governorate || establishment.city || 'Localité inconnue'}
                         </span>
-                        <span className="sa-map-list-item__badges">
+                        <span className="gsa-map-list-item__badges">
                           <StatusBadge establishment={establishment} />
                           <PositionBadge establishment={establishment} compact />
                         </span>
@@ -655,7 +654,7 @@ export default function SuperAdminMapPage() {
                     {coordinateState.kind !== 'located' && (
                       <button
                         type="button"
-                        className="sa-map-list-item__locate"
+                        className="gsa-map-list-item__locate"
                         onClick={() => openCoordinateEditor(establishment)}
                         title="Ajouter les coordonnées"
                         aria-label={`Ajouter les coordonnées de ${establishment.name}`}
@@ -669,8 +668,8 @@ export default function SuperAdminMapPage() {
             </div>
           </aside>
 
-          <div className={`sa-map-canvas${pickingCoordinates ? ' sa-map-canvas--picking' : ''}`}>
-            <div className="sa-map-canvas__topbar">
+          <div className={`gsa-map-canvas${pickingCoordinates ? ' gsa-map-canvas--picking' : ''}`}>
+            <div className="gsa-map-canvas__topbar">
               <div>
                 <Navigation size={16} aria-hidden="true" />
                 <span><strong>{mappedFilteredCount}</strong> affiché{mappedFilteredCount > 1 ? 's' : ''} sur la carte</span>
@@ -681,7 +680,7 @@ export default function SuperAdminMapPage() {
             </div>
 
             {pickingCoordinates && (
-              <div className="sa-map-pick-instruction" role="status">
+              <div className="gsa-map-pick-instruction" role="status">
                 <Crosshair size={18} aria-hidden="true" />
                 <span>Cliquez sur l’emplacement exact de l’établissement.</span>
                 <button type="button" onClick={() => setPickingCoordinates(false)}>Annuler</button>
@@ -696,7 +695,7 @@ export default function SuperAdminMapPage() {
               maxBounds={TUNISIA_BOUNDS}
               maxBoundsViscosity={0.92}
               zoomControl={false}
-              className="sa-map-leaflet"
+              className="gsa-map-leaflet"
             >
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -725,29 +724,29 @@ export default function SuperAdminMapPage() {
                     eventHandlers={{ click: () => selectEstablishment(establishment) }}
                   >
                     <Tooltip direction="right" opacity={1} sticky>
-                      <div className="sa-map-tooltip">
+                      <div className="gsa-map-tooltip">
                         <strong>{establishment.name}</strong>
                         <span>{establishment.governorate || establishment.city || 'Localité non renseignée'}</span>
                         {displayPosition.approximate && <em>Position indicative · GPS à compléter</em>}
                       </div>
                     </Tooltip>
                     <Popup minWidth={245} maxWidth={290}>
-                      <div className="sa-map-popup">
-                        <div className="sa-map-popup__heading">
+                      <div className="gsa-map-popup">
+                        <div className="gsa-map-popup__heading">
                           <span><Hospital size={17} aria-hidden="true" /></span>
                           <div><strong>{establishment.name}</strong><small>{establishment.code || TYPE_LABELS[establishment.type] || 'Établissement'}</small></div>
                         </div>
                         <p><MapPin size={14} aria-hidden="true" /> {[establishment.city, establishment.governorate].filter(Boolean).join(', ') || 'Adresse à compléter'}</p>
-                        <div className="sa-map-popup__badges">
+                        <div className="gsa-map-popup__badges">
                           <StatusBadge establishment={establishment} />
                           <PositionBadge establishment={establishment} compact />
                         </div>
-                        <div className="sa-map-popup__actions">
+                        <div className="gsa-map-popup__actions">
                           <button type="button" onClick={() => openCoordinateEditor(establishment)}><Pencil size={14} aria-hidden="true" /> Position</button>
                           <button type="button" onClick={() => navigate(`/admin?establishment=${encodeURIComponent(establishment.id)}`)}>Gérer <ExternalLink size={14} aria-hidden="true" /></button>
                         </div>
                         {coordinateState.kind !== 'located' && (
-                          <small className="sa-map-popup__notice"><Info size={12} aria-hidden="true" /> Ce repère utilise le centre approximatif du gouvernorat.</small>
+                          <small className="gsa-map-popup__notice"><Info size={12} aria-hidden="true" /> Ce repère utilise le centre approximatif du gouvernorat.</small>
                         )}
                       </div>
                     </Popup>
@@ -770,10 +769,10 @@ export default function SuperAdminMapPage() {
               )}
             </MapContainer>
 
-            <div className="sa-map-legend" aria-label="Légende de la carte">
-              <span><i className="sa-map-legend__dot sa-map-legend__dot--active" /> Actif</span>
-              <span><i className="sa-map-legend__dot sa-map-legend__dot--inactive" /> Inactif</span>
-              <span><i className="sa-map-legend__dot sa-map-legend__dot--missing" /> Position indicative</span>
+            <div className="gsa-map-legend" aria-label="Légende de la carte">
+              <span><i className="gsa-map-legend__dot gsa-map-legend__dot--active" /> Actif</span>
+              <span><i className="gsa-map-legend__dot gsa-map-legend__dot--inactive" /> Inactif</span>
+              <span><i className="gsa-map-legend__dot gsa-map-legend__dot--missing" /> Position indicative</span>
             </div>
           </div>
         </section>
@@ -781,10 +780,10 @@ export default function SuperAdminMapPage() {
 
       {editorEstablishment && (
         <>
-          <div className="sa-map-coordinate-scrim" aria-hidden="true" />
-          <aside className="sa-map-coordinate-drawer" role="dialog" aria-labelledby="coordinate-editor-title">
-            <div className="sa-map-coordinate-drawer__header">
-              <div className="sa-map-coordinate-drawer__header-icon"><LocateFixed size={21} aria-hidden="true" /></div>
+          <div className="gsa-map-coordinate-scrim" aria-hidden="true" />
+          <aside className="gsa-map-coordinate-drawer" role="dialog" aria-labelledby="coordinate-editor-title">
+            <div className="gsa-map-coordinate-drawer__header">
+              <div className="gsa-map-coordinate-drawer__header-icon"><LocateFixed size={21} aria-hidden="true" /></div>
               <div>
                 <span>Référencement cartographique</span>
                 <h2 id="coordinate-editor-title">Corriger la position</h2>
@@ -794,19 +793,19 @@ export default function SuperAdminMapPage() {
               </button>
             </div>
 
-            <div className="sa-map-coordinate-drawer__establishment">
+            <div className="gsa-map-coordinate-drawer__establishment">
               <Hospital size={19} aria-hidden="true" />
               <div><strong>{editorEstablishment.name}</strong><span>{editorEstablishment.code || editorEstablishment.governorate || 'Établissement'}</span></div>
               <PositionBadge establishment={editorEstablishment} compact />
             </div>
 
-            <form onSubmit={submitCoordinates} className="sa-map-coordinate-form">
-              <div className="sa-map-coordinate-form__help">
+            <form onSubmit={submitCoordinates} className="gsa-map-coordinate-form">
+              <div className="gsa-map-coordinate-form__help">
                 <Info size={17} aria-hidden="true" />
                 <p>Renseignez les coordonnées exactes ou sélectionnez directement le bâtiment sur la carte. Le marqueur bleu peut aussi être déplacé.</p>
               </div>
 
-              <div className="sa-map-coordinate-form__fields">
+              <div className="gsa-map-coordinate-form__fields">
                 <label>
                   <span>Latitude</span>
                   <div><Navigation size={15} aria-hidden="true" /><input type="number" min="30" max="38" step="0.000001" value={coordinateForm.latitude} onChange={(event) => { setCoordinateForm((form) => ({ ...form, latitude: event.target.value })); setCoordinateError(''); }} placeholder="36.806389" autoFocus /></div>
@@ -821,7 +820,7 @@ export default function SuperAdminMapPage() {
 
               <button
                 type="button"
-                className={`sa-map-coordinate-form__picker${pickingCoordinates ? ' is-active' : ''}`}
+                className={`gsa-map-coordinate-form__picker${pickingCoordinates ? ' is-active' : ''}`}
                 onClick={() => setPickingCoordinates((value) => !value)}
               >
                 <Crosshair size={18} aria-hidden="true" />
@@ -830,22 +829,22 @@ export default function SuperAdminMapPage() {
               </button>
 
               {draftPosition && (
-                <div className="sa-map-coordinate-form__preview">
+                <div className="gsa-map-coordinate-form__preview">
                   <CheckCircle2 size={16} aria-hidden="true" />
                   <span>Position prête : <strong>{Number(draftPosition[0]).toFixed(6)}, {Number(draftPosition[1]).toFixed(6)}</strong></span>
                 </div>
               )}
 
               {coordinateError && (
-                <div className="sa-map-coordinate-form__error" role="alert">
+                <div className="gsa-map-coordinate-form__error" role="alert">
                   <AlertTriangle size={15} aria-hidden="true" /> {coordinateError}
                 </div>
               )}
 
-              <div className="sa-map-coordinate-form__footer">
+              <div className="gsa-map-coordinate-form__footer">
                 <button type="button" onClick={closeCoordinateEditor}>Annuler</button>
                 <button type="submit" disabled={updateCoordinates.isPending}>
-                  {updateCoordinates.isPending ? <LoaderCircle className="sa-map-spin" size={16} aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
+                  {updateCoordinates.isPending ? <LoaderCircle className="gsa-map-spin" size={16} aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
                   {updateCoordinates.isPending ? 'Enregistrement…' : 'Enregistrer la position'}
                 </button>
               </div>

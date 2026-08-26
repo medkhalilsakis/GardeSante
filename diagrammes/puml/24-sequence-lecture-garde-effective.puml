@@ -1,0 +1,127 @@
+' ============================================================================
+' GardeSanté — Diagramme de séquence : lire la garde effective
+'                                      (superposition à l'affichage)
+'
+' Suite de la figure 23. Explique le principe de la surcouche : la grille
+' validée et les remplacements sont deux lectures indépendantes, assemblées
+' au moment de l'affichage et jamais fusionnées en base.
+'
+' Sources vérifiées :
+'   frontend/src/pages/replacements/components/SchedulePreviewModal.jsx
+'     :179-201  deux requêtes distinctes
+'               ['schedule-preview', id]              -> scheduleBuilderAPI.getDetail
+'               ['schedule-preview-replacements', id] -> replacementsAPI.getOverlay
+'     :361-380  replacementRowsByOrigin — intersection des jours de garde de
+'               l'absent avec coversDate(replacement, iso), puis ligne ajoutée
+'               de clé `replacement:<id>:<absent>:<remplaçant>`
+'   backend/src/modules/schedules/schedule-builder.controller.js
+'     aucune occurrence du mot « replacement » : /detail renvoie la grille brute
+'   frontend/src/pages/schedules/components/SmartSpreadsheet.jsx
+'     aucune lecture de remplacement : le tableur d'édition montre la grille seule
+'   backend/src/modules/journal/journal.controller.js:925-960
+'   backend/src/modules/chef/chef-overview.controller.js:254-256, 332-335
+'     les remplacements y sont COMPTÉS, jamais substitués au titulaire
+' ============================================================================
+@startuml 24-sequence-lecture-garde-effective
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 280
+skinparam ParticipantPadding 12
+skinparam BoxPadding 14
+skinparam actor {
+  BackgroundColor #E6F4F1
+  BorderColor #0F766E
+}
+skinparam participant {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontStyle bold
+}
+skinparam database {
+  BackgroundColor #F3E8FF
+  BorderColor #7A3E9D
+}
+skinparam sequence {
+  LifeLineBorderColor #94A3B8
+  LifeLineBackgroundColor #F8FAFC
+  GroupBackgroundColor #EEF2FF
+  GroupBorderColor #1B4FCA
+  GroupHeaderFontColor #1B4FCA
+  DividerBackgroundColor #E6F4F1
+  DividerBorderColor #0F766E
+  DividerFontColor #0F766E
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Séquence — Lire la garde effective : la superposition se fait à l'affichage
+
+actor "Chef de service\nou surveillant" as U
+participant "Aperçu du\ntableau de garde" as VUE
+participant "API\nschedule-builder" as SB
+participant "API\nreplacements/overlay" as RP
+database "PostgreSQL" as DB
+
+U -> VUE : ouvre l'aperçu d'un planning en vigueur
+
+group deux lectures indépendantes
+  VUE -> SB : GET /schedule-builder/:id/detail
+  SB -> DB : SELECT schedules.metadata.spreadsheet
+  SB --> VUE : la grille validée, telle quelle
+  note right of SB
+    Ce point d'entrée ne connaît pas les
+    remplacements : il ne les lit pas et ne
+    les mentionne nulle part. La grille rendue
+    est exactement celle qu'a validée le chef.
+  end note
+
+  VUE -> RP : GET /replacements/overlay?scheduleId=
+  RP -> DB : SELECT replacements + replacement_items
+  RP --> VUE : binômes, portées et statuts
+end
+
+VUE -> VUE : pour chaque binôme, intersection des jours\nde garde de l'absent et de la portée du remplacement
+
+alt aucun jour commun
+  VUE -> VUE : le remplacement est ignoré à l'affichage
+  note right of VUE
+    Un remplacement dont la portée ne recoupe
+    aucun jour de garde de l'absent ne produit
+    rien : il n'invente pas de garde là où le
+    tableur n'en prévoyait pas.
+  end note
+else jours couverts
+  VUE -> VUE : ajoute une ligne au tableau,\nrattachée à l'agent qu'elle couvre
+  VUE -> U : le titulaire **et** son remplaçant,\nchacun sur sa ligne, sur les jours concernés
+end
+
+note over U, DB
+  **La grille validée n'est jamais réécrite.** Le remplacement n'écrase pas
+  la case du titulaire : il occupe une ligne ajoutée en regard. L'agent
+  d'origine reste donc lisible à côté de celui qui le couvre — c'est ce qui
+  permet de savoir non seulement qui assure la garde, mais qui aurait dû
+  l'assurer. Retirer le remplacement rend le tableau à son état initial,
+  sans reconstruction ni perte d'information.
+end note
+
+note over VUE, DB
+  Le tableur d'édition, lui, n'affiche aucun remplacement : il montre la
+  grille seule. La distinction est délibérée — on édite la grille validée,
+  on consulte la garde effective. Les tableaux de bord du service et de la
+  supervision, de leur côté, **dénombrent** les remplacements confirmés et
+  ceux en attente du chef, sans substituer le remplaçant au titulaire dans
+  leurs indicateurs de charge.
+end note
+
+legend right
+  Trait plein : appel. Trait pointillé : réponse.
+  Deux sources, jamais fusionnées en base : la grille validée et la couche des remplacements.
+  Dépôt et arbitrage d'un remplacement : figure 23.
+endlegend
+
+@enduml

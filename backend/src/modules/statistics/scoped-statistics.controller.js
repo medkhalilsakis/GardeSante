@@ -15,7 +15,7 @@
 
 const { query } = require('../../config/database');
 const { ROLES } = require('../../config/constants');
-const { guardEntries, dateKey } = require('../schedules/spreadsheet-reader');
+const { dutyEntries, dateKey } = require('../schedules/spreadsheet-reader');
 
 const SCOPE_PLATFORM = 'platform';
 const SCOPE_ESTABLISHMENT = 'establishment';
@@ -108,15 +108,13 @@ const getScopedStatistics = async (req, res) => {
     const byStaff = new Map();
     const byDate = new Map();
     let totalGuards = 0;
-    let restCells = 0;
 
     for (const schedule of schedules) {
       byState.set(schedule.state, (byState.get(schedule.state) || 0) + 1);
 
-      for (const entry of guardEntries(schedule)) {
-        if (entry.date < from || entry.date > to) continue;
-        if (!entry.isGuard) { restCells += 1; continue; }
-
+      // Les gardes sont lues comme le fait le tableur lui-même : cases cochées de
+      // la ligne, ou période de participation quand elle n'en porte aucune.
+      for (const entry of dutyEntries(schedule, from, to)) {
         totalGuards += 1;
 
         const deptId = entry.departmentId || schedule.department_id || 'sans-service';
@@ -141,12 +139,10 @@ const getScopedStatistics = async (req, res) => {
               roleName: entry.roleName,
               departmentName: schedule.department_name || null,
               guards: 0,
-              byCode: {},
             });
           }
           const staff = byStaff.get(entry.userId);
           staff.guards += 1;
-          staff.byCode[entry.code] = (staff.byCode[entry.code] || 0) + 1;
         }
 
         byDate.set(entry.date, (byDate.get(entry.date) || 0) + 1);
@@ -172,7 +168,6 @@ const getScopedStatistics = async (req, res) => {
         period: { from, to },
         summary: {
           totalGuards,
-          restCells,
           schedulesCount: schedules.length,
           departmentsCount: byDepartment.size,
           staffCount: byStaff.size,
@@ -198,7 +193,7 @@ const getScopedStatistics = async (req, res) => {
 };
 
 const emptySummary = () => ({
-  totalGuards: 0, restCells: 0, schedulesCount: 0, departmentsCount: 0,
+  totalGuards: 0, schedulesCount: 0, departmentsCount: 0,
   staffCount: 0, daysCovered: 0, averagePerDay: 0, averagePerStaff: 0,
   maxLoad: 0, minLoad: 0, loadGap: 0,
 });

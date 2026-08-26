@@ -1,0 +1,394 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Activité réelle de la plateforme — Super Admin
+   ──────────────────────────────────────────────────────────────────────────
+   Toutes les classes sont préfixées `.pa-` : ce fichier ne peut pas déteindre
+   sur le reste du tableau de bord.
+
+   Ce panneau alignait onze teintes inventées, une par carte, sur l'ancienne
+   couche de variables (`--color-success`, `--text-muted`, `--bg-elevated`…).
+   Il parle maintenant la langue de la plateforme : trois tons sémantiques —
+   le sceau, le service, l'alerte — plus l'encre pâle pour ce qui ne fait que
+   dénombrer. La teinte d'une carte arrive du JSX par `--pa-accent`, celle d'un
+   segment ou d'une jauge par `--pa-seg`, sa longueur par `--pa-seg-w` /
+   `--pa-fill` : aucune couleur, aucune largeur ne se calcule en JavaScript, et
+   le thème sombre reteinte l'ensemble sans une ligne de code.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.pa-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Bandeau d'en-tête ─────────────────────────────────────── */
+.pa-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 14px;
+  box-shadow: var(--gs-shadow-card);
+}
+
+.pa-head-title {
+  margin: 0;
+  font-family: var(--gs-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  color: var(--gs-ink);
+}
+
+.pa-head-sub {
+  margin: 3px 0 0;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+}
+
+.pa-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Un flux qui bat en ce moment : c'est du service, pas une réussite. */
+.pa-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--gs-duty-wash);
+  color: var(--gs-duty);
+  border: 1px solid color-mix(in srgb, var(--gs-duty) 30%, transparent);
+}
+
+.pa-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pa-pulse 1.9s ease-in-out infinite;
+}
+
+@keyframes pa-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%      { opacity: 0.35; transform: scale(0.78); }
+}
+
+.pa-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease;
+}
+
+.pa-refresh:hover:not(:disabled) {
+  color: var(--gs-seal);
+  border-color: var(--gs-seal);
+}
+
+.pa-refresh:focus-visible {
+  outline: 2px solid var(--gs-seal);
+  outline-offset: 1px;
+}
+
+.pa-refresh:disabled { opacity: 0.55; cursor: default; }
+
+.pa-spin { animation: pa-rotate 0.9s linear infinite; }
+
+@keyframes pa-rotate { to { transform: rotate(360deg); } }
+
+/* ── Sections ──────────────────────────────────────────────── */
+.pa-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--gs-ink-faint);
+}
+
+.pa-section-note {
+  margin: 0 0 10px;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+  line-height: 1.55;
+}
+
+/* ── Grille de cartes ──────────────────────────────────────── */
+.pa-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+  gap: 12px;
+}
+
+/* Une barre de répartition qui suit sa grille : l'écart vit ici, pas dans un
+   style en ligne posé sur la grille. */
+.pa-grid + .pa-panel { margin-top: 12px; }
+
+.pa-card {
+  position: relative;
+  padding: 14px 16px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color .15s ease, transform .15s ease;
+}
+
+.pa-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--pa-accent, var(--gs-seal));
+}
+
+.pa-card:hover {
+  border-color: color-mix(in srgb, var(--pa-accent, var(--gs-seal)) 45%, var(--gs-rule));
+  transform: translateY(-1px);
+}
+
+.pa-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+  color: var(--pa-accent, var(--gs-seal));
+}
+
+.pa-card-label {
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--gs-ink-faint);
+}
+
+.pa-card-value {
+  font-family: var(--gs-data);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.05;
+  color: var(--gs-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.pa-card-unit {
+  margin-left: 4px;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gs-ink-faint);
+}
+
+.pa-card-sub {
+  margin-top: 5px;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+  line-height: 1.45;
+}
+
+/* ── Répartition (barre segmentée) ─────────────────────────── */
+.pa-panel {
+  padding: 16px 18px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 12px;
+}
+
+.pa-bar {
+  display: flex;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--gs-paper-alt);
+  margin-bottom: 12px;
+}
+
+.pa-bar-seg {
+  height: 100%;
+  width: calc(var(--pa-seg-w, 0) * 1%);
+  background: var(--pa-seg, var(--gs-ink-faint));
+  transition: width .25s ease;
+}
+
+/* Le brouillon et le terminé partagent l'encre pâle — ni l'un ni l'autre n'est
+   en vigueur. Dans un badge, la forme les sépare ; dans une barre, deux segments
+   voisins de la même encre n'en feraient qu'un. Le brouillon reprend donc la
+   forme de son badge : filet en pointillé, aucun aplat — rien n'est arrêté. Le
+   terminé garde l'aplat plein : l'affaire est classée.
+
+   `outline` plutôt que `border` : un filet qui ne prend aucune place ne décale
+   pas les largeurs de la répartition. */
+.pa-bar-seg.is-open {
+  background: var(--gs-paper);
+  outline: 1px dashed var(--gs-rule-strong);
+  outline-offset: -1px;
+}
+
+.pa-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.pa-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  color: var(--gs-ink-soft);
+}
+
+.pa-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+  background: var(--pa-seg, var(--gs-ink-faint));
+}
+
+.pa-legend-dot.is-open {
+  background: transparent;
+  outline: 1px dashed var(--gs-rule-strong);
+  outline-offset: -1px;
+}
+
+.pa-legend-value {
+  font-family: var(--gs-data);
+  font-weight: 600;
+  color: var(--gs-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Couverture (lignes à jauge) ───────────────────────────── */
+.pa-rows { display: flex; flex-direction: column; gap: 12px; }
+
+.pa-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.pa-row-label {
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gs-ink-soft);
+}
+
+.pa-row-value {
+  font-family: var(--gs-data);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gs-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.pa-row-value span { font-weight: 400; color: var(--gs-ink-faint); }
+
+.pa-gauge {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--gs-paper-alt);
+  overflow: hidden;
+}
+
+.pa-gauge-fill {
+  height: 100%;
+  width: calc(var(--pa-fill, 0) * 1%);
+  border-radius: 999px;
+  background: var(--pa-seg, var(--gs-seal));
+  transition: width .25s ease;
+}
+
+/* ── Mentions en pied de bandeau ───────────────────────────── */
+/* Un plafond de lecture atteint attend une décision : c'est de l'ambre. */
+.pa-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 14px;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--gs-alert);
+  background: var(--gs-alert-wash);
+  border: 1px solid color-mix(in srgb, var(--gs-alert) 28%, transparent);
+  border-radius: 10px;
+}
+
+/* L'icône ne doit ni s'étirer ni glisser sous la première ligne de texte. */
+.pa-warn svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+/* Une plateforme vierge ne réclame rien : elle n'a pas encore commencé. Même
+   forme que le brouillon — pointillé, aucun aplat — plutôt que l'ambre, qui
+   annoncerait un arbitrage qui n'existe pas. */
+.pa-warn.is-note {
+  color: var(--gs-ink-soft);
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--gs-rule-strong);
+}
+
+/* ── États vides / chargement / erreur ─────────────────────── */
+.pa-state {
+  padding: 44px 20px;
+  text-align: center;
+  font-family: var(--gs-body);
+  font-size: 12px;
+  color: var(--gs-ink-faint);
+  background: var(--gs-paper);
+  border: 1px dashed var(--gs-rule-strong);
+  border-radius: 12px;
+}
+
+.pa-empty-hint {
+  margin: 8px 0 0;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .pa-grid { grid-template-columns: repeat(auto-fit, minmax(146px, 1fr)); }
+  .pa-card-value { font-size: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pa-live-dot, .pa-spin { animation: none; }
+  .pa-card:hover { transform: none; }
+}

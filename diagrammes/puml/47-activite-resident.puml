@@ -1,0 +1,143 @@
+' ============================================================================
+' GardeSanté — Diagramme d'activités : Résident
+'
+' Le rôle le plus faible qui garde un accès. Huit permissions, toutes en
+' lecture sauf deux : pointer sur une garde et déclarer sa propre absence.
+' L'intérêt de cette figure, pour le rapport, est justement là : elle montre
+' que la plus petite habilitation de la plateforme atteint tout de même
+' l'écriture la moins contrôlée.
+'
+' Sources vérifiées :
+'   backend/src/db/migrations/012_role_autre.sql
+'     8 permissions : departments.read, schedules.read, shifts.read/confirm,
+'     absences.read/create, replacements.read, stats.read.
+'     Il ne détient PAS replacements.create — contrairement au médecin senior —
+'     ni remarks.read, ni remarks.create.
+'     ÉCART : le commentaire de cette migration le dit « sans acces login » ;
+'     rien dans auth.controller.js ne le refuse à la connexion.
+'   backend/src/modules/shifts/shifts.routes.js:13-14
+'     shifts.confirm est exposée : POST /:id/confirm et POST /:id/absent
+'   backend/src/modules/shifts/shifts.controller.js:83-98
+'     ÉCART GRAVE : UPDATE shifts … WHERE id = $1, sans borne d'établissement
+'     et sans contrôle d'appartenance de la garde. Aucun appel au journal dans
+'     tout le module. Le résident est le plus petit rôle qui y accède.
+'   backend/src/modules/absences/absences.controller.js:14,141
+'     SELF_ONLY_ROLES : il ne déclare une absence que pour lui-même
+'   backend/src/modules/replacements/replacements.routes.js
+'     la création exige replacements.create : elle lui est refusée. Il lit les
+'     remplacements, il n'en demande pas.
+'   backend/src/modules/journal/journal.controller.js:43-47
+'     WRITE_ROLES ne l'inclut pas
+'   backend/src/modules/notes/notes.controller.js:42-52
+'     resolveScope renvoie null : il ne publie pas de note
+'   backend/src/modules/schedule-builder.routes.js:16
+'     router.use(authenticate) SEUL — voir la figure 48 : la conséquence de
+'     cette absence de garde vaut pour lui aussi
+' ============================================================================
+@startuml 47-activite-resident
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontColor #0F172A
+  DiamondBackgroundColor #EEF2FF
+  DiamondBorderColor #1B4FCA
+  DiamondFontColor #1B4FCA
+  StartColor #0F766E
+  EndColor #B91C1C
+  BarColor #7A3E9D
+}
+skinparam partition {
+  BackgroundColor #F8FAFC
+  BorderColor #94A3B8
+  FontColor #475569
+  FontStyle bold
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Activités — Résident : huit permissions, deux écritures
+
+start
+
+#FEF3C7:s'authentifier;
+
+partition "Lire" {
+  fork
+    :consulter le planning\nde son service;
+  fork again
+    :consulter ses gardes;
+  fork again
+    :consulter les remplacements\nde son service;
+  fork again
+    :consulter les statistiques\nqui lui sont ouvertes;
+  end fork
+}
+
+partition "Écrire — deux gestes seulement" {
+  repeat
+    fork
+      :pointer sur une garde;
+      if (présent ?) then (oui)
+        #F3E8FF:la garde passe\nà « confirmée »;
+      else (non)
+        #F3E8FF:la garde passe\nà « absent »;
+      endif
+
+    fork again
+      :déclarer une absence\npour lui-même;
+      #F3E8FF:absence écrite d'emblée\nà l'état accordé;
+    end fork
+  repeat while (il reste des gardes à son nom) is (oui)
+  -> non;
+}
+
+partition "Ce qui lui est fermé" {
+  fork
+    #FEE2E2:demander un remplacement;
+  fork again
+    #FEE2E2:publier une note,\nsignaler un incident;
+  fork again
+    #FEE2E2:déclarer l'absence\nd'un collègue;
+  fork again
+    #FEE2E2:toute action sur\nle planning;
+  end fork
+}
+
+:consulter ses notifications;
+:lire son propre historique;
+stop
+
+floating note left
+  **Il lit les remplacements sans pouvoir en demander.** C'est la seule
+  différence de fond avec le médecin senior : celui-ci détient
+  replacements.create et peut ouvrir une demande sur une garde absentée, le
+  résident non. Il voit donc se décider, sur son service, une couverture qu'il ne
+  peut pas solliciter — la demande passe nécessairement par un échelon
+  au-dessus.
+  ====
+  **La plus petite habilitation atteint l'écriture la moins gardée.** Il détient
+  shifts.confirm, et les deux routes qui la consomment agissent sur
+  l'identifiant reçu dans l'adresse, sans borne d'établissement et sans vérifier
+  que la garde est la sienne. Aucune des deux n'écrit au journal d'activité.
+  Autrement dit : le rôle conçu pour ne rien pouvoir est celui par lequel la
+  faille se démontre le plus simplement. Le rapport la relève parmi les écarts.
+  ====
+  **Sa propre absence lui suffit à libérer une garde.** L'absence est écrite
+  immédiatement accordée et fait basculer la garde à « absent ». Aucun échelon
+  n'arbitre, aucune trace ne part au journal : c'est au service de constater le
+  trou et d'y répondre par un remplacement.
+end note
+
+legend right
+  Fond teinté violet : écriture en base. Fond teinté rouge : refus opposé par le logiciel.
+  Fond ambre : incohérence entre ce que la base déclare et ce que le code applique.
+  Aucun fond vert : aucune de ses actions n'écrit au journal d'activité.
+endlegend
+
+@enduml

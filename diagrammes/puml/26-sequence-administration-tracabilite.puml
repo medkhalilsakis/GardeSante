@@ -1,0 +1,169 @@
+' ============================================================================
+' GardeSanté — Diagramme de séquence : administration et traçabilité
+'
+' Deux mouvements complémentaires : un acte d'administration (le Super Admin
+' crée un hôpital et son directeur) et la trace que tout acte laisse derrière
+' lui, quel qu'en soit l'auteur.
+'
+' Sources vérifiées :
+'   backend/src/modules/history/history.routes.js
+'     cinq routes, TOUTES en GET : /mine, /categories, /all, /users, /users/:id
+'     aucune route d'écriture, de modification ni de suppression
+'   backend/src/modules/history/history.controller.js
+'     :9        OVERSIGHT_ROLES = directeur | administrateur d'hôpital
+'     :11-17    resolveHistoryScope — super admin : plateforme entière ;
+'               direction : son établissement ; tout autre rôle : null ⇒ 403
+'     :26-47    log() — try/catch qui avale l'erreur :
+'               « Ne jamais faire planter l'API à cause d'un log raté »
+'     :115-121  la portée s'applique sur `u.establishment_id`, celui de
+'               l'AUTEUR : `activity_logs` n'a pas de colonne d'établissement
+'   Vérifié par balayage du backend :
+'     aucun `UPDATE activity_logs`, aucun `DELETE FROM activity_logs`
+'     aucun `INSERT INTO audit_logs` — cette table n'est jamais alimentée
+'     61 appels à log() répartis sur plus de 20 modules
+' ============================================================================
+@startuml 26-sequence-administration-tracabilite
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 280
+skinparam ParticipantPadding 12
+skinparam BoxPadding 14
+skinparam actor {
+  BackgroundColor #E6F4F1
+  BorderColor #0F766E
+}
+skinparam participant {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontStyle bold
+}
+skinparam database {
+  BackgroundColor #F3E8FF
+  BorderColor #7A3E9D
+}
+skinparam sequence {
+  LifeLineBorderColor #94A3B8
+  LifeLineBackgroundColor #F8FAFC
+  GroupBackgroundColor #EEF2FF
+  GroupBorderColor #1B4FCA
+  GroupHeaderFontColor #1B4FCA
+  DividerBackgroundColor #E6F4F1
+  DividerBorderColor #0F766E
+  DividerFontColor #0F766E
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Séquence — Administration de la plateforme et traçabilité des actes
+
+actor "Super Admin" as SA
+actor "Directeur\nou administrateur" as DIR
+actor "Tout autre acteur" as ANY
+participant "API\nadmin / users" as ADM
+participant "Journal\nd'activité" as J
+database "PostgreSQL" as DB
+
+== Un acte d'administration ==
+
+SA -> ADM : crée un hôpital, puis son compte directeur
+ADM -> ADM : contrôle d'habilitation
+
+alt l'acteur n'est pas Super Admin
+  ADM --> SA : 403 refus
+  note right of ADM
+    Créer un établissement relève de la seule
+    plateforme. Le directeur administre **dans**
+    son hôpital, il n'en crée pas d'autre.
+  end note
+else Super Admin
+  ADM -> DB : INSERT establishments
+  ADM -> DB : INSERT users\nmot de passe haché, rôle directeur
+  ADM -> J : consigne l'acte
+  J -> DB : INSERT activity_logs\nauteur, action, cible, IP, agent
+  ADM --> SA : 201 hôpital et directeur créés
+end
+
+note right of SA
+  Le compte Super Admin appartient à
+  l'établissement technique de la plateforme,
+  et non à un hôpital. Toute borne posée sur
+  son établissement le priverait donc d'accès
+  à des données qu'il doit précisément voir.
+end note
+
+== La trace, pour tout acte et tout acteur ==
+
+ANY -> ADM : n'importe quelle action métier\nplanning, absence, note, remplacement, prêt
+ADM -> DB : écrit l'effet de l'action
+ADM -> J : consigne l'acte
+
+group écriture du journal
+  J -> DB : INSERT activity_logs
+  alt l'écriture du journal échoue
+    J -> J : avertissement en console, rien de plus
+    note right of J
+      « Ne jamais faire planter l'API à cause
+      d'un log raté. » Le choix est assumé :
+      une action réussie n'est pas annulée
+      parce que sa trace n'a pas pu s'écrire.
+      La contrepartie est que le journal n'est
+      pas garanti exhaustif.
+    end note
+  end
+end
+
+ADM --> ANY : réponse de l'action
+
+note over ANY, DB
+  Plus de soixante points d'écriture répartis dans une vingtaine de modules
+  alimentent le même journal : authentification, plannings, absences et congés,
+  notes de service, remplacements, prêts de personnel, imports, exports,
+  référentiels, archivage de comptes.
+end note
+
+== Consultation du journal ==
+
+ANY -> J : GET /history/mine
+J -> DB : SELECT limité à ses propres lignes
+DB --> ANY : son historique personnel, en lecture seule
+
+DIR -> J : GET /history/all
+J -> J : résolution de la portée
+
+alt Super Admin
+  J -> DB : SELECT sans borne d'établissement
+  note right of J
+    Portée plateforme : la totalité des hôpitaux.
+  end note
+else directeur ou administrateur d'hôpital
+  J -> DB : SELECT borné sur l'établissement\nde l'**auteur** de chaque ligne
+  note right of J
+    Le journal ne porte pas de colonne
+    d'établissement : la portée se déduit du
+    compte qui a agi. C'est la seule façon de
+    rattacher une ligne à un hôpital.
+  end note
+else tout autre rôle
+  J --> DIR : 403 « réservé au Super Admin\net à la direction de l'établissement »
+end
+
+note over ANY, DB
+  **Le journal est immuable par construction.** Les cinq routes exposées sont
+  toutes en lecture, et aucune modification ni suppression ne porte sur la
+  table dans l'ensemble du serveur : personne, pas même le Super Admin, ne
+  peut effacer ou réécrire une ligne d'historique. Ce qui a été consigné
+  le reste.
+end note
+
+legend right
+  Trait plein : appel. Trait pointillé : réponse.
+  Le journal enregistre l'auteur, l'action, la cible, l'adresse IP et le navigateur.
+  Il consigne l'acte, non l'état avant / après : le différentiel des valeurs modifiées n'est pas conservé.
+endlegend
+
+@enduml

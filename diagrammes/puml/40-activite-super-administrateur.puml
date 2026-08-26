@@ -1,0 +1,168 @@
+' ============================================================================
+' GardeSanté — Diagramme d'activités : Super Administrateur
+'
+' Le Super Admin ne planifie pas : il met des hôpitaux en état de planifier,
+' puis veille sur la plateforme. Son activité se lit en deux temps — une mise
+' en service, qui a un début et une fin, et une veille, qui n'en a pas.
+'
+' Sources vérifiées :
+'   backend/src/modules/admin/admin.routes.js
+'     :29-30   activation / désactivation en cascade d'un établissement
+'     :33-34   mot de passe et statut du compte directeur
+'     :37-41   jours fériés, dont l'amorçage du calendrier tunisien
+'     :46-58   référentiels : aperçu, matrice des permissions, amorçage,
+'              types de garde, types d'absence
+'     :63-65   conformité : liste, détail, réparation
+'     :69-71   annuaire inter-hôpitaux et ses facettes
+'     :22-26   statistiques plateforme, utilisateurs connectés, activité
+'   backend/src/modules/establishments/establishments.controller.js
+'              creation, géolocalisation
+'   backend/src/modules/profile/profile.controller.js
+'              arbitrage des demandes de modification de profil
+'   backend/src/modules/notes/notes.controller.js
+'              resolveScope ⇒ portée 'platform_directors'
+'   backend/src/modules/history/history.controller.js:11-17
+'              isSuperAdmin ⇒ portée plateforme, sans borne d'établissement
+'   backend/src/db/migrations/012_role_autre.sql
+'              le Super Admin détient les 39 permissions déclarées
+' ============================================================================
+@startuml 40-activite-super-administrateur
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontColor #0F172A
+  DiamondBackgroundColor #EEF2FF
+  DiamondBorderColor #1B4FCA
+  DiamondFontColor #1B4FCA
+  StartColor #0F766E
+  EndColor #B91C1C
+  BarColor #7A3E9D
+}
+skinparam partition {
+  BackgroundColor #F8FAFC
+  BorderColor #94A3B8
+  FontColor #475569
+  FontStyle bold
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Activités — Super Administrateur : mettre un hôpital en service, puis veiller
+
+start
+
+:s'authentifier;
+note right
+  Le compte appartient à l'établissement
+  technique de la plateforme. Son périmètre
+  n'est donc borné par aucun hôpital — c'est
+  ce qui lui permet de tous les voir.
+end note
+
+partition "Mise en service d'un hôpital" {
+  :créer l'établissement\nnom, type, gouvernorat;
+  :le situer sur la carte\nlatitude et longitude;
+
+  :amorcer les référentiels;
+  note right
+    Rôles, permissions, types de garde et types
+    d'absence sont créés **par établissement**,
+    non partagés. Un hôpital non amorcé n'a pas
+    de rôle à attribuer : aucun compte n'y est
+    créable.
+  end note
+
+  :créer le compte directeur\nmot de passe initial;
+
+  if (le calendrier des jours fériés\nest-il alimenté ?) then (non)
+    :amorcer les jours fériés tunisiens;
+  else (oui)
+  endif
+
+  #E6F4F1:consigner chaque acte\nau journal d'activité;
+  :remettre l'hôpital à son directeur;
+  note right
+    La suite ne lui appartient plus : services,
+    comptes, chefs et plannings relèvent du
+    directeur. Le Super Admin garde la main sur
+    l'existence de l'hôpital, pas sur sa marche.
+  end note
+}
+
+partition "Veille sur la plateforme" {
+  repeat
+    fork
+      :contrôler la conformité\ndes établissements;
+      if (un écart est-il signalé ?) then (oui)
+        :en consulter le détail;
+        :déclencher la réparation;
+        #E6F4F1:consigner la réparation;
+      else (non)
+      endif
+    fork again
+      :relever les demandes de\nmodification de profil;
+      if (la demande est-elle fondée ?) then (oui)
+        :accepter — le profil est mis à jour;
+      else (non)
+        #FEE2E2:refuser avec motif;
+      endif
+      #E6F4F1:consigner l'arbitrage;
+    fork again
+      :suivre l'activité de la plateforme\nstatistiques, connectés, gouvernorats;
+      :consulter l'annuaire inter-hôpitaux;
+      :lire le journal, tous hôpitaux confondus;
+      note right
+        Portée plateforme : aucune borne
+        d'établissement n'est posée sur la
+        lecture du journal.
+      end note
+    fork again
+      :publier une note aux directeurs;
+      if (des directeurs n'ont pas lu ?) then (oui)
+        :relancer les lecteurs manquants;
+      else (non)
+      endif
+    end fork
+
+    if (un hôpital doit-il être suspendu ?) then (oui)
+      :désactiver l'établissement\nen cascade;
+      note right
+        La désactivation en cascade coupe
+        l'accès à tous les comptes de
+        l'hôpital : plus aucune connexion
+        n'y aboutit.
+      end note
+    else (non)
+      if (un directeur est-il bloqué ?) then (oui)
+        :réinitialiser son mot de passe\nou suspendre son compte;
+      else (non)
+      endif
+    endif
+  repeat while (la plateforme est en service) is (oui)
+  -> non;
+}
+
+stop
+
+floating note left
+  **Ce que le Super Administrateur ne fait pas.** Il ne compose aucun tableur,
+  ne valide aucune garde, n'arbitre aucun remplacement et n'accorde aucun congé
+  dans un hôpital donné : ses 39 permissions le lui permettraient, mais les
+  écrans et les contrôles de service le renvoient toujours vers le rôle
+  compétent. Il ne peut pas non plus effacer une ligne de journal : la table
+  n'est exposée qu'en lecture, pour lui comme pour tout le monde.
+end note
+
+legend right
+  Fond teinté vert : écriture au journal d'activité, immuable.
+  Fond teinté rouge : refus ou interruption.
+  Les quatre branches de la veille sont concurrentes et sans ordre imposé.
+endlegend
+
+@enduml

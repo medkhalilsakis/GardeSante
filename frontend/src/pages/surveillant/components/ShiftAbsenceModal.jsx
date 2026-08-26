@@ -5,12 +5,22 @@
  * à l'état `en_cours` et toute date hors période : ce formulaire ne propose donc
  * que les gardes courantes et borne le sélecteur de date sur la période retenue.
  * Les types marqués « congé » sont écartés côté serveur — on n'en propose aucun.
+ *
+ * Refonte (phase 3) : la modale garde la coquille commune de la plateforme
+ * (`.modal`, `.form-group`, `.form-control`) — la reprendre pour elle seule la
+ * désaccorderait des trente autres modales, qui suivront par lots. Seuls passent
+ * au vocabulaire du registre : les dates (plus d'ISO brut dans les options), le
+ * rappel de période sous le champ date, et la consigne quand aucune garde n'est
+ * courante — un vide doit dire quoi faire, pas seulement qu'il est vide.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { absencesShiftAPI, absencesAPI, replacementsAPI } from '../../../api';
 import JustificationChoice from '../../../components/common/JustificationChoice';
+import { frenchRange } from '../../../utils/frenchDates';
+import './service-panels.css';
 
 /** Date du jour en 'YYYY-MM-DD' assemblée depuis les parties locales (jamais toISOString). */
 const todayKey = () => {
@@ -125,11 +135,14 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
         <div className="modal-header">
           <div>
             <h2 className="modal-title">Signaler une absence ou un retard</h2>
-            <p style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
-              Gardes courantes uniquement — le journal de service en garde la trace
+            <p className="gsv-modal-sub">
+              Gardes courantes uniquement — le journal de service en garde la trace,
+              et une alerte de service en découle.
             </p>
           </div>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}>✕</button>
+          <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Fermer">
+            <X size={16} strokeWidth={2.2} />
+          </button>
         </div>
 
         <form onSubmit={submit}>
@@ -144,13 +157,15 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
                 <option value="">{loadingSched ? 'Chargement…' : 'Choisir une garde courante'}</option>
                 {schedules.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} — {s.department_name} ({s.start_date} → {s.end_date})
+                    {s.name} — {s.department_name} ({frenchRange(s.start_date, s.end_date)})
                   </option>
                 ))}
               </select>
               {!loadingSched && schedules.length === 0 && (
-                <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                   Aucune garde courante disponible pour un signalement.
+                <p className="gsv-modal-hint is-alert">
+                  Aucune garde n'est en cours : un signalement se rattache toujours à un
+                  planning validé dont la période couvre aujourd'hui. Signalez l'absence
+                  depuis « Absences » si elle porte sur une autre période.
                 </p>
               )}
             </div>
@@ -199,6 +214,13 @@ export default function ShiftAbsenceModal({ onClose, onReported }) {
                   onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
                   required
                 />
+                {/* Les bornes du champ sont celles de la garde : les écrire évite
+                    de laisser l'utilisateur buter sur un refus du serveur. */}
+                {selected ? (
+                  <span className="gsv-modal-hint">
+                    Dans la période <b>{frenchRange(selected.start_date, selected.end_date)}</b>
+                  </span>
+                ) : null}
               </div>
             </div>
 

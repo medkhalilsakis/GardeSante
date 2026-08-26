@@ -1,0 +1,16 @@
+.gshifts-page {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.gshifts-calendar {
+  min-width: 0;
+  padding: 18px;
+  overflow: hidden;
+}
+
+@media (max-width: 720px) {
+  .gshifts-page { gap: 12px; }
+  .gshifts-calendar { padding: 12px; overflow-x: auto; }
+}

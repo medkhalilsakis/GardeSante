@@ -1,0 +1,499 @@
+/**
+ * VisualCalendar — le tableau de garde lu journée par journée
+ * ═══════════════════════════════════════════════════════════
+ *
+ * Le tableur lit le planning par ligne : un agent, sa période, ses cases. Ce
+ * calendrier le lit par colonne : une journée, qui la tient. Les deux montrent
+ * les mêmes gardes ; la mise en forme sert la question propre à chaque lecture,
+ * et ici la question est « cette journée est-elle tenue, et par qui ».
+ *
+ * D'où les trois seuls signaux de couleur de cet écran :
+ *   • la teinte d'identité de l'agent, celle de son avatar, qui distingue sans
+ *     rien qualifier — elle est choisie dans le JSX et arrive ici en `--vc-tone` ;
+ *   • `--gs-duty` sur le compte de la journée — « de service », rien d'autre ;
+ *   • `--gs-alert` sur une journée découverte, ce que ce jeton désigne exactement.
+ * Le week-end et la garde à domicile sont des catégories, pas des états : ils se
+ * marquent par la trame et le trait, jamais par une teinte sémantique.
+ */
+
+.vc {
+  border: 1px solid var(--gs-rule);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--gs-paper);
+  font-family: var(--gs-body);
+  color: var(--gs-ink);
+}
+
+/* ══ Barre d'outils ═══════════════════════════════════════════════════════ */
+
+.vc__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: var(--gs-paper-alt);
+  border-bottom: 1px solid var(--gs-rule);
+}
+
+.vc__id {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.vc__name {
+  font-family: var(--gs-display);
+  font-size: 15.5px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--gs-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc__sub {
+  font-size: 11.5px;
+  color: var(--gs-ink-faint);
+}
+
+.vc__nav {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 9px;
+  background: var(--gs-paper);
+}
+
+.vc__nav button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--gs-ink-soft);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vc__nav button:hover { background: var(--gs-paper-alt); color: var(--gs-ink); }
+
+.vc__seg {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 9px;
+  background: var(--gs-paper);
+}
+
+.vc__seg button {
+  padding: 5px 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--gs-ink-soft);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vc__seg button[aria-pressed='true'] {
+  background: var(--gs-seal);
+  color: var(--gs-on-tone);
+}
+
+/* Le mode d'écriture, écrit une fois : ce que le glisser-déposer fait ici, et
+   ce qu'il ne fait pas. Un brouillon se réorganise librement ; un planning
+   envoyé se corrige par un remplacement, jamais par une réécriture. */
+.vc__mode {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--gs-rule);
+  background: var(--gs-paper);
+  font-size: 11.5px;
+  color: var(--gs-ink-faint);
+}
+
+.vc__mode strong {
+  color: var(--gs-ink-soft);
+  font-weight: 700;
+}
+
+.vc__mode.is-locked { background: color-mix(in srgb, var(--gs-alert) 5%, var(--gs-paper)); }
+.vc__mode.is-locked strong { color: var(--gs-alert-strong); }
+
+/* ══ Corps : personnel + grille ══════════════════════════════════════════ */
+
+.vc__body {
+  display: flex;
+  align-items: stretch;
+  min-height: 420px;
+}
+
+.vc__aside {
+  flex: 0 0 auto;
+  width: 226px;
+  display: flex;
+  flex-direction: column;
+  background: var(--gs-paper-alt);
+  border-right: 1px solid var(--gs-rule);
+  overflow: hidden;
+}
+
+.vc__aside.is-collapsed { width: 44px; }
+
+.vc__aside-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px;
+  border: 0;
+  border-bottom: 1px solid var(--gs-rule);
+  background: transparent;
+  color: var(--gs-ink-faint);
+  cursor: pointer;
+}
+
+.vc__aside-toggle:hover { color: var(--gs-ink); }
+
+.vc__aside-head {
+  padding: 10px 12px 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.vc__search {
+  margin: 0 10px 8px;
+  padding: 5px 8px;
+  width: calc(100% - 20px);
+  box-sizing: border-box;
+  border: 1px solid var(--gs-rule);
+  border-radius: 7px;
+  background: var(--gs-paper);
+  color: var(--gs-ink);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.vc__search:focus { outline: 2px solid var(--gs-seal); outline-offset: 1px; }
+
+.vc__staff {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 0 7px 8px;
+}
+
+.vc__member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+  padding: 6px 7px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--gs-paper);
+  text-align: left;
+  user-select: none;
+}
+
+.vc__member.is-draggable { cursor: grab; }
+.vc__member.is-draggable:hover { border-color: var(--gs-seal); background: var(--gs-seal-wash); }
+
+.vc__initials {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--vc-tone, var(--gs-seal));
+  color: var(--gs-on-tone);
+  font-family: var(--gs-data);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+
+.vc__member-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.vc__member-name {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc__member-meta {
+  display: block;
+  font-size: 10px;
+  color: var(--gs-ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc__scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+}
+
+.vc__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 640px;
+}
+
+/* ── En-tête des colonnes ── */
+
+.vc__dow {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 6px 7px;
+  text-align: center;
+  background: var(--gs-paper-alt);
+  border-bottom: 1px solid var(--gs-rule-strong);
+  border-right: 1px solid var(--gs-rule);
+}
+
+.vc__dow:nth-child(7n) { border-right: 0; }
+
+.vc__dow-name {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.vc__dow-num {
+  font-family: var(--gs-data);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--gs-ink);
+}
+
+.vc__dow.is-today .vc__dow-num { color: var(--gs-seal); }
+.vc__dow.is-today { box-shadow: inset 0 -2px 0 0 var(--gs-seal); }
+
+/* ── Cellules ── */
+
+.vc__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  min-height: 116px;
+  background: var(--gs-paper);
+  border-right: 1px solid var(--gs-rule);
+  border-bottom: 1px solid var(--gs-rule);
+}
+
+.vc__cell:nth-child(7n) { border-right: 0; }
+
+.vc.is-week .vc__cell { min-height: 300px; }
+
+/* Le week-end se marque par la trame du papier, pas par une teinte : c'est une
+   catégorie de calendrier, elle ne dit rien de l'état de la journée. */
+.vc__cell.is-weekend { background: var(--gs-paper-alt); }
+.vc__cell.is-outside { background: var(--gs-paper-alt); opacity: .55; }
+.vc__cell.is-today { box-shadow: inset 2px 0 0 0 var(--gs-seal); }
+
+.vc__cell.is-drop {
+  background: var(--gs-seal-wash);
+  box-shadow: inset 0 0 0 2px var(--gs-seal);
+}
+
+.vc__cell-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.vc__cell-day {
+  font-family: var(--gs-data);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--gs-ink-soft);
+}
+
+.vc__cell.is-today .vc__cell-day { color: var(--gs-seal); }
+
+.vc__count {
+  margin-left: auto;
+  font-family: var(--gs-data);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--gs-duty);
+  white-space: nowrap;
+}
+
+/* Une journée sans personne n'est pas un vide décoratif : c'est le seul défaut
+   qu'un calendrier de garde doit crier. */
+.vc__count.is-empty { color: var(--gs-alert-strong); }
+.vc__cell.is-empty:not(.is-outside):not(.is-drop) { background: var(--gs-alert-wash); }
+
+.vc__hint {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 2px;
+  font-size: 10.5px;
+  text-align: center;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Carte d'une garde ── */
+
+.vc__shift {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--gs-rule);
+  border-left: 3px solid var(--vc-tone, var(--gs-seal));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--vc-tone, var(--gs-seal)) 9%, var(--gs-paper));
+  user-select: none;
+}
+
+.vc__shift.is-draggable { cursor: grab; }
+.vc__shift.is-draggable:hover { box-shadow: var(--gs-shadow-card); }
+.vc__shift.is-dragging { opacity: .4; }
+
+/* Garde à domicile : le trait s'interrompt, comme la présence. */
+.vc__shift.is-at-home { border-left-style: dashed; }
+
+.vc__shift-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.vc__shift-name {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gs-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc__shift-meta {
+  display: block;
+  font-family: var(--gs-data);
+  font-size: 9.5px;
+  color: var(--gs-ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc__dot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--vc-tone, var(--gs-seal));
+  color: var(--gs-on-tone);
+  font-family: var(--gs-data);
+  font-size: 8.5px;
+  font-weight: 800;
+}
+
+.vc__drop-shift {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  cursor: pointer;
+}
+
+.vc__drop-shift:hover { background: var(--gs-alert-wash); color: var(--gs-alert-strong); }
+
+/* ── Attente d'enregistrement ── */
+
+.vc__busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
+  font-size: 11.5px;
+  color: var(--gs-ink-soft);
+}
+
+.vc__spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--gs-rule-strong);
+  border-top-color: var(--gs-seal);
+  border-radius: 50%;
+  animation: spin .9s linear infinite;
+}
+
+.vc__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 280px;
+  color: var(--gs-ink-faint);
+  font-size: 12.5px;
+}
+
+.vc__loading .vc__spinner { width: 28px; height: 28px; border-width: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vc__spinner { animation: none; }
+}
+
+@media (max-width: 860px) {
+  .vc__body { flex-direction: column; }
+  .vc__aside,
+  .vc__aside.is-collapsed {
+    width: auto;
+    max-height: 190px;
+    border-right: 0;
+    border-bottom: 1px solid var(--gs-rule);
+  }
+  .vc.is-week .vc__cell { min-height: 190px; }
+}

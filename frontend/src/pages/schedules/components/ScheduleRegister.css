@@ -1,0 +1,316 @@
+/**
+ * Le registre des plannings — habillage
+ * ═════════════════════════════════════
+ *
+ * Fichier neuf, classes préfixées `.gs-reg-`. C'est la liste par laquelle on
+ * entre dans un tableur : elle doit se balayer, pas se lire.
+ *
+ * Ce qu'elle remplace : des lignes non sémantiques (`<div onClick>`) avec deux
+ * zones cliquables distinctes et aucun accès au clavier, une pastille d'état
+ * colorée par ligne — dix pastilles ne hiérarchisent plus rien —, un émoji
+ * devant chaque information et des dates au format `2026-08-01`.
+ *
+ * Ici : un filet d'état à gauche pour le balayage, le nom en titre, les faits
+ * sur une ligne en français, l'état en un mot. Toute la ligne est un bouton
+ * (motif du lien étiré) et les outils passent au-dessus.
+ *
+ * La correspondance état → ton est la même que celle de l'en-tête du tableur
+ * (`STATUS_META` dans SmartSpreadsheet) : un planning « en vigueur » a la même
+ * couleur ici et là.
+ */
+
+.gs-reg-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.gs-reg-head h3 {
+  margin: 0;
+  font-family: var(--gs-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gs-reg-head p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Le filtre par état ────────────────────────────────────────────────
+   Des puces basculantes, pas des onglets : plusieurs états peuvent être
+   pertinents et l'utilisateur revient souvent à « Tous ». Le décompte fait
+   partie de l'étiquette — c'est ce qui décide si l'on clique. */
+
+.gs-reg-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.gs-reg-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+
+.gs-reg-filter:hover { color: var(--gs-ink); }
+
+.gs-reg-filter[aria-pressed='true'] {
+  color: var(--reg-tone, var(--gs-seal));
+  border-color: var(--reg-tone, var(--gs-seal));
+  background: color-mix(in srgb, var(--reg-tone, var(--gs-seal)) 9%, transparent);
+}
+
+.gs-reg-filter > b {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  opacity: .75;
+}
+
+/* ── Les lignes du registre ───────────────────────────────────────────── */
+
+.gs-reg-list { display: flex; flex-direction: column; gap: 7px; }
+
+.gs-reg-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 14px 12px 17px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 12px;
+  background: var(--gs-paper);
+  /* Le menu Actions doit pouvoir sortir de la ligne sans être découpé. Les
+     textes gardent leur propre ellipsis via `.gs-reg-name`. */
+  overflow: visible;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.gs-reg-row:hover {
+  border-color: var(--gs-rule-strong);
+  box-shadow: var(--gs-shadow-card);
+}
+
+/* Le filet d'état — la seule couleur de la ligne, et le repère qui permet de
+   retrouver un brouillon parmi dix plannings sans lire un mot. Posé en absolu
+   pour tenir toute la hauteur, y compris quand la ligne se replie. */
+.gs-reg-rail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--reg-tone, var(--gs-ink-faint));
+}
+
+/* Le lien étiré : le bouton porte le nom, son `::after` couvre la ligne
+   entière. Cliquer n'importe où ouvre le planning, et le clavier atteint la
+   même cible — ce qui n'était pas le cas des deux `<div onClick>` d'avant. */
+.gs-reg-open {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gs-reg-open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+}
+
+.gs-reg-open:focus-visible { outline: 0; }
+
+.gs-reg-open:focus-visible::after {
+  outline: 2px solid var(--gs-seal);
+  outline-offset: -2px;
+}
+
+.gs-reg-name {
+  display: block;
+  font-family: var(--gs-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gs-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gs-reg-facts {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+}
+
+.gs-reg-facts > span + span::before {
+  content: '·';
+  margin-right: 7px;
+}
+
+.gs-reg-facts .gs-num { font-size: 10.5px; }
+
+.gs-reg-status {
+  flex-shrink: 0;
+  font-family: var(--gs-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--reg-tone, var(--gs-ink-faint));
+}
+
+/* Au-dessus du lien étiré, sinon le menu serait inatteignable. */
+.gs-reg-tools { position: relative; z-index: 2; flex-shrink: 0; }
+
+.gs-reg-actions { position: relative; }
+
+.gs-reg-actions.is-open { z-index: 20; }
+
+.gs-reg-actions__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  cursor: pointer;
+}
+
+.gs-reg-actions__trigger:hover,
+.gs-reg-actions__trigger[aria-expanded='true'] {
+  color: var(--gs-seal);
+  border-color: var(--gs-rule-strong);
+  background: var(--gs-seal-wash);
+}
+
+.gs-reg-actions__menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 30;
+  min-width: 190px;
+  padding: 4px 0;
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-lift);
+}
+
+.gs-reg-actions__divider {
+  height: 1px;
+  margin: 3px 0;
+  background: var(--gs-rule);
+}
+
+.gs-reg-actions__item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gs-reg-actions__item:hover { background: var(--gs-paper-alt); }
+
+.gs-reg-actions__item.is-danger { color: var(--gs-alert); }
+
+.gs-reg-actions__item.is-danger:hover { background: var(--gs-alert-wash); }
+
+/* ── Registre vide ─────────────────────────────────────────────────────
+   Une page blanche est une invitation, pas une erreur : le trait discontinu
+   dit « il n'y a rien encore », et l'action est immédiatement là. */
+
+.gs-reg-empty {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 46px 20px;
+  border: 1px dashed var(--gs-rule-strong);
+  border-radius: var(--border-radius-lg, 16px);
+  background: var(--gs-paper);
+  text-align: center;
+}
+
+.gs-reg-empty > strong {
+  font-family: var(--gs-display);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gs-reg-empty > p {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--gs-ink-faint);
+}
+
+/* ── Les tons d'état ───────────────────────────────────────────────────
+   Portés par `data-tone` sur la ligne ou la puce, hérités par le filet et le
+   mot. Aucune couleur nouvelle : ce sont les trois couleurs qui engagent. Les
+   sélecteurs restent préfixés pour ne rien revendiquer hors du registre. */
+
+.gs-reg-row[data-tone='live'],
+.gs-reg-filter[data-tone='live']    { --reg-tone: var(--gs-duty); }
+.gs-reg-row[data-tone='sealed'],
+.gs-reg-filter[data-tone='sealed']  { --reg-tone: var(--gs-seal); }
+.gs-reg-row[data-tone='stopped'],
+.gs-reg-filter[data-tone='stopped'] { --reg-tone: var(--gs-alert); }
+.gs-reg-row[data-tone='open'],
+.gs-reg-row[data-tone='neutral'],
+.gs-reg-filter[data-tone='open'],
+.gs-reg-filter[data-tone='neutral'] { --reg-tone: var(--gs-ink-faint); }
+
+@media (max-width: 620px) {
+  .gs-reg-row { flex-wrap: wrap; padding-bottom: 10px; }
+  .gs-reg-status { order: 3; margin-left: 0; }
+}
+
+/* Le sélecteur de lecture, au-dessus d'un planning ouvert. Deux façons de lire
+   les mêmes gardes ; il ne change ni le planning ni les droits d'écriture. */
+.gs-reg-reading {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}

@@ -1,0 +1,305 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Journal de service, alertes, signalement d'absence
+   ───────────────────────────────────────────────────────────────────────────
+   Préfixe unique `gsv-` (veille de service), jetons `--gs-*` seulement. Les
+   trois composants du surveillant étaient écrits à 100 % en styles en ligne,
+   avec une palette de six couleurs par type d'événement et un émoji en guise
+   d'icône. Ici : une pastille d'icône dont le ton dit ce qu'il en est
+   (`--gs-alert` ce qui manque ou blesse, `--gs-duty` ce qui est tenu, neutre
+   le reste), et la même réglure que le reste du registre.
+
+   Le journal se lit comme un cahier de garde : l'heure d'abord, au chiffre
+   tabulaire, puis la nature de l'entrée, puis ce qui a été écrit. Une entrée
+   n'est jamais modifiable — le panneau le dit, et rien dans sa forme ne
+   suggère le contraire.
+
+   `ServiceAlertsPanel` garde par ailleurs sa forme d'origine sous
+   `variant="workspace"` : c'est celle que met en page `IncidentsPage.css`, un
+   écran déjà validé qu'on ne rouvre pas ici.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Journée de journal ────────────────────────────────────────────────────
+   Le regroupement par jour est la structure réelle du document : une garde se
+   raconte par journée. Le surtitre porte la date entière et le nombre
+   d'entrées. */
+
+.gsv-day + .gsv-day { margin-top: 4px; }
+
+.gsv-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 2px;
+  padding: 8px 0 6px;
+  border-bottom: 1px solid var(--gs-rule);
+  font-family: var(--gs-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsv-day-head > b {
+  font-family: var(--gs-display);
+  font-weight: 600;
+  color: var(--gs-ink-soft);
+}
+
+.gsv-day-head .gsv-today { color: var(--gs-duty); }
+
+/* ── Les entrées ───────────────────────────────────────────────────────────
+   Heure, nature, contenu. Pas de carte par entrée : un filet suffit à séparer
+   deux lignes d'un même cahier. */
+
+.gsv-log,
+.gsv-alerts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.gsv-log > li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 0;
+}
+
+.gsv-log > li + li { border-top: 1px solid var(--gs-rule); }
+
+.gsv-hour {
+  padding-top: 3px;
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--gs-ink-faint);
+}
+
+/* La pastille : une icône, un ton, aucune couleur décorative. */
+.gsv-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-faint);
+}
+
+.gsv-mark[data-tone='alert'] {
+  border-color: color-mix(in srgb, var(--gs-alert) 26%, transparent);
+  background: var(--gs-alert-wash);
+  color: var(--gs-alert);
+}
+
+.gsv-mark[data-tone='duty'] {
+  border-color: color-mix(in srgb, var(--gs-duty) 26%, transparent);
+  background: var(--gs-duty-wash);
+  color: var(--gs-duty);
+}
+
+.gsv-mark[data-tone='seal'] {
+  border-color: color-mix(in srgb, var(--gs-seal) 26%, transparent);
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+}
+
+.gsv-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gsv-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.gsv-title {
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--gs-ink);
+}
+
+.gsv-kind {
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsv-desc {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+}
+
+/* Qui est concerné, qui a écrit, dans quel service : la traçabilité tient sur
+   une ligne, et elle se lit sans peser. */
+.gsv-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+}
+
+.gsv-meta > span + span::before {
+  content: '·';
+  margin-right: 7px;
+  color: var(--gs-rule-strong);
+}
+
+/* ── Le composeur ──────────────────────────────────────────────────────────
+   Quatre types seulement, parce que l'absence et le retard passent par le
+   formulaire dédié qui applique la règle « garde courante ». La consigne reste
+   écrite sous les champs. */
+
+.gsv-form {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 10px;
+  background: var(--gs-paper-alt);
+}
+
+.gsv-form-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.gsv-form-row > select { flex: 1 1 170px; min-width: 0; max-width: 240px; }
+
+.gsv-form textarea { resize: vertical; font-family: var(--gs-body); }
+
+.gsv-form-note {
+  margin: 0;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-faint);
+}
+
+.gsv-form-foot { display: flex; gap: 8px; }
+
+/* ── Alertes ───────────────────────────────────────────────────────────────
+   Une alerte ouverte porte un filet de gravité à sa gauche ; résolue, elle
+   perd son ton et s'efface — elle reste lisible parce que l'historique est
+   constant, mais elle ne réclame plus rien. */
+
+.gsv-alerts > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  min-width: 0;
+  padding: 12px 0 12px 11px;
+  border-left: 3px solid var(--gs-rule);
+}
+
+.gsv-alerts > li + li { border-top: 1px solid var(--gs-rule); }
+
+.gsv-alerts > li[data-tone='alert'] { border-left-color: var(--gs-alert); }
+.gsv-alerts > li[data-tone='watch'] { border-left-color: var(--gs-alert-wash); }
+.gsv-alerts > li[data-resolved='true'] { border-left-color: var(--gs-rule); opacity: .68; }
+
+.gsv-alert-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.gsv-alert-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.gsv-alert-acts > button { white-space: nowrap; }
+
+/* ── Signalement d'absence ─────────────────────────────────────────────────
+   La modale garde la coquille commune de la plateforme (`.modal`,
+   `.form-control`) : la reprendre pour elle seule la désaccorderait des trente
+   autres modales, qui suivront par lots. Seuls son sous-titre, ses consignes
+   et le rappel de période passent au vocabulaire du registre. */
+
+.gsv-modal-sub {
+  margin: 3px 0 0;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--gs-ink-faint);
+}
+
+.gsv-modal-hint {
+  display: block;
+  margin: 5px 0 0;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--gs-ink-faint);
+}
+
+.gsv-modal-hint > b {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--gs-ink-soft);
+}
+
+.gsv-modal-hint.is-alert { color: var(--gs-alert); }
+
+/* ── Étroit ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 560px) {
+  /* L'heure remonte à côté du titre : trois colonnes sur un téléphone
+     réduisent le texte à quatre mots par ligne.
+
+     Le placement est explicitement rattaché à `.gsv-log > li` : `.gsv-mark` et
+     `.gsv-body` servent aussi la liste des alertes, où `.gsv-body` est l'enfant
+     de `.gsv-alert-main`. Un `grid-column: 2` non rattaché y créait une seconde
+     colonne implicite, et les deux boutons d'action se retrouvaient dans une
+     piste de 0 px — mesuré sur un téléphone avant d'être borné ici. */
+  .gsv-log > li {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px 10px;
+  }
+
+  .gsv-log > li > .gsv-hour { grid-column: 2; grid-row: 1; padding-top: 0; }
+  .gsv-log > li > .gsv-mark { grid-column: 1; grid-row: 1 / span 2; }
+  .gsv-log > li > .gsv-body { grid-column: 2; }
+
+  .gsv-alert-main { grid-template-columns: minmax(0, 1fr); }
+  .gsv-alert-acts { flex-direction: row; }
+  .gsv-alert-acts > button { flex: 1; }
+
+  .gsv-form-row > select { max-width: none; }
+}

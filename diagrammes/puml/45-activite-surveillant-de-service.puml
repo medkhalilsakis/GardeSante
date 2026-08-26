@@ -1,0 +1,203 @@
+' ============================================================================
+' GardeSanté — Diagramme d'activités : Surveillant de Service
+'
+' C'est le second du chef, dans son service. Il compose, il propose, il tient
+' le service au jour le jour — mais il ne décide rien seul : chacune de ses
+' écritures sur le planning finit devant le chef. Trois écarts se lisent dans
+' cette figure, tous vérifiés en base et dans le code.
+'
+' Sources vérifiées :
+'   backend/src/db/migrations/012_role_autre.sql
+'     18 permissions : users.read, departments.read,
+'     schedules.read/create/update/submit, shifts.read/create/update/confirm,
+'     absences.read/create/approve, replacements.read/create/update,
+'     stats.read, remarks.read/create.
+'     Il ne détient NI schedules.generate, NI replacements.approve,
+'     NI shifts.delete, NI schedules.approve/reject.
+'   backend/src/modules/schedules/schedule-builder.controller.js
+'     :211      la génération n'admet que le chef de service et le surveillant
+'               de service — il génère donc SANS détenir schedules.generate
+'     :220-224  et sa simple appartenance au service suffit : le is_head=TRUE
+'               exigé du chef lui est explicitement levé
+'     :754      un brouillon est privé à son AUTEUR CHEF DE SERVICE : le
+'               brouillon qu'il vient de créer lui devient illisible
+'     :424-500  saveDraft — sur un brouillon, aucun contrôle de rôle ; le
+'               Tableur fixe, lui, est réservé au chef
+'     :873-879  canProposeScheduleChange l'admet s'il est membre du service
+'     :1224     decideChangeProposal — il ne peut pas arbitrer sa proposition
+'   backend/src/modules/schedules/schedule-inbox.controller.js:35-40
+'     DEPARTMENT_SCOPE : sa boîte se borne à ses services d'appartenance ;
+'     un brouillon n'y figure jamais
+'   backend/src/modules/replacements/replacements-overlay.controller.js
+'     :536-538  il peut créer un remplacement en surcouche
+'     :654      mais il n'est pas chef : la ligne part « en attente du chef »
+'     :774,830  confirmer ou refuser est réservé au chef de ce service
+'   backend/src/modules/schedules/staff-loans.controller.js:189
+'     WATCHER_ROLES ne l'inclut pas : il ne suit pas les prêts de personnel
+'   backend/src/modules/journal/journal.controller.js
+'     :43-47    WRITE_ROLES l'inclut : il écrit dans le journal de son service
+'     :29       MANUAL_EVENT_TYPES : présence, remarque, incident, renfort —
+'               les quatre lui sont ouverts, là où le directeur est borné à
+'               la seule présence
+'   backend/src/modules/notes/notes.controller.js:42-52
+'     resolveScope renvoie null pour son rôle : publier une note lui est
+'     REFUSÉ, alors qu'il détient remarks.create
+'   backend/src/modules/absences/absences.controller.js:198-215
+'     l'absence de garde est écrite d'emblée à l'état accordé
+'   ÉCART : absences.approve lui est accordée — aucune route ne la consomme.
+' ============================================================================
+@startuml 45-activite-surveillant-de-service
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #1E293B
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  FontColor #0F172A
+  DiamondBackgroundColor #EEF2FF
+  DiamondBorderColor #1B4FCA
+  DiamondFontColor #1B4FCA
+  StartColor #0F766E
+  EndColor #B91C1C
+  BarColor #7A3E9D
+}
+skinparam partition {
+  BackgroundColor #F8FAFC
+  BorderColor #94A3B8
+  FontColor #475569
+  FontStyle bold
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Activités — Surveillant de Service : composer sans pouvoir relire, proposer sans arbitrer
+
+start
+
+:s'authentifier;
+note right
+  Sa portée est son ou ses services
+  d'appartenance. Il n'a pas besoin d'en être
+  le chef : l'appartenance suffit partout où
+  le chef, lui, doit être désigné chef.
+end note
+
+partition "Prêter la main à la composition" {
+  :créer un planning pour son service;
+  #F3E8FF:le brouillon est écrit,\nà son nom;
+
+  fork
+    :remplir la grille\nagent par agent;
+  fork again
+    :lancer l'assistant\nde répartition;
+  fork again
+    :importer un tableur Excel;
+  end fork
+
+  #FEF3C7:rouvrir son brouillon;
+  note right
+    **Écart.** Le brouillon est privé à son auteur
+    **chef de service** : la lecture exige ce rôle.
+    Le surveillant écrit donc un brouillon qu'il ne
+    peut plus ouvrir, et que la boîte des plannings
+    n'affiche pas non plus. Seul le chef du service
+    peut le reprendre.
+  end note
+
+  :demander l'envoi;
+  if (le moteur de règles\nlaisse-t-il passer ?) then (oui)
+    #F3E8FF:le planning passe en vigueur;
+    #E6F4F1:consigner l'envoi;
+  else (non)
+    #FEE2E2:refus — corriger avant de soumettre;
+  endif
+}
+
+partition "Tenir le service au quotidien" {
+  repeat
+    fork
+      :ouvrir la boîte des plannings\nde ses services;
+      if (une correction\ns'impose-t-elle ?) then (oui)
+        :déposer une proposition\nmotivée;
+        #F3E8FF:écrite « en attente »;
+        :attendre la décision du chef;
+      else (non)
+      endif
+
+    fork again
+      :déposer un remplacement\nen surcouche;
+      #F3E8FF:écrit « en attente\ndu chef de service »;
+
+    fork again
+      :faire l'appel du jour;
+      fork
+        :noter une présence;
+      fork again
+        :signaler un incident;
+      fork again
+        :demander un renfort;
+      end fork
+      #E6F4F1:consigner l'événement;
+
+    fork again
+      :déclarer une absence\nde garde;
+      #F3E8FF:la garde passe\nà « absent »;
+
+    fork again
+      :consulter la couverture\net les statistiques\nde son service;
+    end fork
+  repeat while (le service continue) is (oui)
+  -> non;
+}
+
+partition "Ce qui lui est fermé" {
+  fork
+    #FEF3C7:approuver une absence;
+  fork again
+    #FEE2E2:publier une note\nde service;
+  fork again
+    #FEE2E2:confirmer ou refuser\nun remplacement;
+  fork again
+    #FEE2E2:arbitrer une proposition\nde modification;
+  fork again
+    #FEE2E2:suivre les prêts\nde personnel;
+  end fork
+}
+
+:lire son propre historique;
+stop
+
+floating note left
+  **Il génère un planning sans détenir la permission de le générer.** Le contrôle
+  qui garde l'assistant de répartition est écrit dans le code, rôle par rôle, et
+  il le nomme — tandis que la table des permissions ne lui accorde pas
+  schedules.generate. Mieux : le chef doit être désigné chef du service, lui non,
+  sa seule appartenance suffit. Sur ce chemin il est donc mieux traité que le
+  chef, et mieux traité que ce que la base lui accorde.
+  ====
+  **Tout ce qu'il écrit sur le planning finit devant le chef.** Sa proposition
+  attend l'arbitrage du chef ; son remplacement attend la confirmation du chef ;
+  le brouillon qu'il a rempli, seul le chef peut le rouvrir. Il détient
+  replacements.update mais pas replacements.approve : la différence entre
+  préparer et décider est la ligne de partage de tout son rôle.
+  ====
+  **Deux permissions accordées, deux portes fermées.** Il détient absences.approve
+  — aucune route ne la consomme, absences et congés étant écrits d'emblée à
+  l'état accordé. Il détient remarks.create — mais la résolution de portée ne
+  reconnaît pas son rôle et le refuse : publier une note reste au chef, aux deux
+  surveillants généraux et à la direction. Le renfort qu'il demande passe donc
+  par le journal de service, pas par une note.
+end note
+
+legend right
+  Fond teinté vert : écriture au journal. Fond teinté violet : écriture en base.
+  Fond teinté rouge : refus opposé par le logiciel. Fond ambre : permission accordée
+  en base, sans route qui l'implémente, ou incohérence entre la base et le code.
+  Cycle de vie du planning : figure 21. Propositions : figure 22.
+  Remplacements en surcouche : figures 23 et 24.
+endlegend
+
+@enduml

@@ -1,0 +1,141 @@
+' ============================================================================
+' GardeSanté — Cas d'utilisation : Chef de Service (niveau 4, 23 permissions)
+'
+' Sources vérifiées :
+'   - role_permissions de `department_head` : absences.approve/create/read,
+'     departments.read/update, remarks.create/read,
+'     replacements.approve/create/read/update,
+'     schedules.create/generate/read/submit/update,
+'     shifts.confirm/create/delete/read/update, stats.read, users.read.
+'   - Prêt de personnel : staff-loans.controller.js n'ouvre la création
+'     qu'à `department_head` (et au super admin).
+'   - Surcouche de remplacement : `isChef` réserve la confirmation au seul
+'     `department_head`.
+'   - Propositions de modification : le chef DÉCIDE (decideChangeProposal,
+'     decideAllChangeProposals) mais ne PROPOSE pas — `canProposeScheduleChange`
+'     l'exclut explicitement. L'héritage d'acteur est donc rompu sur ce point.
+'   - Publication de note : `resolveScope` lui attribue la portée 'department'.
+' ============================================================================
+@startuml 04-cas-chef-de-service
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ActorBorderColor #0F766E
+skinparam ActorBackgroundColor #E6F4F1
+skinparam ActorFontStyle bold
+skinparam UsecaseBorderColor #1B4FCA
+skinparam UsecaseBackgroundColor #EEF2FF
+skinparam usecase {
+BackgroundColor<<hérité>> #F1F5F9
+BorderColor<<hérité>> #94A3B8
+FontColor<<hérité>> #475569
+BackgroundColor<<non hérité>> #FEE2E2
+BorderColor<<non hérité>> #B91C1C
+FontColor<<non hérité>> #7F1D1D
+}
+skinparam PackageBorderColor #94A3B8
+skinparam PackageBackgroundColor #F8FAFC
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+
+title Cas d'utilisation — Chef de Service\nniveau 4 · 23 permissions
+
+left to right direction
+
+actor "Surveillant\nde Service" as SS
+actor "Chef de Service" as CS
+SS <|-- CS
+
+package "Hérité du Surveillant de Service" as P0 {
+  usecase "Élaborer le tableur\nde garde" as UC_TABLEUR <<hérité>>
+  usecase "Soumettre le planning" as UC_SOUMETTRE <<hérité>>
+  usecase "Exporter le planning" as UC_EXPORT <<hérité>>
+  usecase "Valider une absence\nde son service" as UC_ABS_VALID <<hérité>>
+  usecase "Faire l'appel du jour\net signaler un incident" as UC_APPEL <<hérité>>
+  usecase "Gérer son compte\net sa communication" as UC_CPT <<hérité>>
+  usecase "Proposer une modification\nsur planning en vigueur" as UC_PROPOSER <<non hérité>>
+}
+
+package "Construction du planning" as P1 {
+  usecase "Générer le planning\navec l'assistant" as UC_GENERER
+  usecase "Composer un cahier\nde contraintes" as UC_BRIEF
+  usecase "Importer un tableur\nexistant" as UC_IMPORT
+  usecase "Prévisualiser l'import\navant confirmation" as UC_PREVIEW
+  usecase "Créer un instantané\ndu planning" as UC_SNAPSHOT
+  usecase "Annuler la soumission" as UC_ANNULER
+  usecase "Décider des propositions\nde modification" as UC_DECIDER
+  usecase "Supprimer une garde" as UC_GARDE_SUPPR
+}
+
+package "Remplacements et prêts" as P2 {
+  usecase "Confirmer un remplacement" as UC_REMP_CONF
+  usecase "Rejeter un remplacement" as UC_REMP_REJ
+  usecase "Supprimer un remplacement\nen surcouche" as UC_REMP_SUPPR
+  usecase "Demander un prêt\nde personnel" as UC_PRET_DEM
+  usecase "Répondre à une demande\nde prêt" as UC_PRET_REP
+}
+
+package "Pilotage du service" as P3 {
+  usecase "Mettre à jour\nson service" as UC_DEPT_MAJ
+  usecase "Publier une note\nde service" as UC_NOTE_PUB
+  usecase "Consulter le tableau de bord\ndu service" as UC_DASH
+}
+
+note as N1
+ROMPU : le Chef de Service n'hérite PAS de « proposer
+une modification ». `canProposeScheduleChange` ne
+répond vrai que pour le Surveillant Général et pour
+le Surveillant de Service membre du service. Le chef
+arbitre les propositions, il ne les formule pas.
+L'inclusion des ensembles de permissions ne suffit
+donc pas à décrire les droits : les contrôles
+impératifs des contrôleurs la restreignent.
+end note
+note as N2
+Le prêt de personnel étend l'affectation : lorsque
+l'agent visé appartient à un autre service, la
+plateforme ouvre une demande auprès du chef
+propriétaire au lieu d'affecter directement.
+end note
+N1 .. UC_TABLEUR
+N2 .. UC_REMP_CONF
+
+SS --> UC_TABLEUR
+SS --> UC_SOUMETTRE
+SS --> UC_EXPORT
+SS --> UC_ABS_VALID
+SS --> UC_APPEL
+SS --> UC_CPT
+SS --> UC_PROPOSER
+
+CS --> UC_GENERER
+CS --> UC_IMPORT
+CS --> UC_SNAPSHOT
+CS --> UC_ANNULER
+CS --> UC_DECIDER
+CS --> UC_GARDE_SUPPR
+CS --> UC_REMP_CONF
+CS --> UC_REMP_REJ
+CS --> UC_REMP_SUPPR
+CS --> UC_PRET_DEM
+CS --> UC_PRET_REP
+CS --> UC_DEPT_MAJ
+CS --> UC_NOTE_PUB
+CS --> UC_DASH
+
+UC_GENERER ..> UC_BRIEF : <<include>>
+UC_IMPORT ..> UC_PREVIEW : <<include>>
+UC_TABLEUR <.. UC_PRET_DEM : <<extend>>
+UC_REMP_CONF <.. UC_REMP_REJ : <<extend>>
+
+legend right
+Bleu : cas propres à ce rôle.
+Gris : capacités héritées du Surveillant de Service.
+Rouge : capacité du rôle parent NON héritée,
+bloquée par un contrôle impératif.
+endlegend
+
+@enduml

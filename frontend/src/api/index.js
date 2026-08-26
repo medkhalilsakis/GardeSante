@@ -3,6 +3,11 @@ import { useAuthStore } from '../store';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
+// Exposée pour les rares cas qui ne passent pas par l'instance Axios — un
+// téléchargement ouvert dans un onglet, par exemple — afin qu'ils visent la
+// même adresse que le reste de l'application au lieu de la deviner.
+export const API_BASE_URL = BASE_URL;
+
 // Instance Axios principale
 const api = axios.create({
   baseURL: BASE_URL,
@@ -112,7 +117,11 @@ export const usersAPI = {
   deactivate: (id) => api.put(`/users/${id}/deactivate`),
   getShifts: (id, params) => api.get(`/users/${id}/shifts`, { params }),
   getStats: (id, params) => api.get(`/users/${id}/stats`, { params }),
-  rolesAvailable: () => api.get('/users/roles-available'),
+  // `params` est optionnel. Le Super Admin passe `{ establishmentId }` pour
+  // obtenir les rôles de l'établissement **ciblé** (Lot X6, D1) : les rôles sont
+  // créés par établissement, et sans cible la liste est légitimement vide. Les
+  // appelants existants n'en passent aucun — axios ignore `{ params: undefined }`.
+  rolesAvailable: (params) => api.get('/users/roles-available', { params }),
 };
 
 // Archivage de comptes — Super Admin uniquement.
@@ -211,6 +220,9 @@ export const notesAPI = {
   getOne: (id) => api.get(`/notes/${id}`),
   markRead: (id) => api.put(`/notes/${id}/read`),
   getReaders: (id) => api.get(`/notes/${id}/readers`),
+  // Suivi de diffusion (Lot X5) — non-lecteurs nommés et relance tracée
+  getDiffusion: (id) => api.get(`/notes/${id}/diffusion`),
+  remind: (id, userIds) => api.post(`/notes/${id}/remind`, userIds ? { userIds } : {}),
   delete: (id) => api.delete(`/notes/${id}`),
   publish: ({ title, body, category, priority, isPinned, attachments = [] }) => {
     const form = new FormData();
@@ -233,6 +245,25 @@ export const hospitalCalendarAPI = {
 
 export const scopedStatsAPI = {
   get: (params) => api.get('/statistics/scoped', { params }),
+};
+
+// Vue d'ensemble de pilotage du directeur (Lot Y1).
+// Complémentaire de `supervisionAPI.getOverview` : celui-ci répond « où en est
+// la garde aujourd'hui ? », celui-là « où en est l'établissement ? »
+// (encadrement des services, composition de l'effectif, accès, demandes en
+// attente). La portée est décidée par le serveur.
+export const directorOverviewAPI = {
+  get: (params) => api.get('/director/overview', { params }),
+};
+
+// Vue d'ensemble de pilotage d'un service (Lot Z3).
+// Un seul appel rend tout ce qu'un chef doit savoir sur SON service : garde du
+// jour et statut d'appel, effectif et accès, ses plannings par état, ses files
+// d'attente, les congés qui heurtent une garde, l'équité de la charge.
+// `departmentId` est facultatif — sans lui, le serveur retient le service
+// primaire de l'appelant ; avec lui, il vérifie le droit de lecture (403 sinon).
+export const chefOverviewAPI = {
+  get: (params) => api.get('/chef/overview', { params }),
 };
 
 // Journal de service et alertes (Lot 4).
@@ -377,6 +408,10 @@ export const adminAPI = {
   getStats:        ()            => api.get('/admin/stats'),
   getOnlineUsers:  ()            => api.get('/admin/online-users'),
 
+  // Activité réelle de la plateforme (services, plannings, gardes du tableur,
+  // absences, remplacements, prêts, alertes, couverture, traçabilité)
+  getPlatformActivity: ()        => api.get('/admin/platform-activity'),
+
   // Gestion établissements (cascade)
   deactivateEst:   (id)          => api.put(`/admin/establishments/${id}/deactivate`),
   activateEst:     (id, data)    => api.put(`/admin/establishments/${id}/activate`, data),
@@ -391,6 +426,31 @@ export const adminAPI = {
   updateHoliday:       (id, data) => api.put(`/admin/holidays/${id}`, data),
   deleteHoliday:       (id)       => api.delete(`/admin/holidays/${id}`),
   seedTunisiaHolidays: (data)     => api.post('/admin/holidays/seed-tunisia', data),
+
+  // Référentiels nationaux (Lot X4) — types de garde, types d'absence, droits
+  getReferentiels:      ()          => api.get('/admin/referentiels/overview'),
+  getPermissionMatrix:  ()          => api.get('/admin/referentiels/permissions'),
+  seedReferentiels:     (data)      => api.post('/admin/referentiels/seed', data),
+
+  getShiftTypes:        (params)    => api.get('/admin/referentiels/shift-types', { params }),
+  createShiftType:      (data)      => api.post('/admin/referentiels/shift-types', data),
+  updateShiftType:      (id, data)  => api.put(`/admin/referentiels/shift-types/${id}`, data),
+  deleteShiftType:      (id)        => api.delete(`/admin/referentiels/shift-types/${id}`),
+
+  getAbsenceTypes:      (params)    => api.get('/admin/referentiels/absence-types', { params }),
+  createAbsenceType:    (data)      => api.post('/admin/referentiels/absence-types', data),
+  updateAbsenceType:    (id, data)  => api.put(`/admin/referentiels/absence-types/${id}`, data),
+  deleteAbsenceType:    (id)        => api.delete(`/admin/referentiels/absence-types/${id}`),
+
+  // Fiche de conformité des établissements (Lot X6, C1)
+  getConformite:        ()          => api.get('/admin/conformite'),
+  getConformiteDetail:  (id)        => api.get(`/admin/conformite/${id}`),
+  repairConformite:     (id, data)  => api.post(`/admin/conformite/${id}/repair`, data),
+
+  // Annuaire national du personnel (Lot X6, D2)
+  searchStaff:          (params)    => api.get('/admin/annuaire', { params }),
+  getAnnuaireFacets:    ()          => api.get('/admin/annuaire/facets'),
+  getAnnuairePerson:    (id)        => api.get(`/admin/annuaire/${id}`),
 };
 
 // ── Schedule Builder API (Chef de Service) ───────────────────
@@ -403,6 +463,7 @@ export const scheduleBuilderAPI = {
   confirmProposal:   (data)          => api.post('/schedule-builder/confirm-proposal', data),
   // Par planning
   getDetail:        (id)            => api.get(`/schedule-builder/${id}/detail`),
+  getHistory:       (id)            => api.get(`/schedule-builder/${id}/history`),
   validate:         (id)            => api.post(`/schedule-builder/${id}/validate`),
   validateShift:    (id, data)      => api.post(`/schedule-builder/${id}/validate-shift`, data),
   saveDraft:        (id, data)      => api.put(`/schedule-builder/${id}/draft`, data),

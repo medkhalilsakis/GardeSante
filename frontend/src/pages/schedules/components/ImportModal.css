@@ -1,0 +1,591 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Importer un tableur — harmonisation
+   ──────────────────────────────────────────────────────────────────────────
+   Le parcours ne change pas : guide → fichier → aperçu → import → terminé,
+   les mêmes nœuds, les mêmes conditions. Seule la présentation sort du JSX,
+   où elle vivait en 380 objets `style` et une trentaine de teintes empruntées
+   à Tailwind.
+
+   Ce que les couleurs disent ici, et rien de plus :
+     duty  — c'est reconnu, c'est acté : l'agent est retrouvé en base, le
+             fichier est intégralement adaptable, la case est « de service ».
+     alert — il reste un arbitrage : des lignes non reconnues, qui partiront
+             en lignes personnalisées. Ce n'est pas une erreur, c'est une
+             décision à prendre — d'où l'aplat léger, jamais plein.
+     seal  — l'action qui engage, une seule par étape.
+
+   Le bandeau de tête est inversé (encre au fond, papier en texte) comme celui
+   des jours du tableur : c'est la même barre de repère, elle doit se lire
+   pareil. Les formats de fichier acceptés ne portent plus une couleur chacun —
+   trois teintes pour trois extensions ne disaient rien que l'étiquette ne
+   disait déjà.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.gsi-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 6000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--bg-overlay);
+  backdrop-filter: blur(5px);
+}
+
+.gsi-modal {
+  display: flex;
+  flex-direction: column;
+  width: 800px;
+  max-width: 100%;
+  max-height: 90vh;
+  overflow: hidden;
+  border: 1px solid var(--gs-rule);
+  border-radius: 16px;
+  background: var(--gs-paper);
+  box-shadow: var(--gs-shadow-lift);
+  font-family: var(--gs-body);
+  color: var(--gs-ink);
+}
+
+/* ── Bandeau de tête ────────────────────────────────────────────────── */
+
+.gsi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 22px;
+  background: var(--gs-ink);
+}
+
+.gsi-head__title {
+  font-family: var(--gs-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  color: var(--gs-paper);
+}
+
+.gsi-head__sub {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--gs-ink-faint);
+}
+
+.gsi-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* L'étape courante s'inverse une seconde fois — papier plein sur l'encre —
+   parce qu'un « vous êtes ici » n'a pas besoin d'une couleur pour se voir. */
+.gsi-step {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--gs-paper) 16%, transparent);
+  color: var(--gs-paper);
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.gsi-step.is-current {
+  background: var(--gs-paper);
+  color: var(--gs-ink);
+}
+
+.gsi-step.is-done {
+  background: var(--gs-duty);
+  color: var(--gs-paper);
+}
+
+.gsi-step-link {
+  width: 20px;
+  height: 2px;
+  background: color-mix(in srgb, var(--gs-paper) 16%, transparent);
+}
+
+.gsi-close {
+  margin-left: 8px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--gs-paper) 10%, transparent);
+  color: var(--gs-ink-faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition-fast, .15s), color var(--transition-fast, .15s);
+}
+
+.gsi-close:hover {
+  background: color-mix(in srgb, var(--gs-paper) 20%, transparent);
+  color: var(--gs-paper);
+}
+
+/* ── Corps ──────────────────────────────────────────────────────────── */
+
+.gsi-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 22px;
+  background: var(--gs-paper);
+}
+
+/* ── Guide ──────────────────────────────────────────────────────────── */
+
+.gsi-banner {
+  margin-bottom: 20px;
+  padding: 15px 18px;
+  border: 1px solid var(--gs-duty);
+  border-radius: 12px;
+  background: var(--gs-duty-wash);
+}
+
+.gsi-banner__title {
+  font-family: var(--gs-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gs-duty);
+}
+
+.gsi-banner__text {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--gs-ink-soft);
+}
+
+.gsi-banner__text strong { color: var(--gs-ink); }
+
+.gsi-tabs { margin-bottom: 16px; }
+
+.gsi-hidden { display: none; }
+
+.gsi-section-title {
+  margin-bottom: 8px;
+  font-family: var(--gs-display);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gsi-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.gsi-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--gs-duty);
+  border-radius: 8px;
+  background: var(--gs-duty-wash);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gs-duty);
+}
+
+.gsi-legend__mark {
+  font-family: var(--gs-data);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gsi-legend__item.is-quiet {
+  border: 1px dashed var(--gs-rule-strong);
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-faint);
+  font-weight: 500;
+}
+
+/* ── Tableaux d'exemple et d'aperçu ─────────────────────────────────── */
+
+.gsi-table-wrap {
+  overflow: auto;
+  margin-bottom: 16px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 10px;
+}
+
+.gsi-table-wrap.is-scroll { max-height: 200px; }
+
+.gsi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.gsi-table thead tr { background: var(--gs-ink); }
+
+.gsi-table th {
+  padding: 8px 10px;
+  border-right: 1px solid var(--gs-rule-strong);
+  color: var(--gs-paper-alt);
+  font-family: var(--gs-display);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.gsi-table th:last-child { border-right: 0; }
+.gsi-table th.is-centered { text-align: center; }
+
+.gsi-table td {
+  padding: 6px 10px;
+  border-right: 1px solid var(--gs-rule);
+  color: var(--gs-ink-soft);
+  white-space: nowrap;
+}
+
+.gsi-table td:last-child { border-right: 0; }
+.gsi-table tbody tr:nth-child(even) { background: var(--gs-paper-alt); }
+.gsi-table td.is-name { color: var(--gs-ink); font-weight: 700; }
+.gsi-table td.is-centered { text-align: center; }
+.gsi-table td.is-num { font-family: var(--gs-data); font-variant-numeric: tabular-nums; }
+
+.gsi-table td.is-duty {
+  background: var(--gs-duty-wash);
+  color: var(--gs-duty);
+  font-family: var(--gs-data);
+  font-weight: 600;
+  text-align: center;
+}
+
+.gsi-table td.is-off { color: var(--gs-ink-faint); text-align: center; }
+
+.gsi-example-note {
+  margin-bottom: 14px;
+  padding: 11px 15px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 10px;
+  background: var(--gs-paper-alt);
+}
+
+.gsi-example-note strong {
+  font-family: var(--gs-display);
+  font-size: 12px;
+  color: var(--gs-ink);
+}
+
+.gsi-example-note div {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+}
+
+/* ── Dépôt de fichier ───────────────────────────────────────────────── */
+
+.gsi-drop {
+  padding: 46px 28px;
+  border: 2px dashed var(--gs-rule-strong);
+  border-radius: 14px;
+  background: var(--gs-paper-alt);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--transition-fast, .15s), background var(--transition-fast, .15s);
+}
+
+.gsi-drop.is-over {
+  border-color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+}
+
+.gsi-drop__title {
+  margin-bottom: 6px;
+  font-family: var(--gs-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gsi-drop__hint {
+  margin-bottom: 18px;
+  font-size: 12px;
+  color: var(--gs-ink-faint);
+}
+
+.gsi-formats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.gsi-format {
+  padding: 5px 12px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 8px;
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-data);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.gsi-spinner {
+  width: 38px;
+  height: 38px;
+  margin: 0 auto 16px;
+  border: 3px solid var(--gs-rule);
+  border-top-color: var(--gs-seal);
+  border-radius: 50%;
+  animation: gsiSpin 1s linear infinite;
+}
+
+.gsi-spinner.is-lg {
+  width: 46px;
+  height: 46px;
+  margin-bottom: 20px;
+  border-width: 4px;
+}
+
+@keyframes gsiSpin { to { transform: rotate(360deg); } }
+
+/* ── Aperçu ─────────────────────────────────────────────────────────── */
+
+.gsi-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.gsi-verdict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 17px;
+  border-radius: 12px;
+}
+
+.gsi-verdict.is-full {
+  border: 1px solid var(--gs-duty);
+  background: var(--gs-duty-wash);
+}
+
+.gsi-verdict.is-partial {
+  border: 1px solid var(--gs-alert);
+  background: var(--gs-alert-wash);
+}
+
+.gsi-verdict strong {
+  font-family: var(--gs-display);
+  font-size: 13px;
+}
+
+.gsi-verdict.is-full strong { color: var(--gs-duty); }
+.gsi-verdict.is-partial strong { color: var(--gs-alert); }
+
+.gsi-verdict p {
+  margin: 3px 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--gs-ink-soft);
+}
+
+.gsi-verdict__badge {
+  flex: 0 0 auto;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--gs-duty);
+  color: var(--gs-paper);
+  font-family: var(--gs-data);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ── Paramètres du planning ─────────────────────────────────────────── */
+
+.gsi-config {
+  padding: 17px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 12px;
+  background: var(--gs-paper-alt);
+}
+
+.gsi-config h4 {
+  margin: 0 0 14px;
+  font-family: var(--gs-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gsi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.gsi-grid.is-tight { gap: 8px; }
+
+.gsi-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gsi-field.is-wide { grid-column: 1 / -1; }
+
+.gsi-field > span {
+  font-family: var(--gs-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.gsi-field input,
+.gsi-field select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: 8px;
+  background: var(--gs-paper);
+  color: var(--gs-ink);
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.gsi-field input:focus,
+.gsi-field select:focus { border-color: var(--gs-seal); box-shadow: 0 0 0 3px var(--gs-seal-wash); }
+
+/* ── Statuts de ligne ───────────────────────────────────────────────── */
+
+.gsi-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.gsi-status.is-matched { color: var(--gs-duty); }
+.gsi-status.is-custom { color: var(--gs-alert); }
+
+.gsi-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--gs-ink-faint);
+  cursor: pointer;
+}
+
+.gsi-home input { accent-color: var(--gs-duty); margin: 0; cursor: pointer; }
+.gsi-home.is-on { color: var(--gs-duty); }
+
+/* ── Attente et fin ─────────────────────────────────────────────────── */
+
+.gsi-wait,
+.gsi-done { padding: 40px 20px; text-align: center; }
+
+.gsi-wait__title,
+.gsi-done__title {
+  font-family: var(--gs-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gsi-done__title { color: var(--gs-duty); margin-bottom: 12px; }
+
+.gsi-wait__hint {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--gs-ink-faint);
+}
+
+.gsi-done p {
+  margin: 0 auto 20px;
+  max-width: 46ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--gs-ink-soft);
+}
+
+.gsi-stats {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.gsi-stat {
+  padding: 13px 22px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 12px;
+  background: var(--gs-paper-alt);
+}
+
+.gsi-stat strong {
+  display: block;
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--gs-ink);
+}
+
+.gsi-stat span {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+/* La journée de service est la seule quantité qui engage le service :
+   elle garde la couleur, le nombre de lignes reste au neutre. */
+.gsi-stat.is-duty {
+  border-color: var(--gs-duty);
+  background: var(--gs-duty-wash);
+}
+
+.gsi-stat.is-duty strong,
+.gsi-stat.is-duty span { color: var(--gs-duty); }
+
+/* ── Pied ───────────────────────────────────────────────────────────── */
+
+.gsi-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 22px;
+  border-top: 1px solid var(--gs-rule);
+  background: var(--gs-paper-alt);
+}
+
+.gsi-foot > div { display: flex; gap: 8px; }
+
+@media (max-width: 760px) {
+  .gsi-head { flex-wrap: wrap; }
+  .gsi-grid { grid-template-columns: 1fr; }
+  .gsi-verdict { align-items: flex-start; flex-direction: column; }
+  .gsi-foot { flex-wrap: wrap; }
+}

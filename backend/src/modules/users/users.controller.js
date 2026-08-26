@@ -562,11 +562,22 @@ const deactivateUser = async (req, res) => {
   if (req.params.id === req.user.id) {
     return res.status(400).json({ success: false, message: 'Vous ne pouvez pas cloturer votre propre compte' });
   }
-  await query(
+  // Le Super Admin est rattaché à l'établissement **système** : filtrer sur son
+  // `establishment_id` ne désignait jamais l'agent visé, l'UPDATE ne touchait
+  // aucune ligne, et l'endpoint répondait pourtant « Compte cloture avec
+  // succes ». Sa portée étant nationale, aucun filtre d'établissement ne
+  // s'applique à lui ; pour tous les autres rôles la clause reste identique.
+  // `rowCount` est désormais vérifié : une cible hors périmètre renvoie 404 au
+  // lieu d'un faux succès.
+  const scoped = !req.user.isSuperAdmin;
+  const result = await query(
     `UPDATE users SET is_active = FALSE, updated_at = NOW()
-     WHERE id = $1 AND establishment_id = $2`,
-    [req.params.id, req.user.establishmentId]
+     WHERE id = $1 ${scoped ? 'AND establishment_id = $2' : ''}`,
+    scoped ? [req.params.id, req.user.establishmentId] : [req.params.id]
   );
+  if (result.rowCount === 0) {
+    return res.status(404).json({ success: false, message: 'Compte introuvable dans votre perimetre' });
+  }
   return res.json({ success: true, message: 'Compte cloture avec succes' });
 };
 
@@ -575,11 +586,17 @@ const activateUser = async (req, res) => {
   if (!['director', 'hospital_admin', 'super_admin', 'general_supervisor'].includes(req.user.roleCode)) {
     return res.status(403).json({ success: false, message: 'Permission refusee' });
   }
-  await query(
+  // Meme correction que `deactivateUser` : portee nationale pour le Super Admin,
+  // clause inchangee pour les autres roles, et plus de faux succes.
+  const scoped = !req.user.isSuperAdmin;
+  const result = await query(
     `UPDATE users SET is_active = TRUE, updated_at = NOW()
-     WHERE id = $1 AND establishment_id = $2`,
-    [req.params.id, req.user.establishmentId]
+     WHERE id = $1 ${scoped ? 'AND establishment_id = $2' : ''}`,
+    scoped ? [req.params.id, req.user.establishmentId] : [req.params.id]
   );
+  if (result.rowCount === 0) {
+    return res.status(404).json({ success: false, message: 'Compte introuvable dans votre perimetre' });
+  }
   return res.json({ success: true, message: 'Compte reactive avec succes' });
 };
 
@@ -644,12 +661,21 @@ const getCreatableRoles = async (req, res) => {
     ? ['director', 'hospital_admin', 'general_supervisor', 'department_head', 'service_supervisor', 'senior_doctor', 'resident', 'observer']
     : (CREATABLE_ROLES[req.user.roleCode] || []);
 
+  // Les rôles sont créés **par établissement** (`create_roles_for_establishment`,
+  // migration 012) et le Super Admin n'appartient à aucun : son
+  // `req.user.establishmentId` est NULL, donc la requête ne renvoyait jamais
+  // rien et le formulaire de création restait vide. `req.establishmentId`
+  // (posé par `injectEstablishment`) vaut l'établissement **cible** passé en
+  // `?establishmentId=` pour un Super Admin, et son propre établissement pour
+  // tous les autres rôles — comportement inchangé pour eux.
+  const eid = req.establishmentId;
+
   const result = await query(
     `SELECT id, code, name, name_ar, level
      FROM roles
      WHERE establishment_id = $1 AND code = ANY($2::text[])
      ORDER BY level`,
-    [req.user.establishmentId, allowed]
+    [eid, allowed]
   );
 
   // `autre` est uniquement un rôle technique de compatibilité pour les
@@ -663,7 +689,7 @@ const getCreatableRoles = async (req, res) => {
      FROM roles
      WHERE establishment_id = $1 AND code = ANY($2::text[])
      ORDER BY level`,
-    [req.user.establishmentId, SECONDARY_ROLE_CODES]
+    [eid, SECONDARY_ROLE_CODES]
   );
 
   return res.json({

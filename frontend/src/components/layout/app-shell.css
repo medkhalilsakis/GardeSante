@@ -1,0 +1,845 @@
+/**
+ * La coque — tranche, en-tête, tiroir
+ * ═══════════════════════════════════
+ *
+ * Fichier neuf, chargé par `AppLayout` après `layout.css` : il rhabille la
+ * coque dans les jetons `--gs-*` sans qu'aucune règle existante soit supprimée.
+ * Les sélecteurs sont préfixés de `.app-layout` — non par goût de la
+ * spécificité, mais parce que `index.css` et `layout.css` sont partagés par
+ * toute la plateforme et qu'on ne les rouvre pas pour cette phase.
+ *
+ * La direction : la barre latérale est la **tranche d'un registre relié**. Un
+ * fond papier, un seul filet à droite, des bandes de rubrique en surtitre, et
+ * l'entrée courante marquée d'un cachet sur la tranche. Ni dégradé, ni lueur
+ * portée, ni pastille pleine — la couche de conception l'interdit à ses
+ * primitives, la coque s'y tient aussi.
+ *
+ * Le défaut réparé ici : la barre de 260 px ne se repliait **jamais**.
+ * `index.css` ramenait pourtant la marge du contenu à 72 px sous 1024 px et à
+ * 0 sous 768 px, en supposant un repli qui n'arrivait pas — la barre se posait
+ * donc par-dessus la page. Deux paliers corrigent cela :
+ *   • 901 → 1024 px : la barre passe en rail d'icônes, quoi qu'ait choisi
+ *     l'utilisateur ; le bouton de repli n'a plus d'objet et disparaît.
+ *   • ≤ 900 px : la barre devient un tiroir, ouvert par le bouton de l'en-tête,
+ *     fermé au voile, à la croix, par Échap ou par un changement de page.
+ */
+
+/* ── Lien d'évitement ─────────────────────────────────────────────────
+   Invisible tant qu'on ne l'atteint pas au clavier. Sans lui, arriver au
+   contenu demandait de traverser les vingt entrées du menu à chaque page. */
+
+.gsh-skip {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 400;
+  padding: 9px 14px;
+  border-radius: 8px;
+  background: var(--gs-seal);
+  color: var(--gs-on-tone);
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-160%);
+  transition: transform var(--transition-fast, .15s);
+}
+
+/* Révélé sur `:focus` et pas seulement `:focus-visible` : le lien n'est
+   atteignable qu'au clavier, et l'heuristique du navigateur ne le compte pas
+   toujours comme tel quand le focus lui est donné par programme. */
+.gsh-skip:focus,
+.gsh-skip:focus-visible {
+  transform: none;
+  outline-offset: 3px;
+}
+
+/* ── La colonne de contenu ────────────────────────────────────────────
+   `.app-layout` est un conteneur flex : sans cette ligne, la colonne de
+   contenu hérite de `min-width: auto` et refuse de descendre sous la largeur
+   minimale de ce qu'elle contient. Résultat mesuré à 375 px : la page faisait
+   932 px de large et toute la plateforme débordait horizontalement, quel que
+   soit l'écran affiché. La colonne se plie désormais à la fenêtre, et chaque
+   bloc large gère son propre défilement à l'intérieur. */
+
+.app-layout .main-content {
+  min-width: 0;
+}
+
+/* ── La tranche ───────────────────────────────────────────────────────── */
+
+.app-layout .sidebar {
+  background: var(--gs-paper);
+  border-right: 1px solid var(--gs-rule);
+}
+
+.app-layout .sidebar-logo {
+  gap: 11px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--gs-rule);
+}
+
+/* Le cachet : un carré plein, pas un galet dégradé qui brille. */
+.app-layout .logo-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: var(--gs-seal);
+  color: var(--gs-on-tone);
+  box-shadow: none;
+}
+
+.app-layout .logo-name {
+  font-family: var(--gs-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  color: var(--gs-ink);
+  /* `layout.css` découpait le titre dans un dégradé ; on rend l'encre au texte. */
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+
+/* Le code d'établissement est une donnée : il va au registre. */
+.app-layout .logo-sub {
+  font-family: var(--gs-data);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  color: var(--gs-ink-faint);
+}
+
+.app-layout .sidebar-nav {
+  padding: 10px 10px 14px;
+  gap: 0;
+}
+
+.gsh-nav-group + .gsh-nav-group { margin-top: 4px; }
+
+.gsh-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* La bande de rubrique — un surtitre posé sur un filet, comme l'onglet d'un
+   classeur. C'est ce qui donne au menu son air de sommaire. */
+.app-layout .nav-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 8px 6px;
+  font-family: var(--gs-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.app-layout .nav-section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--gs-rule);
+}
+
+.app-layout .nav-item {
+  gap: 10px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-body);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.app-layout .nav-item:hover {
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink);
+}
+
+/* L'entrée courante ne se remplit pas de bleu : elle prend un fond de lavis et
+   un cachet sur la tranche. Le filet complet de l'ancienne version doublait la
+   bordure de la barre. */
+.app-layout .nav-item.active {
+  border: 0;
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+  font-weight: 600;
+}
+
+.app-layout .nav-item.active::before {
+  left: -10px;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  background: var(--gs-seal);
+  border-radius: 0 2px 2px 0;
+}
+
+.app-layout .nav-item .nav-icon {
+  display: flex;
+  width: 18px;
+  height: 18px;
+  color: var(--gs-ink-faint);
+  transition: color var(--transition-fast, .15s);
+}
+
+.app-layout .nav-item:hover .nav-icon { color: var(--gs-ink-soft); }
+.app-layout .nav-item.active .nav-icon { color: var(--gs-seal); }
+
+.app-layout .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Le compteur du menu adopte l'ambre et le registre de `.gs-tab-count` : un
+   chiffre à traiter se lit partout de la même façon. */
+.app-layout .nav-item .nav-badge {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  background: var(--gs-alert-wash);
+  border-radius: 999px;
+  color: var(--gs-alert);
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+/* ── Contexte d'appartenance ──────────────────────────────────────────
+   Le composant est partagé par douze écrans : la géométrie est conservée au
+   pixel, seules l'encre et la typographie changent. */
+
+.app-layout .ctx-badge-sidebar {
+  padding: 10px 18px 11px;
+  border-bottom: 1px solid var(--gs-rule);
+}
+
+.app-layout .ctx-hospital {
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gs-ink-soft);
+}
+
+.app-layout .ctx-hospital-lg {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.app-layout .ctx-depts-label {
+  font-family: var(--gs-display);
+  font-size: 9px;
+  letter-spacing: .14em;
+  color: var(--gs-ink-faint);
+}
+
+.app-layout .ctx-chip {
+  padding: 2px 8px;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  border-radius: 999px;
+  color: var(--gs-ink-soft);
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* Chef de service : le cachet, et un point d'état devant le nom. */
+.app-layout .ctx-chip-head {
+  background: var(--gs-seal-wash);
+  border-color: color-mix(in srgb, var(--gs-seal) 40%, transparent);
+  color: var(--gs-seal);
+}
+
+.gsh-chip-mark {
+  margin-right: 4px;
+  font-size: 8px;
+  line-height: 1;
+  vertical-align: 1px;
+}
+
+.app-layout .ctx-badge-header {
+  padding: 9px 13px;
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-radius: var(--border-radius-sm, 8px);
+}
+
+.gsh-ctx-icon {
+  display: inline-flex;
+  margin-right: 6px;
+  color: var(--gs-ink-faint);
+  vertical-align: -2px;
+}
+
+/* ── Pied de la tranche ───────────────────────────────────────────────── */
+
+.app-layout .sidebar-footer {
+  padding: 12px 10px;
+  border-top: 1px solid var(--gs-rule);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Le sélecteur de langue était un bouton à bascule dont le libellé annonçait la
+   langue d'arrivée — donc illisible : on ne savait pas si « العربية » décrivait
+   l'état ou l'action. Deux boutons, deux états, `aria-pressed` pour le dire. */
+.gsh-lang {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--gs-paper-alt);
+  border: 1px solid var(--gs-rule);
+  border-radius: 8px;
+}
+
+.gsh-lang > button {
+  flex: 1;
+  padding: 5px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  font-family: var(--gs-body);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast, .15s), color var(--transition-fast, .15s);
+}
+
+.gsh-lang > button:hover { color: var(--gs-ink); }
+
+.gsh-lang > button[aria-pressed='true'] {
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule);
+  padding: 4px 3px;
+  color: var(--gs-ink);
+  box-shadow: var(--gs-shadow-card);
+}
+
+.app-layout .user-info {
+  gap: 9px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: default;
+}
+
+.app-layout .user-info:hover {
+  background: var(--gs-paper-alt);
+  border-color: var(--gs-rule);
+}
+
+/* La fiche d'identité est passée dans un bouton — un `<p>` n'y a pas sa place,
+   ce sont donc des `<span>`, qu'il faut remettre en blocs pour que la coupure
+   par points de suspension fonctionne. */
+.app-layout .user-details { display: block; }
+
+.app-layout .user-name {
+  display: block;
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.app-layout .user-role {
+  display: block;
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  color: var(--gs-ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gsh-me-open {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.gsh-me-open[disabled] { cursor: default; }
+
+.gsh-logout,
+.gsh-collapse,
+.gsh-nav-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--gs-ink-faint);
+  cursor: pointer;
+  transition: color var(--transition-fast, .15s), background var(--transition-fast, .15s),
+              border-color var(--transition-fast, .15s);
+}
+
+.gsh-logout { padding: 5px; flex-shrink: 0; }
+
+.gsh-logout:hover {
+  color: var(--gs-alert);
+  background: var(--gs-alert-wash);
+}
+
+.gsh-collapse {
+  gap: 7px;
+  width: 100%;
+  padding: 6px;
+  border-color: var(--gs-rule);
+  font-family: var(--gs-body);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.gsh-collapse:hover {
+  color: var(--gs-seal);
+  border-color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+}
+
+.gsh-collapse > svg { transition: transform var(--transition-base, .25s); }
+.sidebar.collapsed .gsh-collapse > svg { transform: rotate(180deg); }
+
+/* La croix du tiroir : elle n'a de sens que lorsque la barre en est un. */
+.gsh-nav-close {
+  display: none;
+  margin-left: auto;
+  padding: 5px;
+  flex-shrink: 0;
+}
+
+.gsh-nav-close:hover {
+  color: var(--gs-ink);
+  background: var(--gs-paper-alt);
+}
+
+/* ── L'en-tête ────────────────────────────────────────────────────────── */
+
+.app-layout .header {
+  gap: 14px;
+  padding: 0 20px;
+  background: var(--gs-paper);
+  border-bottom: 1px solid var(--gs-rule);
+}
+
+.gsh-head-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-layout .header-title {
+  font-family: var(--gs-display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  color: var(--gs-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gsh-head-sub {
+  margin-top: 1px;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  color: var(--gs-ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-layout .header-actions { gap: 8px; flex-shrink: 0; }
+
+/* La date du jour. Toute cette plateforme parle d'aujourd'hui : le registre est
+   daté en tête, pas seulement à l'intérieur de chaque écran. */
+.gsh-today {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 7px;
+  background: var(--gs-paper-alt);
+  font-family: var(--gs-data);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--gs-ink-soft);
+  white-space: nowrap;
+}
+
+.gsh-today > span {
+  font-family: var(--gs-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--gs-ink-faint);
+}
+
+.app-layout .header-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 7px;
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+}
+
+.app-layout .header-btn:hover {
+  color: var(--gs-seal);
+  border-color: var(--gs-seal);
+  background: var(--gs-seal-wash);
+}
+
+.app-layout .header-btn .badge-dot {
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  background: var(--gs-alert);
+  border: 2px solid var(--gs-paper);
+}
+
+.gsh-burger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--gs-rule);
+  border-radius: 7px;
+  background: var(--gs-paper);
+  color: var(--gs-ink-soft);
+  cursor: pointer;
+}
+
+.gsh-burger:hover {
+  color: var(--gs-seal);
+  border-color: var(--gs-seal);
+}
+
+/* Le bouton de thème superpose deux glyphes qui se croisent : il lui faut un
+   repère de positionnement et pas de débordement. */
+.gsh-theme { position: relative; overflow: hidden; }
+
+.gsh-theme-glyph {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .35s cubic-bezier(.34, 1.56, .64, 1), opacity .2s;
+}
+
+.gsh-theme-glyph[data-on='false'] { opacity: 0; transform: rotate(-18deg) scale(.8); }
+.gsh-theme-glyph[data-on='true'] { opacity: 1; transform: none; }
+
+/* ── Moi, en tête ─────────────────────────────────────────────────────── */
+
+.gsh-me {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 200px;
+  padding: 4px 10px 4px 5px;
+  border: 1px solid var(--gs-rule);
+  border-radius: 7px;
+  background: var(--gs-paper);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color var(--transition-fast, .15s), background var(--transition-fast, .15s);
+}
+
+.gsh-me:hover { border-color: var(--gs-seal); background: var(--gs-seal-wash); }
+.gsh-me[data-static='true'] { cursor: default; }
+.gsh-me[data-static='true']:hover { border-color: var(--gs-rule); background: var(--gs-paper); }
+
+.gsh-me-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: var(--gs-seal-wash);
+  color: var(--gs-seal);
+  font-family: var(--gs-display);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.gsh-me-lines { min-width: 0; line-height: 1.25; }
+
+.gsh-me-name {
+  display: block;
+  font-family: var(--gs-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gs-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gsh-me-sub {
+  display: block;
+  font-family: var(--gs-data);
+  font-size: 9.5px;
+  color: var(--gs-ink-faint);
+  white-space: nowrap;
+}
+
+/* ── Le volet des notifications ───────────────────────────────────────── */
+
+.gsh-notif-anchor { position: relative; }
+
+.gsh-notif {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  width: min(370px, calc(100vw - 32px));
+  max-height: min(470px, calc(100vh - var(--header-height) - 32px));
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  background: var(--gs-paper);
+  border: 1px solid var(--gs-rule-strong);
+  border-radius: var(--border-radius, 12px);
+  box-shadow: var(--gs-shadow-lift);
+  animation: gsh-drop .18s ease;
+}
+
+@keyframes gsh-drop {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.gsh-notif-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--gs-rule);
+  flex-shrink: 0;
+}
+
+.gsh-notif-head > strong {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--gs-display);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--gs-ink);
+}
+
+.gsh-notif-head b {
+  font-family: var(--gs-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gs-alert);
+}
+
+.gsh-notif-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gsh-notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--gs-rule);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast, .15s);
+}
+
+.gsh-notif-item:hover { background: var(--gs-paper-alt); }
+.gsh-notif-item[data-unread='true'] { background: var(--gs-seal-wash); }
+.gsh-notif-item[data-unread='true']:hover { background: var(--gs-paper-alt); }
+.gsh-notif-list > li:last-child .gsh-notif-item { border-bottom: 0; }
+
+/* La priorité est un état, donc un point coloré et non un fond : trois encres
+   seulement, celles que la couche de conception autorise. */
+.gsh-notif-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--gs-ink-faint);
+}
+
+.gsh-notif-dot[data-priority='urgent'],
+.gsh-notif-dot[data-priority='high'] { background: var(--gs-alert); }
+.gsh-notif-dot[data-priority='normal'] { background: var(--gs-seal); }
+
+.gsh-notif-lines { flex: 1; min-width: 0; }
+
+.gsh-notif-title {
+  display: block;
+  font-family: var(--gs-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gs-ink);
+}
+
+.gsh-notif-msg {
+  margin-top: 2px;
+  font-family: var(--gs-body);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--gs-ink-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.gsh-notif-foot-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.gsh-notif-time {
+  font-family: var(--gs-data);
+  font-size: 9.5px;
+  color: var(--gs-ink-faint);
+}
+
+.gsh-notif-cta {
+  font-family: var(--gs-body);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--gs-seal);
+}
+
+.gsh-notif-foot {
+  display: flex;
+  justify-content: center;
+  padding: 9px;
+  border-top: 1px solid var(--gs-rule);
+  flex-shrink: 0;
+}
+
+.gsh-notif-empty { padding: 6px; }
+
+/* ── Le tiroir ────────────────────────────────────────────────────────── */
+
+.gsh-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: var(--bg-overlay);
+  animation: gsh-fade .18s ease;
+}
+
+@keyframes gsh-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Palier 1 : le rail, de 901 à 1024 px ─────────────────────────────
+   `index.css` ramène déjà la marge du contenu à 72 px ici. On aligne enfin la
+   barre sur cette promesse, que l'utilisateur ait replié ou non. */
+
+@media (min-width: 901px) and (max-width: 1024px) {
+  .app-layout .sidebar { width: var(--sidebar-collapsed); }
+  .app-layout .header { left: var(--sidebar-collapsed); }
+
+  .app-layout .sidebar .nav-section-title,
+  .app-layout .sidebar .logo-text,
+  .app-layout .sidebar .nav-label,
+  .app-layout .sidebar .ctx-badge-sidebar,
+  .app-layout .sidebar .nav-badge,
+  .app-layout .sidebar .user-details,
+  .app-layout .sidebar .gsh-lang,
+  .app-layout .sidebar .gsh-logout,
+  .app-layout .sidebar .gsh-collapse { display: none; }
+
+  .app-layout .sidebar .nav-item { justify-content: center; padding: 9px; }
+  .app-layout .sidebar .nav-item.active::before { left: -10px; }
+  .app-layout .sidebar-logo { justify-content: center; padding: 0 12px; }
+  .app-layout .sidebar-nav { padding: 10px 10px 14px; }
+  .app-layout .user-info { justify-content: center; padding: 7px 0; }
+}
+
+/* ── Palier 2 : le tiroir, sous 900 px ────────────────────────────────
+   La barre sort du flux. Le contenu reprend toute la largeur — `index.css` ne
+   le faisait qu'à 768 px, laissant 130 px de recouvrement entre les deux. */
+
+@media (max-width: 900px) {
+  .app-layout .main-content { margin-left: 0; }
+  .app-layout .header { left: 0; padding: 0 14px; }
+
+  .app-layout .sidebar {
+    transform: translateX(-100%);
+    box-shadow: none;
+    transition: transform var(--transition-base, .25s);
+  }
+
+  .app-layout[data-nav='open'] .sidebar {
+    transform: none;
+    box-shadow: var(--gs-shadow-lift);
+  }
+
+  /* Le tiroir s'ouvre toujours en entier : un rail d'icônes replié n'aurait
+     aucune raison d'exister ici, et l'utilisateur ne peut plus le déplier. */
+  .app-layout .sidebar.collapsed { width: var(--sidebar-width); }
+  .app-layout .sidebar.collapsed .logo-text { display: flex; }
+  .app-layout .sidebar.collapsed .nav-label { display: inline; }
+  .app-layout .sidebar.collapsed .nav-section-title { display: flex; }
+  .app-layout .sidebar.collapsed .ctx-badge-sidebar { display: flex; }
+  .app-layout .sidebar.collapsed .nav-badge { display: inline-flex; }
+  .app-layout .sidebar.collapsed .user-details { display: block; }
+  .app-layout .sidebar.collapsed .nav-item { justify-content: flex-start; padding: 8px 9px; }
+
+  .app-layout .sidebar .gsh-collapse { display: none; }
+  .app-layout .sidebar .gsh-nav-close { display: flex; }
+  .gsh-burger { display: flex; }
+}
+
+@media (max-width: 760px) {
+  .gsh-today { display: none; }
+}
+
+@media (max-width: 560px) {
+  .gsh-me-lines { display: none; }
+  .gsh-me { max-width: none; padding: 4px 5px; }
+  .app-layout .header-title { font-size: 14.5px; }
+}

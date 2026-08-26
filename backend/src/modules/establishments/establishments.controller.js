@@ -1,9 +1,103 @@
 const { query, transaction } = require('../../config/database');
 const { log, getIp } = require('../history/history.controller');
 const { initEstablishmentDefaults } = require('../schedules/rules-engine');
+const { dutyEntries, entryHours } = require('../schedules/spreadsheet-reader');
 const { ensureDefaultAbsenceTypes } = require('../absences/absence-types.service');
+const { ensureDefaultShiftTypes } = require('../schedules/shift-types.service');
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+// ──────────────────────────────────────────────────────────────
+// Compteurs de garde du mois
+//
+// La table `shifts` n'est plus alimentée par le Tableur : les affectations
+// vivent dans `schedules.metadata.spreadsheet`. Les deux endroits de ce module
+// qui affichent « gardes et heures du mois » — le registre du personnel et le
+// rapport mensuel — lisent donc le tableur, et ne retombent sur `shifts` que
+// pour les plannings antérieurs au registre, exactement comme le portefeuille
+// (portfolio.controller.js).
+// ──────────────────────────────────────────────────────────────
+const monthBounds = (year, month) => {
+  const y = Number(year);
+  const m = Number(month);
+  const prefix = `${y}-${String(m).padStart(2, '0')}`;
+  // Jour 0 du mois suivant = dernier jour du mois demandé.
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { first: `${prefix}-01`, last: `${prefix}-${String(lastDay).padStart(2, '0')}` };
+};
+
+/**
+ * Gardes et heures d'un mois, par agent : Map userId → { shifts, hours }.
+ * `userId` restreint le calcul à un seul agent (rapport mensuel).
+ */
+const loadMonthlyDuty = async ({ establishmentId, year, month, userId = null }) => {
+  const counters = new Map();
+  if (!establishmentId) return counters;
+
+  const { first, last } = monthBounds(year, month);
+  const bump = (id, shifts, hours) => {
+    if (!id) return;
+    const current = counters.get(id) || { shifts: 0, hours: 0 };
+    current.shifts += shifts;
+    current.hours += hours;
+    counters.set(id, current);
+  };
+
+  // Plannings qui chevauchent le mois. Les brouillons sont exclus : ils ne sont
+  // pas encore du service rendu.
+  const scheduleResult = await query(
+    `SELECT sch.id, sch.department_id, sch.schedule_type, sch.metadata,
+            TO_CHAR(sch.start_date, 'YYYY-MM-DD') AS start_date,
+            TO_CHAR(sch.end_date, 'YYYY-MM-DD') AS end_date
+       FROM schedules sch
+      WHERE sch.establishment_id = $1
+        AND sch.status NOT IN ('draft', 'cancelled', 'rejected')
+        AND sch.start_date <= $3::date
+        AND sch.end_date >= $2::date`,
+    [establishmentId, first, last]
+  );
+
+  for (const schedule of scheduleResult.rows) {
+    if (!Array.isArray(schedule.metadata?.spreadsheet?.rows)) continue;
+    for (const entry of dutyEntries(schedule, first, last)) {
+      if (userId && entry.userId !== userId) continue;
+      bump(entry.userId, 1, entryHours(entry));
+    }
+  }
+
+  // Repli historique. Le garde-fou `jsonb_typeof` suffit à éviter le double
+  // comptage : tout planning porteur d'un tableur est écarté ici. Le LEFT JOIN
+  // conserve les gardes orphelines (sans planning), qui restent du legacy.
+  const legacyParams = [establishmentId, first, last];
+  const legacyConditions = [
+    's.establishment_id = $1',
+    's.shift_date BETWEEN $2::date AND $3::date',
+    "s.status <> 'cancelled'",
+    "jsonb_typeof(sch.metadata -> 'spreadsheet' -> 'rows') IS DISTINCT FROM 'array'",
+  ];
+  if (userId) {
+    legacyParams.push(userId);
+    legacyConditions.push(`s.user_id = $${legacyParams.length}`);
+  }
+  const legacyResult = await query(
+    `SELECT s.user_id,
+            COUNT(DISTINCT s.id)::integer AS shifts,
+            COALESCE(SUM(st.duration_hours), 0)::float AS hours
+       FROM shifts s
+       LEFT JOIN schedules sch ON sch.id = s.schedule_id
+       LEFT JOIN shift_types st ON st.id = s.shift_type_id
+      WHERE ${legacyConditions.join(' AND ')}
+      GROUP BY s.user_id`,
+    legacyParams
+  );
+  for (const row of legacyResult.rows) {
+    bump(row.user_id, Number(row.shifts) || 0, Number(row.hours) || 0);
+  }
+
+  return counters;
+};
+
+const roundHours = (value) => Math.round((Number(value) || 0) * 10) / 10;
 
 // Les établissements de cette plateforme sont tunisiens. Accepter une paire
 // GPS complète uniquement et refuser les valeurs qui produiraient un marqueur
@@ -166,6 +260,13 @@ const create = async (req, res) => {
 
     // Types standards requis par l'appel du jour et la gestion des congés.
     await ensureDefaultAbsenceTypes(eid, client);
+
+    // Types de garde J/S/N/G : le tableur ne les utilise plus (il ne connaît que
+    // « de service / pas de service »), mais ils alimentent toujours la table
+    // `shifts`, les statistiques bâties sur elle et les remplacements. La
+    // migration 028 ne s'exécutant qu'au démarrage, un établissement créé en
+    // cours de session s'en retrouverait dépourvu.
+    await ensureDefaultShiftTypes(eid, client);
 
     return est.rows[0];
   });
@@ -407,25 +508,12 @@ const getPersonnel = async (req, res) => {
            FROM user_departments ud2
            JOIN departments d2 ON d2.id = ud2.department_id
           WHERE ud2.user_id = u.id
-       ), '[]'::jsonb) AS departments_detail,
-       -- Gardes du mois courant
-       COUNT(DISTINCT s.id) FILTER (
-         WHERE EXTRACT(YEAR FROM s.shift_date) = ${year}
-           AND EXTRACT(MONTH FROM s.shift_date) = ${month}
-           AND s.status != 'cancelled'
-       ) AS shifts_this_month,
-       COALESCE(SUM(st.duration_hours) FILTER (
-         WHERE EXTRACT(YEAR FROM s.shift_date) = ${year}
-           AND EXTRACT(MONTH FROM s.shift_date) = ${month}
-           AND s.status IN ('completed','confirmed','planned')
-       ), 0) AS hours_this_month
+       ), '[]'::jsonb) AS departments_detail
      FROM users u
      JOIN roles r ON r.id = u.role_id
      LEFT JOIN roles r2 ON r2.id = u.secondary_role_id
      LEFT JOIN user_departments ud ON ud.user_id = u.id
      LEFT JOIN departments d ON d.id = ud.department_id
-     LEFT JOIN shifts s ON s.user_id = u.id
-     LEFT JOIN shift_types st ON st.id = s.shift_type_id
      WHERE ${where}
      GROUP BY u.id, r.id, r2.id
      ORDER BY r.level, u.last_name, u.first_name
@@ -438,9 +526,20 @@ const getPersonnel = async (req, res) => {
     params
   );
 
+  // Gardes et heures du mois : lues dans le tableur, pas dans `shifts`.
+  const duty = await loadMonthlyDuty({ establishmentId: eid, year, month });
+  const rows = result.rows.map((row) => {
+    const counters = duty.get(row.id) || { shifts: 0, hours: 0 };
+    return {
+      ...row,
+      shifts_this_month: counters.shifts,
+      hours_this_month: roundHours(counters.hours),
+    };
+  });
+
   return res.json({
     success: true,
-    data: result.rows,
+    data: rows,
     pagination: {
       total: parseInt(countRes.rows[0].count),
       page: parseInt(page),
@@ -462,8 +561,15 @@ const getEstablishmentHistory = async (req, res) => {
   const offset = (page - 1) * limit;
   const eid = req.params.id;
 
+  // `activity_logs` ne porte pas de colonne `establishment_id` : une ligne de
+  // journal n'appartient à un établissement que par l'auteur de l'action
+  // (`user_id`, NOT NULL et supprimé en cascade — il n'existe donc jamais de
+  // ligne orpheline). L'ancienne condition citait `al.establishment_id`, une
+  // colonne inexistante : PostgreSQL rejetait la requête entière (42703) et le
+  // panneau renvoyait 500 à chaque ouverture. On garde le seul rattachement
+  // réel, celui que lit déjà `history.controller`.
   let conditions = [
-    `(al.establishment_id = $1 OR u.establishment_id = $1)`
+    `u.establishment_id = $1`
   ];
   let params = [eid];
   let idx = 2;
@@ -472,7 +578,10 @@ const getEstablishmentHistory = async (req, res) => {
   if (severity) { conditions.push(`al.severity = $${idx}`); params.push(severity); idx++; }
   if (userId)   { conditions.push(`al.user_id = $${idx}`);  params.push(userId);  idx++; }
   if (from)     { conditions.push(`al.created_at >= $${idx}`); params.push(from);  idx++; }
-  if (to)       { conditions.push(`al.created_at <= $${idx}`); params.push(to);    idx++; }
+  // `to` arrive en date nue (« 2026-08-08 »), que PostgreSQL lit comme minuit :
+  // une borne `<= '2026-08-08'` écarte donc tout ce qui s'est passé ce jour-là.
+  // On ferme la journée, comme le fait déjà `history.controller`.
+  if (to)       { conditions.push(`al.created_at <= $${idx}`); params.push(`${to} 23:59:59`); idx++; }
 
   const where = conditions.join(' AND ');
 
@@ -704,6 +813,7 @@ const getSalaryReport = async (req, res) => {
   const userRes = await query(
     `SELECT u.first_name, u.last_name, u.base_salary, u.hourly_rate,
             u.hire_date, u.speciality, u.grade, u.avatar_url,
+            u.establishment_id,
             r.name AS role_name, r.code AS role_code,
             e.name AS establishment_name
      FROM users u
@@ -717,7 +827,9 @@ const getSalaryReport = async (req, res) => {
 
   const user = userRes.rows[0];
 
-  // Stats gardes du mois
+  // Stats gardes du mois — voies historiques uniquement (statut, garde extra) :
+  // le tableur ne connaît ni l'un ni l'autre. Le garde-fou `jsonb_typeof` évite
+  // le double comptage avec les affectations lues plus bas.
   const shiftsRes = await query(
     `SELECT
        COUNT(*) FILTER (WHERE s.status NOT IN ('cancelled'))         AS total_shifts,
@@ -732,17 +844,38 @@ const getSalaryReport = async (req, res) => {
        ), 0) AS extra_hours
      FROM shifts s
      JOIN shift_types st ON st.id = s.shift_type_id
+     LEFT JOIN schedules sch ON sch.id = s.schedule_id
      WHERE s.user_id = $1
        AND EXTRACT(YEAR  FROM s.shift_date) = $2
-       AND EXTRACT(MONTH FROM s.shift_date) = $3`,
+       AND EXTRACT(MONTH FROM s.shift_date) = $3
+       AND jsonb_typeof(sch.metadata -> 'spreadsheet' -> 'rows') IS DISTINCT FROM 'array'`,
     [userId, year, month]
   );
 
-  const stats = shiftsRes.rows[0];
+  // Affectations du tableur du mois, ajoutées aux gardes historiques. Aucune
+  // n'est « extra » : le tableur ne distingue pas la garde supplémentaire, donc
+  // la prime reste adossée aux seules heures extra saisies comme telles.
+  const duty = await loadMonthlyDuty({
+    establishmentId: user.establishment_id,
+    year,
+    month,
+    userId,
+  });
+  const tableur = duty.get(userId) || { shifts: 0, hours: 0 };
+  const legacy = shiftsRes.rows[0];
+  const stats = {
+    total_shifts: (Number(legacy.total_shifts) || 0) + tableur.shifts,
+    completed: Number(legacy.completed) || 0,
+    absent: Number(legacy.absent) || 0,
+    billable_shifts: (Number(legacy.billable_shifts) || 0) + tableur.shifts,
+    total_hours: roundHours((Number(legacy.total_hours) || 0) + tableur.hours),
+    extra_hours: roundHours(legacy.extra_hours),
+  };
+
   const baseSalary   = parseFloat(user.base_salary)  || 0;
   const hourlyRate   = parseFloat(user.hourly_rate)   || 0;
-  const extraHours   = parseFloat(stats.extra_hours)  || 0;
-  const totalHours   = parseFloat(stats.total_hours)  || 0;
+  const extraHours   = stats.extra_hours;
+  const totalHours   = stats.total_hours;
   const extraPay     = extraHours * hourlyRate;
   const totalSalary  = baseSalary + extraPay;
 

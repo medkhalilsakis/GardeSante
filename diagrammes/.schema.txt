@@ -1,0 +1,657 @@
+◇ injected env (13) from .env // tip: ⌘ suppress logs { quiet: true }
+✅ Connected to PostgreSQL
+
+### absence_types  (28 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  code : VARCHAR(30)  [NN]
+  name : VARCHAR(100)  [NN]
+  name_ar : VARCHAR(100)
+  requires_justification : BOOL =false
+  is_paid : BOOL =true
+  color : VARCHAR(7) ='#EF4444'::character varying
+  is_active : BOOL =true
+  is_leave : BOOL =false
+
+### absences  (7 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id NN]
+  department_id : UUID  [FK->departments.id NN]
+  user_id : UUID  [FK->users.id NN]
+  shift_id : UUID  [FK->shifts.id]
+  absence_type_id : UUID  [FK->absence_types.id NN]
+  start_date : DATE  [NN]
+  end_date : DATE  [NN]
+  reason : TEXT
+  justification_url : TEXT
+  status : VARCHAR(30) ='pending'::character varying
+  declared_by : UUID  [FK->users.id NN]
+  approved_by : UUID  [FK->users.id]
+  approved_at : TIMESTAMPTZ
+  rejection_reason : TEXT
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+  start_time : TIME
+  end_time : TIME
+  kind : VARCHAR(20) ='shift_absence'::character varying
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE]
+  reported_by_role : VARCHAR(40)
+  is_justified : BOOL =false
+  notified_at : TIMESTAMPTZ
+  late_minutes : INT
+  CHECK absences_late_minutes_range : CHECK (late_minutes IS NULL) OR ((late_minutes >= 0) AND (late_minutes <= 1440))
+  CHECK chk_absence_dates : CHECK end_date >= start_date
+  CHECK chk_absence_status : CHECK (status)::text = ANY ((ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying, 'cancelled'::character varying])::text[])
+
+### activity_logs  (386 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  user_id : UUID  [FK->users.id ON DEL CASCADE NN]
+  action : VARCHAR(80)  [NN]
+  category : VARCHAR(40) ='general'::character varying  [NN]
+  description : TEXT
+  description_ar : TEXT
+  entity_type : VARCHAR(60)
+  entity_id : UUID
+  metadata : JSONB ='{}'::jsonb
+  ip_address : VARCHAR(45)
+  user_agent : TEXT
+  severity : VARCHAR(10) ='info'::character varying  [NN]
+  created_at : TIMESTAMPTZ =now()  [NN]
+
+### assistant_briefs  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  department_id : UUID  [FK->departments.id ON DEL CASCADE NN]
+  name : VARCHAR(160)  [NN]
+  mode : VARCHAR(30) ='balanced'::character varying  [NN]
+  brief : JSONB ='{}'::jsonb  [NN]
+  created_by : UUID  [FK->users.id ON DEL CASCADE NN]
+  times_used : INT =0  [NN]
+  last_used_at : TIMESTAMPTZ
+  created_at : TIMESTAMPTZ =now()  [NN]
+  updated_at : TIMESTAMPTZ =now()  [NN]
+  CHECK chk_brief_mode : CHECK (mode)::text = ANY ((ARRAY['manual'::character varying, 'rotation'::character varying, 'ab_rotation'::character varying, 'periods'::character varying, 'balanced'::character varying])::text[])
+
+### audit_logs  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id]
+  user_id : UUID  [FK->users.id]
+  action : VARCHAR(100)  [NN]
+  entity_type : VARCHAR(50)
+  entity_id : UUID
+  old_values : JSONB
+  new_values : JSONB
+  ip_address : INET
+  user_agent : TEXT
+  created_at : TIMESTAMPTZ =now()
+
+### departments  (9 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  parent_id : UUID  [FK->departments.id]
+  code : VARCHAR(30)  [NN]
+  name : VARCHAR(150)  [NN]
+  name_ar : VARCHAR(150)
+  department_type : VARCHAR(50) ='other'::character varying
+  floor : VARCHAR(30)
+  wing : VARCHAR(30)
+  phone : VARCHAR(30)
+  bed_count : INT
+  min_guard_count : INT =1
+  is_active : BOOL =true
+  created_at : TIMESTAMPTZ =now()
+
+### establishment_configs  (18 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  config_key : VARCHAR(100)  [NN]
+  config_value : TEXT
+  config_type : VARCHAR(20) ='string'::character varying
+  description : TEXT
+  description_ar : TEXT
+  updated_by : UUID
+  updated_at : TIMESTAMPTZ =now()
+
+### establishment_rules  (15 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  rule_code : VARCHAR(80)  [NN]
+  rule_name : VARCHAR(200)  [NN]
+  rule_name_ar : VARCHAR(200)
+  rule_type : VARCHAR(50)  [NN]
+  config : JSONB ='{}'::jsonb  [NN]
+  severity : VARCHAR(20) ='warning'::character varying  [NN]
+  is_active : BOOL =true
+  is_system : BOOL =false
+  priority : INT =0
+  created_by : UUID  [FK->users.id]
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+
+### establishments  (4 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  code : VARCHAR(20)  [NN]
+  name : VARCHAR(255)  [NN]
+  name_ar : VARCHAR(255)
+  type : VARCHAR(50) ='hospital'::character varying  [NN]
+  address : TEXT
+  city : VARCHAR(100)
+  phone : VARCHAR(30)
+  email : VARCHAR(150)
+  logo_url : TEXT
+  is_active : BOOL =true
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+  governorate : VARCHAR(100) =NULL::character varying
+  delegation : VARCHAR(120)
+  postal_code : VARCHAR(20)
+  address_details : TEXT
+  latitude : NUMERIC
+  longitude : NUMERIC
+
+### job_titles  (448 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE]
+  name : VARCHAR(200)  [NN]
+  name_ar : VARCHAR(200)
+  category : VARCHAR(50) ='medical'::character varying
+  is_system : BOOL =false
+  is_active : BOOL =true
+  sort_order : INT =0
+  created_at : TIMESTAMPTZ =now()
+  category_label : VARCHAR(100)
+
+### learned_columns  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  raw_label : VARCHAR(300)  [NN]
+  normalized_label : VARCHAR(300)
+  detected_type : VARCHAR(50)
+  mapped_to : UUID  [FK->schedule_column_models.id ON DEL SET NULL]
+  confidence : NUMERIC =0.0
+  times_used : INT =1
+  was_confirmed : BOOL =false
+  was_rejected : BOOL =false
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+
+### note_attachments  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  note_id : UUID  [FK->notes.id ON DEL CASCADE NN]
+  kind : VARCHAR(10)  [NN]
+  file_url : TEXT  [NN]
+  file_name : VARCHAR(255)  [NN]
+  mime_type : VARCHAR(100)
+  size_bytes : INT
+  created_at : TIMESTAMPTZ =now()  [NN]
+  CHECK chk_attachment_kind : CHECK (kind)::text = ANY ((ARRAY['image'::character varying, 'pdf'::character varying])::text[])
+
+### note_reads  (7 lignes)
+  note_id : UUID  [PK FK->notes.id ON DEL CASCADE NN]
+  user_id : UUID  [PK FK->users.id ON DEL CASCADE NN]
+  read_at : TIMESTAMPTZ =now()  [NN]
+
+### note_reminders  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  note_id : UUID  [FK->notes.id ON DEL CASCADE NN]
+  user_id : UUID  [FK->users.id ON DEL CASCADE NN]
+  sent_by : UUID  [FK->users.id ON DEL SET NULL]
+  sent_at : TIMESTAMPTZ =now()  [NN]
+
+### notes  (3 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE]
+  department_id : UUID  [FK->departments.id ON DEL CASCADE]
+  author_id : UUID  [FK->users.id ON DEL CASCADE NN]
+  scope : VARCHAR(30)  [NN]
+  title : VARCHAR(255)  [NN]
+  body : TEXT
+  category : VARCHAR(40) ='note'::character varying
+  priority : VARCHAR(10) ='normal'::character varying  [NN]
+  is_pinned : BOOL =false  [NN]
+  recipients_count : INT =0  [NN]
+  published_at : TIMESTAMPTZ =now()  [NN]
+  created_at : TIMESTAMPTZ =now()  [NN]
+  updated_at : TIMESTAMPTZ =now()  [NN]
+  CHECK chk_note_priority : CHECK (priority)::text = ANY ((ARRAY['low'::character varying, 'normal'::character varying, 'high'::character varying, 'urgent'::character varying])::text[])
+  CHECK chk_note_scope : CHECK (scope)::text = ANY ((ARRAY['platform_directors'::character varying, 'establishment_staff'::character varying, 'department'::character varying])::text[])
+
+### notifications  (109 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id NN]
+  recipient_id : UUID  [FK->users.id NN]
+  sender_id : UUID  [FK->users.id]
+  type : VARCHAR(50)  [NN]
+  title : VARCHAR(255)  [NN]
+  title_ar : VARCHAR(255)
+  message : TEXT  [NN]
+  message_ar : TEXT
+  entity_type : VARCHAR(50)
+  entity_id : UUID
+  is_read : BOOL =false
+  read_at : TIMESTAMPTZ
+  priority : VARCHAR(20) ='normal'::character varying
+  created_at : TIMESTAMPTZ =now()
+
+### permissions  (39 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  code : VARCHAR(100)  [NN]
+  module : VARCHAR(50)  [NN]
+  action : VARCHAR(50)  [NN]
+  description : TEXT
+  description_ar : TEXT
+
+### profile_change_requests  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  user_id : UUID  [FK->users.id ON DEL CASCADE NN]
+  status : VARCHAR(20) ='pending'::character varying  [NN]
+  current_data : JSONB ='{}'::jsonb  [NN]
+  requested_data : JSONB ='{}'::jsonb  [NN]
+  changed_fields : ARRAY ='{}'::text[]  [NN]
+  submitted_at : TIMESTAMPTZ =now()
+  reviewed_at : TIMESTAMPTZ
+  reviewed_by : UUID  [FK->users.id ON DEL SET NULL]
+  rejection_reason : TEXT
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+
+### public_holidays  (4 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  name : VARCHAR(255)  [NN]
+  start_date : DATE  [NN]
+  end_date : DATE  [NN]
+  year : INT  [NN]
+  category : VARCHAR(50) ='national'::character varying  [NN]
+  is_recurring : BOOL =false  [NN]
+  multiplier : NUMERIC =1.50  [NN]
+  notes : TEXT
+  created_by : UUID  [FK->users.id ON DEL SET NULL]
+  created_at : TIMESTAMPTZ =now()  [NN]
+  updated_at : TIMESTAMPTZ =now()  [NN]
+
+### replacement_candidates  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  replacement_id : UUID  [FK->replacements.id ON DEL CASCADE NN]
+  user_id : UUID  [FK->users.id NN]
+  score : NUMERIC
+  status : VARCHAR(20) ='proposed'::character varying
+  notified_at : TIMESTAMPTZ
+  responded_at : TIMESTAMPTZ
+  notes : TEXT
+
+### replacement_items  (1 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  replacement_id : UUID  [FK->replacements.id ON DEL CASCADE NN]
+  absent_user_id : UUID  [FK->users.id NN]
+  replacement_user_id : UUID  [FK->users.id NN]
+  from_department_id : UUID  [FK->departments.id]
+  is_cross_department : BOOL =false
+  notes : TEXT
+  created_at : TIMESTAMPTZ =now()
+  CHECK chk_replacement_item_distinct : CHECK absent_user_id <> replacement_user_id
+
+### replacements  (1 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id NN]
+  shift_id : UUID  [FK->shifts.id]
+  absent_user_id : UUID  [FK->users.id]
+  replacement_user_id : UUID  [FK->users.id]
+  absence_id : UUID  [FK->absences.id]
+  status : VARCHAR(30) ='pending'::character varying
+  urgency : VARCHAR(20) ='normal'::character varying
+  requested_by : UUID  [FK->users.id NN]
+  notes : TEXT
+  proposed_at : TIMESTAMPTZ
+  accepted_at : TIMESTAMPTZ
+  completed_at : TIMESTAMPTZ
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+  department_id : UUID  [FK->departments.id]
+  duration_type : VARCHAR(30) ='full'::character varying
+  replacement_start_time : VARCHAR(10)
+  replacement_end_time : VARCHAR(10)
+  duration_custom : VARCHAR(100)
+  start_date : DATE
+  end_date : DATE
+  confirmed_by : UUID  [FK->users.id]
+  confirmed_at : TIMESTAMPTZ
+  replacement_type : VARCHAR(30) ='full'::character varying
+  start_time : TIME
+  end_time : TIME
+  duration_hours : NUMERIC
+  target_department_id : UUID  [FK->departments.id]
+  confirmation_status : VARCHAR(50) ='confirmed'::character varying
+  rejected_by : UUID  [FK->users.id]
+  rejection_reason : TEXT
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE]
+  scope : VARCHAR(20)
+  created_by_role : VARCHAR(40)
+  reason : TEXT
+  CHECK chk_replacement_confirmation : CHECK (confirmation_status IS NULL) OR ((confirmation_status)::text = ANY ((ARRAY['confirmed'::character varying, 'pending_chef'::character varying])::text[]))
+  CHECK chk_replacement_period : CHECK (end_date IS NULL) OR (start_date IS NULL) OR (end_date >= start_date)
+  CHECK chk_replacement_scope : CHECK (scope IS NULL) OR ((scope)::text = ANY ((ARRAY['full_period'::character varying, 'date_range'::character varying, 'single_day'::character varying, 'time_slot'::character varying])::text[]))
+  CHECK chk_replacement_status : CHECK (status)::text = ANY ((ARRAY['pending'::character varying, 'proposed'::character varying, 'confirmed'::character varying, 'accepted'::character varying, 'rejected'::character varying, 'cancelled'::character varying, 'completed'::character varying])::text[])
+
+### role_permissions  (390 lignes)
+  role_id : UUID  [PK FK->roles.id ON DEL CASCADE NN]
+  permission_id : UUID  [PK FK->permissions.id ON DEL CASCADE NN]
+
+### roles  (22 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE]
+  code : VARCHAR(50)  [NN]
+  name : VARCHAR(100)  [NN]
+  name_ar : VARCHAR(100)
+  level : INT =0  [NN]
+  is_system : BOOL =false
+  description : TEXT
+  created_at : TIMESTAMPTZ =now()
+
+### rule_evaluations  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  rule_id : UUID  [FK->establishment_rules.id ON DEL SET NULL]
+  rule_code : VARCHAR(80)  [NN]
+  severity : VARCHAR(20)  [NN]
+  violations : JSONB ='[]'::jsonb  [NN]
+  evaluated_at : TIMESTAMPTZ =now()
+
+### schedule_change_proposals  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  department_id : UUID  [FK->departments.id ON DEL CASCADE NN]
+  proposed_by : UUID  [FK->users.id NN]
+  proposal : JSONB  [NN]
+  comment : TEXT
+  status : VARCHAR(20) ='pending'::character varying  [NN]
+  decided_by : UUID  [FK->users.id]
+  decision_comment : TEXT
+  decided_at : TIMESTAMPTZ
+  created_at : TIMESTAMPTZ =now()  [NN]
+  updated_at : TIMESTAMPTZ =now()  [NN]
+  CHECK schedule_change_proposals_status_check : CHECK (status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'rejected'::character varying])::text[])
+
+### schedule_column_models  (30 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE]
+  code : VARCHAR(50)  [NN]
+  label : VARCHAR(150)  [NN]
+  label_ar : VARCHAR(150)
+  data_type : VARCHAR(30) ='text'::character varying  [NN]
+  validation_rules : JSONB ='{}'::jsonb  [NN]
+  is_system : BOOL =false
+  is_default : BOOL =true
+  display_order : INT =0
+  is_active : BOOL =true
+  created_at : TIMESTAMPTZ =now()
+
+### schedule_cycles  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  cycle_label : VARCHAR(20)  [NN]
+  cycle_color : VARCHAR(7) ='#3B82F6'::character varying
+  start_date : DATE  [NN]
+  end_date : DATE  [NN]
+  team_ids : ARRAY ='{}'::uuid[]
+  shift_pattern : JSONB ='{}'::jsonb
+  notes : TEXT
+  created_at : TIMESTAMPTZ =now()
+
+### schedule_snapshots  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  snapshot : JSONB  [NN]
+  version : INT =1  [NN]
+  created_at : TIMESTAMPTZ =now()
+  created_by : UUID  [FK->users.id]
+
+### schedule_staff_assignments  (30 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  user_id : UUID  [FK->users.id NN]
+  period_start : DATE  [NN]
+  period_end : DATE  [NN]
+  position : INT =0  [NN]
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+  CHECK chk_roster_assignment_dates : CHECK period_end >= period_start
+
+### schedule_staff_periods  (30 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  user_id : UUID  [FK->users.id ON DEL CASCADE NN]
+  period_start : DATE  [NN]
+  period_end : DATE  [NN]
+  position : INT =0  [NN]
+  created_at : TIMESTAMPTZ =now()  [NN]
+  CHECK chk_schedule_staff_period_dates : CHECK period_end >= period_start
+
+### schedule_templates  (1 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  department_id : UUID  [FK->departments.id ON DEL SET NULL]
+  name : VARCHAR(200)  [NN]
+  description : TEXT
+  period_type : VARCHAR(30) ='monthly'::character varying  [NN]
+  week_mode : VARCHAR(20) ='standard'::character varying  [NN]
+  generation_algo : VARCHAR(50) ='round_robin'::character varying  [NN]
+  column_ids : ARRAY ='{}'::uuid[]
+  shift_type_ids : ARRAY ='{}'::uuid[]
+  shared_with : ARRAY ='{}'::uuid[]
+  config : JSONB ='{}'::jsonb  [NN]
+  is_active : BOOL =true
+  is_default : BOOL =false
+  times_used : INT =0
+  created_by : UUID  [FK->users.id]
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+
+### schedule_versions  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  version_number : INT  [NN]
+  parent_version_id : UUID  [FK->schedule_versions.id ON DEL SET NULL]
+  created_by : UUID  [FK->users.id NN]
+  author_role : VARCHAR(40)  [NN]
+  review_stage : VARCHAR(30)  [NN]
+  status : VARCHAR(30) ='pending_chef'::character varying  [NN]
+  snapshot : JSONB  [NN]
+  comment : TEXT
+  decision_comment : TEXT
+  decided_by : UUID  [FK->users.id]
+  decided_at : TIMESTAMPTZ
+  is_final : BOOL =false  [NN]
+  created_at : TIMESTAMPTZ =now()  [NN]
+  updated_at : TIMESTAMPTZ =now()  [NN]
+  CHECK schedule_versions_review_stage_check : CHECK (review_stage)::text = ANY ((ARRAY['service_supervisor'::character varying, 'general_supervisor'::character varying])::text[])
+  CHECK schedule_versions_status_check : CHECK (status)::text = ANY ((ARRAY['final'::character varying, 'pending_chef'::character varying, 'accepted'::character varying, 'rejected'::character varying, 'available_to_general'::character varying])::text[])
+
+### schedule_workflow_history  (8 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  step_order : INT  [NN]
+  action : VARCHAR(30)  [NN]
+  actor_id : UUID  [FK->users.id NN]
+  comment : TEXT
+  created_at : TIMESTAMPTZ =now()
+
+### schedules  (12 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  department_id : UUID  [FK->departments.id NN]
+  name : VARCHAR(200)  [NN]
+  start_date : DATE  [NN]
+  end_date : DATE  [NN]
+  status : VARCHAR(30) ='draft'::character varying  [NN]
+  created_by : UUID  [FK->users.id NN]
+  current_workflow_step : INT =0
+  workflow_id : UUID  [FK->workflow_definitions.id]
+  notes : TEXT
+  rejection_reason : TEXT
+  published_at : TIMESTAMPTZ
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+  template_id : UUID  [FK->schedule_templates.id ON DEL SET NULL]
+  period_type : VARCHAR(30) ='monthly'::character varying  [NN]
+  creation_mode : VARCHAR(30) ='manual'::character varying  [NN]
+  is_shared : BOOL =false
+  shared_with : ARRAY ='{}'::uuid[]
+  metadata : JSONB ='{}'::jsonb  [NN]
+  final_version_id : UUID  [FK->schedule_versions.id ON DEL SET NULL]
+  type : VARCHAR(30) ='normal'::character varying  [NN]
+  schedule_type : VARCHAR(50) ='normal'::character varying  [NN]
+  CHECK chk_schedule_dates : CHECK end_date >= start_date
+  CHECK chk_schedule_status : CHECK (status)::text = ANY ((ARRAY['draft'::character varying, 'submitted'::character varying, 'under_review'::character varying, 'approved'::character varying, 'rejected'::character varying, 'active'::character varying, 'archived'::character varying])::text[])
+
+### service_alerts  (6 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  department_id : UUID  [FK->departments.id ON DEL CASCADE]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE]
+  alert_type : VARCHAR(40)  [NN]
+  severity : VARCHAR(10) ='warning'::character varying  [NN]
+  title : VARCHAR(255)  [NN]
+  message : TEXT  [NN]
+  entity_type : VARCHAR(50)
+  entity_id : UUID
+  acknowledged_by : UUID  [FK->users.id ON DEL SET NULL]
+  acknowledged_at : TIMESTAMPTZ
+  resolved_at : TIMESTAMPTZ
+  created_at : TIMESTAMPTZ =now()  [NN]
+  CHECK chk_alert_severity : CHECK (severity)::text = ANY ((ARRAY['info'::character varying, 'warning'::character varying, 'error'::character varying, 'critical'::character varying, 'urgent'::character varying])::text[])
+  CHECK chk_alert_type : CHECK (alert_type)::text = ANY ((ARRAY['staff_absent'::character varying, 'shift_uncovered'::character varying, 'replacement_pending'::character varying, 'urgent_notification'::character varying, 'conflict_detected'::character varying, 'insufficient_staff'::character varying])::text[])
+
+### shift_events  (29 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  department_id : UUID  [FK->departments.id ON DEL CASCADE NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE]
+  shift_id : UUID  [FK->shifts.id ON DEL SET NULL]
+  event_type : VARCHAR(30)  [NN]
+  user_id : UUID  [FK->users.id ON DEL SET NULL]
+  reported_by : UUID  [FK->users.id ON DEL CASCADE NN]
+  event_time : TIMESTAMPTZ =now()  [NN]
+  title : VARCHAR(255)  [NN]
+  description : TEXT
+  severity : VARCHAR(10) ='info'::character varying  [NN]
+  metadata : JSONB
+  created_at : TIMESTAMPTZ =now()  [NN]
+  duty_date : DATE =((CURRENT_TIMESTAMP AT TIME ZONE '
+  CHECK chk_event_severity : CHECK (severity)::text = ANY ((ARRAY['info'::character varying, 'warning'::character varying, 'error'::character varying, 'critical'::character varying])::text[])
+  CHECK chk_event_type : CHECK (event_type)::text = ANY ((ARRAY['presence'::character varying, 'absence'::character varying, 'late'::character varying, 'incident'::character varying, 'remark'::character varying, 'reinforcement'::character varying])::text[])
+
+### shift_types  (16 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  code : VARCHAR(30)  [NN]
+  name : VARCHAR(100)  [NN]
+  name_ar : VARCHAR(100)
+  start_time : TIME  [NN]
+  end_time : TIME  [NN]
+  duration_hours : NUMERIC  [NN]
+  is_overnight : BOOL =false
+  color : VARCHAR(7) ='#3B82F6'::character varying
+  is_active : BOOL =true
+  created_at : TIMESTAMPTZ =now()
+
+### shifts  (6 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  establishment_id : UUID  [FK->establishments.id NN]
+  department_id : UUID  [FK->departments.id NN]
+  user_id : UUID  [FK->users.id NN]
+  shift_type_id : UUID  [FK->shift_types.id NN]
+  shift_date : DATE  [NN]
+  actual_start : TIMESTAMPTZ
+  actual_end : TIMESTAMPTZ
+  status : VARCHAR(30) ='planned'::character varying  [NN]
+  notes : TEXT
+  is_extra : BOOL =false
+  created_by : UUID  [FK->users.id]
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+  CHECK chk_shift_status : CHECK (status)::text = ANY ((ARRAY['planned'::character varying, 'confirmed'::character varying, 'absent'::character varying, 'replaced'::character varying, 'cancelled'::character varying, 'completed'::character varying])::text[])
+
+### staff_loan_requests  (1 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  schedule_id : UUID  [FK->schedules.id ON DEL CASCADE NN]
+  requesting_department_id : UUID  [FK->departments.id ON DEL CASCADE NN]
+  requesting_chief_id : UUID  [FK->users.id ON DEL CASCADE NN]
+  staff_user_id : UUID  [FK->users.id ON DEL CASCADE NN]
+  owner_department_id : UUID  [FK->departments.id ON DEL CASCADE NN]
+  owner_chief_id : UUID  [FK->users.id ON DEL SET NULL NN]
+  shift_date : DATE  [NN]
+  status : VARCHAR(20) ='pending'::character varying  [NN]
+  requested_at : TIMESTAMPTZ =now()  [NN]
+  responded_at : TIMESTAMPTZ
+  response_reason : TEXT
+  CHECK chk_loan_status : CHECK (status)::text = ANY ((ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying, 'auto_approved'::character varying])::text[])
+
+### user_departments  (42 lignes)
+  user_id : UUID  [PK FK->users.id ON DEL CASCADE NN]
+  department_id : UUID  [PK FK->departments.id ON DEL CASCADE NN]
+  is_head : BOOL =false
+  is_primary : BOOL =true
+  joined_at : DATE =CURRENT_DATE
+
+### users  (47 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  role_id : UUID  [FK->roles.id NN]
+  matricule : VARCHAR(50)
+  first_name : VARCHAR(100)  [NN]
+  last_name : VARCHAR(100)  [NN]
+  first_name_ar : VARCHAR(100)
+  last_name_ar : VARCHAR(100)
+  email : VARCHAR(150)  [NN]
+  phone : VARCHAR(30)
+  password_hash : TEXT  [NN]
+  speciality : VARCHAR(100)
+  grade : VARCHAR(100)
+  is_active : BOOL =true
+  is_on_leave : BOOL =false
+  avatar_url : TEXT
+  preferred_language : VARCHAR(5) ='fr'::character varying
+  last_login : TIMESTAMPTZ
+  password_reset_token : TEXT
+  password_reset_expires : TIMESTAMPTZ
+  refresh_token : TEXT
+  created_at : TIMESTAMPTZ =now()
+  updated_at : TIMESTAMPTZ =now()
+  can_login : BOOL =true
+  birth_date : DATE
+  gender : VARCHAR(20) ='non_renseigne'::character varying
+  address : TEXT
+  city : VARCHAR(100)
+  id_card_number : VARCHAR(50)
+  id_card_expiry : DATE
+  hire_date : DATE
+  bio : TEXT
+  hourly_rate : NUMERIC =NULL::numeric
+  base_salary : NUMERIC =NULL::numeric
+  last_activity_at : TIMESTAMPTZ
+  job_title_id : UUID  [FK->job_titles.id ON DEL SET NULL]
+  archived_at : TIMESTAMPTZ
+  archived_by : UUID  [FK->users.id ON DEL SET NULL]
+  archive_reason : TEXT
+  secondary_role_id : UUID  [FK->roles.id ON DEL SET NULL]
+
+### workflow_definitions  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  establishment_id : UUID  [FK->establishments.id ON DEL CASCADE NN]
+  name : VARCHAR(100)  [NN]
+  entity_type : VARCHAR(50)  [NN]
+  is_active : BOOL =true
+  created_at : TIMESTAMPTZ =now()
+
+### workflow_steps  (0 lignes)
+  id : UUID =uuid_generate_v4()  [PK NN]
+  workflow_id : UUID  [FK->workflow_definitions.id ON DEL CASCADE NN]
+  step_order : INT  [NN]
+  role_code : VARCHAR(50)  [NN]
+  step_name : VARCHAR(100)  [NN]
+  step_name_ar : VARCHAR(100)
+  is_optional : BOOL =false
+  timeout_hours : INT

@@ -1,0 +1,208 @@
+' ============================================================================
+' GardeSanté — Diagramme de classes : absences, événements et alertes
+'
+' Sources vérifiées (information_schema + pg_constraint) :
+'   absence_types(28), absences(7), shift_events(29), service_alerts(6).
+'
+' Contraintes CHECK relevées :
+'   chk_absence_status : pending | approved | rejected | cancelled
+'   chk_absence_dates  : end_date >= start_date
+'   absences_late_minutes_range : late_minutes entre 0 et 1440
+'   chk_event_type     : presence | absence | late | incident | remark
+'                        | reinforcement
+'   chk_event_severity : info | warning | error | critical
+'   chk_alert_type     : staff_absent | shift_uncovered | replacement_pending
+'                        | urgent_notification | conflict_detected
+'                        | insufficient_staff
+'   chk_alert_severity : info | warning | error | critical | urgent
+'
+' Règle de contrôleur vérifiée :
+'   journal.controller.js:344 — le directeur ne peut inscrire au journal de
+'   service que des événements de type `presence`.
+' ============================================================================
+@startuml 14-classes-absences
+!pragma layout smetana
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Segoe UI
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam classAttributeIconSize 0
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #1B4FCA
+  HeaderBackgroundColor #EEF2FF
+  FontStyle bold
+  AttributeFontSize 10
+  AttributeFontColor #334155
+  BackgroundColor<<référentiel>> #FFFFFF
+  BorderColor<<référentiel>> #0F766E
+  HeaderBackgroundColor<<référentiel>> #E6F4F1
+  BackgroundColor<<autre paquet>> #F8FAFC
+  BorderColor<<autre paquet>> #94A3B8
+  HeaderBackgroundColor<<autre paquet>> #F1F5F9
+  FontColor<<autre paquet>> #475569
+}
+skinparam NoteBackgroundColor #FEF9C3
+skinparam NoteBorderColor #B4530A
+hide circle
+hide methods
+
+title Diagramme de classes — Absences, événements de garde et alertes
+
+class TypeAbsence <<référentiel>> {
+  + id : UUID
+  --
+  code : VARCHAR(30)
+  nom : VARCHAR(100)
+  nomAr : VARCHAR(100)
+  justificatifRequis : BOOL = false
+  rémunérée : BOOL = true
+  estUnCongé : BOOL = false
+  couleur : VARCHAR(7)
+  actif : BOOL = true
+}
+
+class Absence {
+  + id : UUID
+  --
+  dateDébut : DATE
+  dateFin : DATE
+  heureDébut : TIME
+  heureFin : TIME
+  nature : VARCHAR(20) = 'shift_absence'
+  état : VARCHAR(30) = 'pending'
+  motif : TEXT
+  justificatifUrl : TEXT
+  justifiée : BOOL = false
+  rôleDéclarant : VARCHAR(40)
+  minutesDeRetard : INT
+  signaléeLe : TIMESTAMPTZ
+  approuvéeLe : TIMESTAMPTZ
+  motifRejet : TEXT
+  --
+  «CHECK» dateFin >= dateDébut
+  «CHECK» 0 <= minutesDeRetard <= 1440
+  «CHECK» état parmi pending | approved |
+  rejected | cancelled
+}
+
+class ÉvénementDeGarde {
+  + id : UUID
+  --
+  typeÉvénement : VARCHAR(30)
+  dateDeService : DATE
+  horodatage : TIMESTAMPTZ
+  titre : VARCHAR(255)
+  description : TEXT
+  gravité : VARCHAR(10) = 'info'
+  métadonnées : JSONB
+  --
+  «CHECK» typeÉvénement parmi presence |
+  absence | late | incident | remark |
+  reinforcement
+}
+
+class AlerteDeService {
+  + id : UUID
+  --
+  typeAlerte : VARCHAR(40)
+  gravité : VARCHAR(10) = 'warning'
+  titre : VARCHAR(255)
+  message : TEXT
+  typeEntité : VARCHAR(50)
+  identifiantEntité : UUID
+  priseEnCompteLe : TIMESTAMPTZ
+  résolueLe : TIMESTAMPTZ
+  --
+  «CHECK» typeAlerte parmi staff_absent |
+  shift_uncovered | replacement_pending |
+  urgent_notification | conflict_detected
+  | insufficient_staff
+}
+
+class Utilisateur <<autre paquet>> {
+  + id : UUID
+}
+
+class Service <<autre paquet>> {
+  + id : UUID
+}
+
+class Planning <<autre paquet>> {
+  + id : UUID
+}
+
+class Garde <<autre paquet>> {
+  + id : UUID
+}
+
+Absence "0..*" --> "1" TypeAbsence : qualifiée par
+Absence "0..*" --> "1" Utilisateur : concerne
+Absence "0..*" --> "1" Utilisateur : déclarée par
+Absence "0..*" --> "0..1" Utilisateur : validée par
+Absence "0..*" --> "1" Service : dans le service
+Absence "0..*" --> "0..1" Garde : sur la garde
+Absence "0..*" --> "0..1" Planning : dans le planning
+
+ÉvénementDeGarde "0..*" --> "0..1" Garde : sur la garde
+ÉvénementDeGarde "0..*" --> "0..1" Planning : dans le planning
+ÉvénementDeGarde "0..*" --> "0..1" Utilisateur : agent concerné
+ÉvénementDeGarde "0..*" --> "1" Utilisateur : signalé par
+ÉvénementDeGarde "0..*" --> "1" Service : dans le service
+
+AlerteDeService "0..*" --> "0..1" Planning : porte sur
+AlerteDeService "0..*" --> "0..1" Service : dans le service
+AlerteDeService "0..*" --> "0..1" Utilisateur : prise en compte par
+
+note as N1
+  **Deux natures d'absence dans une seule table.**
+  `nature` distingue l'absence ponctuelle sur une garde
+  (`shift_absence`) du congé posé sur une période
+  (`leave`). Un congé approuvé interdit d'affecter
+  l'agent à une garde recouvrant la période : le
+  contrôle est appliqué à l'affectation, pas seulement
+  signalé après coup.
+end note
+
+note as N2
+  **`rôleDéclarant` conserve qui a signalé.**
+  Un agent déclare sa propre absence ; un surveillant
+  peut la signaler à sa place lors de l'appel du jour.
+  La colonne mémorise le rôle du déclarant, ce qui
+  distingue une auto-déclaration d'un signalement
+  hiérarchique — deux situations de valeur probante
+  différente.
+end note
+
+note as N3
+  **L'appel du jour est borné par rôle.**
+  Le surveillant de service et le chef inscrivent tous
+  les types d'événement ; le directeur, lui, ne peut
+  inscrire qu'un événement de type `presence`. Il
+  constate une présence, il ne qualifie pas un
+  incident dans un service qu'il n'encadre pas
+  directement.
+end note
+
+note as N4
+  `AlerteDeService` est produite par la plateforme, non
+  saisie : elle signale une garde non couverte, un
+  effectif insuffisant, un remplacement en attente ou
+  un conflit détecté. `priseEnCompteLe` et `résolueLe`
+  distinguent l'accusé de réception du traitement
+  effectif.
+end note
+
+N1 .. Absence
+N2 .. TypeAbsence
+N3 .. ÉvénementDeGarde
+N4 .. AlerteDeService
+
+legend right
+  Bleu : entités du paquet Absences.
+  Vert : référentiel de paramétrage.
+  Gris : entité d'un autre paquet, citée pour l'association.
+endlegend
+
+@enduml

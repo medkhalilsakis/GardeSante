@@ -1,0 +1,168 @@
+.gsdl-page {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  padding-bottom: 24px;
+}
+
+.gsdl-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.gsdl-conflict-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--gs-ink-soft);
+  font-size: 12px;
+}
+
+.gsdl-grid-wrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.gsdl-grid {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+}
+
+.gsdl-grid th,
+.gsdl-grid td {
+  border-bottom: 1px solid var(--gs-rule);
+  border-right: 1px solid var(--gs-rule);
+}
+
+.gsdl-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-width: 42px;
+  padding: 8px 4px;
+  background: var(--gs-paper-alt);
+  color: var(--gs-ink-faint);
+  text-align: center;
+  font-family: var(--gs-data);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.gsdl-grid thead th span,
+.gsdl-grid thead th b {
+  display: block;
+}
+
+.gsdl-grid thead th b {
+  margin-top: 2px;
+  color: var(--gs-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gsdl-grid thead th.is-weekend,
+.gsdl-grid tbody td.is-weekend {
+  background: var(--gs-alert-wash);
+}
+
+.gsdl-grid thead th.is-today {
+  box-shadow: inset 0 -2px 0 var(--gs-seal);
+  color: var(--gs-seal);
+}
+
+.gsdl-person-col,
+.gsdl-person {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  width: 190px;
+  min-width: 190px;
+  text-align: left !important;
+}
+
+.gsdl-person-col {
+  background: var(--gs-paper-alt) !important;
+}
+
+.gsdl-person {
+  padding: 9px 14px;
+  background: var(--gs-paper);
+}
+
+.gsdl-person strong,
+.gsdl-person span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gsdl-person strong {
+  color: var(--gs-ink);
+  font-family: var(--gs-display);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gsdl-person span {
+  margin-top: 2px;
+  color: var(--gs-ink-faint);
+  font-size: 10px;
+}
+
+.gsdl-grid td {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 3px;
+  background: var(--gs-paper);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.gsdl-duty {
+  display: block;
+  min-width: 27px;
+  padding: 4px 2px;
+  border: 1px solid color-mix(in srgb, var(--gs-duty) 44%, transparent);
+  border-radius: 4px;
+  background: var(--gs-duty-wash);
+  color: var(--gs-duty);
+  font-family: var(--gs-data);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.gsdl-duty.is-cancelled {
+  opacity: .45;
+  text-decoration: line-through;
+}
+
+.gsdl-footnote {
+  display: flex;
+  gap: 10px 24px;
+  flex-wrap: wrap;
+  color: var(--gs-ink-faint);
+  font-size: 11px;
+}
+
+.gsdl-footnote span + span::before {
+  content: '·';
+  margin-right: 24px;
+}
+
+@media (max-width: 680px) {
+  .gsdl-actions { justify-content: flex-start; }
+  .gsdl-person-col,
+  .gsdl-person { width: 160px; min-width: 160px; }
+}

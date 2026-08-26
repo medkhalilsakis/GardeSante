@@ -9,6 +9,12 @@
  */
 const { query, transaction } = require('../../config/database');
 const { createNotification } = require('../notifications/notifications.controller');
+const { dutyEntries } = require('../schedules/spreadsheet-reader');
+// Journal d'activité : un refus SUPPRIME la ligne de remplacement (voir
+// `rejectOverlayReplacement`). Sans trace dans `activity_logs`, ce qui a été
+// demandé puis refusé ne subsiste nulle part. Le journal est le seul historique
+// immuable du parcours de surcouche.
+const { log, getIp } = require('../history/history.controller');
 
 const SCOPES = ['full_period', 'date_range', 'single_day', 'time_slot'];
 const CHEF_ROLES = ['department_head'];
@@ -47,6 +53,31 @@ const emitToUser = (req, userId, event, payload) => {
 };
 
 /**
+ * Même émission, vers la room du service (`department:<id>`), que rejoignent
+ * tous les membres du service via `joinDepartment` (`useRealtime.js`).
+ *
+ * Elle manquait : un remplacement créé, confirmé ou refusé ne prévenait que son
+ * auteur, et seulement par la notification. Les panneaux « Remplacements », la
+ * supervision de l'hôpital et la vue d'ensemble du chef n'apprenaient donc rien
+ * avant leur prochain rafraîchissement périodique — alors que le client écoute
+ * déjà `replacement:created`, `replacement:confirmed` et `replacement:rejected`
+ * depuis le Lot 0. Personne ne les émettait.
+ *
+ * Helper local, sur le modèle de `emitToUser` juste au-dessus : le module reste
+ * autonome, et la signature `(req, …)` ne peut pas être confondue avec celle de
+ * `realtime/emit.js`, qui attend `app`.
+ */
+const emitToDept = (req, departmentId, event, payload) => {
+  if (!departmentId) return;
+  try {
+    const io = req.app.get('io');
+    if (io) io.to(`department:${departmentId}`).emit(event, payload);
+  } catch (err) {
+    console.error('Socket emit failed:', err.message);
+  }
+};
+
+/**
  * Destinataires « information » : surveillants du service + surveillants
  * généraux de l'hôpital. Même requête que notifyScheduleReviewers.
  */
@@ -71,7 +102,7 @@ const notifySupervisors = async (req, { establishmentId, departmentId, senderId,
       title, titleAr: 'استبدال جديد',
       message, entityType: 'replacements', entityId: replacementId, priority: 'normal',
     });
-    emitToUser(req, id, 'notification', { type: 'replacement_created', title, message, entityId: replacementId });
+    emitToUser(req, id, 'notification:new', { type: 'replacement_created', title, message, entityId: replacementId });
   }));
 };
 
@@ -97,7 +128,7 @@ const notifyChef = async (req, { establishmentId, departmentId, senderId, replac
       title, titleAr: 'استبدال في انتظار التأكيد',
       message, entityType: 'replacements', entityId: replacementId, priority: 'high',
     });
-    emitToUser(req, id, 'notification', { type: 'replacement_pending_confirmation', title, message, entityId: replacementId });
+    emitToUser(req, id, 'notification:new', { type: 'replacement_pending_confirmation', title, message, entityId: replacementId });
   }));
 };
 
@@ -113,6 +144,107 @@ const toDateOnly = (value) => {
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return null;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+/**
+ * Roster d'un planning, quelle que soit sa génération.
+ *
+ * Le Tableur est la source moderne de vérité : une ligne compte pour chaque
+ * jour où elle est réellement de service. Les anciens plannings sans lignes
+ * de Tableur sont lus dans `shifts` pour préserver les remplacements existants.
+ */
+const loadScheduleRoster = async (schedule) => {
+  if (Array.isArray(schedule?.metadata?.spreadsheet?.rows)) {
+    const counts = new Map();
+    for (const entry of dutyEntries(schedule)) {
+      if (!entry.userId) continue;
+      counts.set(entry.userId, (counts.get(entry.userId) || 0) + 1);
+    }
+    return { counts, userIds: [...counts.keys()] };
+  }
+
+  const { rows } = await query(
+    `SELECT user_id, COUNT(*)::integer AS shift_count
+       FROM shifts
+      WHERE schedule_id = $1 AND status <> 'cancelled'
+      GROUP BY user_id`,
+    [schedule.id]
+  );
+  const counts = new Map(rows.map((row) => [row.user_id, Number(row.shift_count) || 0]));
+  // Certains plannings historiques ne possédaient que des affectations de
+  // roster, sans ligne `shifts`. Elles restent éligibles au remplacement.
+  const assignments = await query(
+    `SELECT DISTINCT user_id
+       FROM schedule_staff_assignments
+      WHERE schedule_id = $1`,
+    [schedule.id]
+  );
+  for (const row of assignments.rows) {
+    if (!counts.has(row.user_id)) counts.set(row.user_id, 0);
+  }
+  return { counts, userIds: [...counts.keys()] };
+};
+
+/**
+ * Utilisateurs de garde sur une période, pour l'avertissement de conflit d'un
+ * remplaçant. Les dates sont des clés DATE ; aucune conversion UTC n'est faite.
+ */
+const loadDutyUserIds = async ({ establishmentId, userIds, from, to, excludeScheduleId }) => {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length || !from || !to) return new Set();
+
+  const params = [establishmentId, from, to];
+  const requestedIds = new Set(ids);
+  const conditions = [
+    'sch.establishment_id = $1',
+    'sch.start_date <= $3',
+    'sch.end_date >= $2',
+    "sch.status NOT IN ('draft', 'cancelled', 'rejected')",
+  ];
+  if (excludeScheduleId) {
+    params.push(excludeScheduleId);
+    conditions.push(`sch.id <> $${params.length}`);
+  }
+  const schedules = await query(
+    `SELECT sch.id, sch.start_date, sch.end_date, sch.schedule_type, sch.metadata
+       FROM schedules sch
+      WHERE ${conditions.join(' AND ')}`,
+    params
+  );
+
+  const modernIds = [];
+  const found = new Set();
+  for (const schedule of schedules.rows) {
+    if (!Array.isArray(schedule.metadata?.spreadsheet?.rows)) continue;
+    modernIds.push(schedule.id);
+    for (const entry of dutyEntries(schedule, from, to)) {
+      if (requestedIds.has(entry.userId)) found.add(entry.userId);
+    }
+  }
+
+  const legacyParams = [ids, from, to, establishmentId];
+  const legacyConditions = [
+    's.user_id = ANY($1::uuid[])',
+    's.shift_date BETWEEN $2 AND $3',
+    's.establishment_id = $4',
+    "s.status <> 'cancelled'",
+  ];
+  if (excludeScheduleId) {
+    legacyParams.push(excludeScheduleId);
+    legacyConditions.push(`s.schedule_id <> $${legacyParams.length}`);
+  }
+  if (modernIds.length) {
+    legacyParams.push(modernIds);
+    legacyConditions.push(`s.schedule_id <> ALL($${legacyParams.length}::uuid[])`);
+  }
+  const legacy = await query(
+    `SELECT DISTINCT s.user_id
+       FROM shifts s
+      WHERE ${legacyConditions.join(' AND ')}`,
+    legacyParams
+  );
+  for (const row of legacy.rows) found.add(row.user_id);
+  return found;
 };
 
 /**
@@ -204,7 +336,9 @@ const getEligibleSchedules = async (req, res) => {
     `(sch.final_version_id IS NOT NULL
       OR EXISTS (SELECT 1 FROM schedule_versions sv WHERE sv.schedule_id = sch.id AND sv.is_final = TRUE)
       OR sch.status IN ('submitted','under_review','approved','active'))`,
-    // Garde courante : la période n'est pas terminée
+    // Garde courante : elle a commencé mais n'est pas encore terminée.
+    // Une garde future ne peut pas faire l'objet d'un remplacement.
+    'sch.start_date <= CURRENT_DATE',
     'sch.end_date >= CURRENT_DATE',
   ];
   const params = [eid];
@@ -246,32 +380,43 @@ const getEligibleSchedules = async (req, res) => {
 const getScheduleStaff = async (req, res) => {
   const { scheduleId } = req.params;
   const sched = await query(
-    'SELECT id, department_id, establishment_id, status FROM schedules WHERE id = $1 AND establishment_id = $2',
+    `SELECT id, department_id, establishment_id, status, start_date, end_date, metadata,
+            (start_date <= CURRENT_DATE AND end_date >= CURRENT_DATE) AS is_current,
+            (final_version_id IS NOT NULL
+              OR EXISTS (SELECT 1 FROM schedule_versions sv WHERE sv.schedule_id = schedules.id AND sv.is_final = TRUE)
+              OR status IN ('submitted','under_review','approved','active')) AS is_finalized
+       FROM schedules
+      WHERE id = $1 AND establishment_id = $2`,
     [scheduleId, req.user.establishmentId]
   );
   if (!sched.rows[0]) return res.status(404).json({ success: false, message: 'Planning introuvable' });
-  if (sched.rows[0].status === 'draft') {
+  const currentSchedule = sched.rows[0];
+  if (!currentSchedule.is_current) {
+    return res.status(400).json({ success: false, message: 'Seules les gardes actuellement en cours sont concernées.' });
+  }
+  if (currentSchedule.status === 'draft') {
     return res.status(400).json({ success: false, message: 'Les brouillons ne sont pas concernés par les remplacements.' });
   }
+  if (!currentSchedule.is_finalized) {
+    return res.status(400).json({ success: false, message: "Ce planning n'est pas encore soumis définitivement." });
+  }
+
+  const roster = await loadScheduleRoster(currentSchedule);
+  if (!roster.userIds.length) return res.json({ success: true, data: [] });
 
   const { rows } = await query(
     `SELECT DISTINCT u.id, u.first_name, u.last_name, u.matricule, u.speciality, u.grade,
             r.name AS role_name, r.code AS role_code,
-            d.id AS department_id, d.name AS department_name,
-            (SELECT COUNT(*) FROM shifts s2
-              WHERE s2.schedule_id = $1 AND s2.user_id = u.id AND s2.status <> 'cancelled') AS shift_count
+            d.id AS department_id, d.name AS department_name
      FROM users u
      JOIN roles r ON r.id = u.role_id
      LEFT JOIN user_departments ud ON ud.user_id = u.id AND ud.is_primary = TRUE
      LEFT JOIN departments d ON d.id = ud.department_id
-     WHERE u.id IN (
-       SELECT user_id FROM shifts WHERE schedule_id = $1 AND status <> 'cancelled'
-       UNION
-       SELECT user_id FROM schedule_staff_assignments WHERE schedule_id = $1
-     )
+     WHERE u.id = ANY($1::uuid[])
      ORDER BY u.last_name, u.first_name`,
-    [scheduleId]
+    [roster.userIds]
   );
+  for (const row of rows) row.shift_count = roster.counts.get(row.id) || 0;
 
   return res.json({ success: true, data: rows });
 };
@@ -286,9 +431,36 @@ const getOverlayReplacements = async (req, res) => {
   }
 
   const { scheduleId, confirmationStatus } = req.query;
-  const conditions = ['r.establishment_id = $1', 'r.schedule_id IS NOT NULL'];
-  const params = [req.user.establishmentId];
-  let idx = 2;
+
+  // Une demande ciblée (`scheduleId`) et la liste générale ne se bornent pas de
+  // la même façon :
+  //
+  //  • La fenêtre « garde courante » (le planning couvre aujourd'hui) est ce qui
+  //    fait de la LISTE une liste de gardes en cours. Sur une demande ciblée elle
+  //    n'a plus de sens et devient nuisible : l'aperçu d'un tableur déjà terminé
+  //    ou pas encore commencé n'affichait aucun remplacement, alors qu'il en
+  //    portait bien.
+  //  • La borne d'établissement est levée pour le seul Super Admin, et seulement
+  //    sur une demande ciblée : son propre établissement est le compte plateforme
+  //    (`00000000-…`), qui ne possède aucun planning, donc la borne lui renvoyait
+  //    toujours une liste vide — même piège que `getScheduleDetail`. Sa liste
+  //    générale, elle, ne change pas.
+  //
+  // Le cloisonnement par service ci-dessous n'est pas touché : c'est une règle de
+  // confidentialité, pas une borne technique.
+  const targeted = !!scheduleId;
+  const conditions = ['r.schedule_id IS NOT NULL'];
+  const params = [];
+  let idx = 1;
+
+  if (!(req.user.isSuperAdmin && targeted)) {
+    conditions.push(`r.establishment_id = $${idx}`);
+    params.push(req.user.establishmentId);
+    idx++;
+  }
+  if (!targeted) {
+    conditions.push('sch.start_date <= CURRENT_DATE', 'sch.end_date >= CURRENT_DATE');
+  }
 
   if (scheduleId) { conditions.push(`r.schedule_id = $${idx}`); params.push(scheduleId); idx++; }
   if (confirmationStatus) { conditions.push(`r.confirmation_status = $${idx}`); params.push(confirmationStatus); idx++; }
@@ -379,7 +551,9 @@ const createOverlayReplacement = async (req, res) => {
               OR sch.status IN ('submitted','under_review','approved','active')) AS is_finalized
      FROM schedules sch
      JOIN departments d ON d.id = sch.department_id
-     WHERE sch.id = $1 AND sch.establishment_id = $2`,
+     WHERE sch.id = $1 AND sch.establishment_id = $2
+       AND sch.start_date <= CURRENT_DATE
+       AND sch.end_date >= CURRENT_DATE`,
     [scheduleId, user.establishmentId]
   );
   const schedule = schedRes.rows[0];
@@ -442,6 +616,14 @@ const createOverlayReplacement = async (req, res) => {
     }
   }
 
+  // Le personnel d'origine doit appartenir au roster de la garde sélectionnée.
+  const roster = await loadScheduleRoster(schedule);
+  const rosterIds = new Set(roster.userIds.filter((id) => absentIds.includes(id)));
+  const missing = absentIds.filter(id => !rosterIds.has(id));
+  if (missing.length) {
+    return res.status(400).json({ success: false, message: 'Chaque personnel remplacé doit être affecté au planning sélectionné.' });
+  }
+
   // ── Blocage des chevauchements sur un même remplacé ──
   const existing = await query(
     `SELECT r.id, r.scope, r.start_date, r.end_date, r.start_time, r.end_time,
@@ -474,13 +656,20 @@ const createOverlayReplacement = async (req, res) => {
   const status = isChef ? 'accepted' : 'pending';
 
   // Avertissements non bloquants : remplaçant déjà de garde sur la période
-  const conflictRes = await query(
-    `SELECT DISTINCT s.user_id, u.first_name, u.last_name
-     FROM shifts s JOIN users u ON u.id = s.user_id
-     WHERE s.user_id = ANY($1) AND s.status <> 'cancelled'
-       AND s.shift_date BETWEEN $2 AND $3`,
-    [replacerIds, period.startDate || schedStart, period.endDate || schedEnd]
-  );
+  const conflictIds = await loadDutyUserIds({
+    establishmentId: user.establishmentId,
+    userIds: replacerIds,
+    from: period.startDate || schedStart,
+    to: period.endDate || schedEnd,
+  });
+  const conflictRes = conflictIds.size
+    ? await query(
+      `SELECT id AS user_id, first_name, last_name
+         FROM users
+        WHERE id = ANY($1::uuid[])`,
+      [[...conflictIds]]
+    )
+    : { rows: [] };
   const warnings = conflictRes.rows.map(r => ({
     userId: r.user_id,
     message: `${r.first_name} ${r.last_name} est déjà de garde sur cette période.`,
@@ -537,6 +726,27 @@ const createOverlayReplacement = async (req, res) => {
     await notifySupervisors(req, notifPayload);
   }
 
+  // Le service entier voit la nouvelle ligne apparaître sans rechargement.
+  emitToDept(req, schedule.department_id, 'replacement:created', {
+    replacementId: created.id, scheduleId: schedule.id, departmentId: schedule.department_id,
+    pendingChef: !isChef,
+  });
+
+  log({
+    userId: user.id,
+    action: 'replacement_overlay_created',
+    category: 'replacement',
+    description: `Remplacement déposé sur « ${schedule.name || 'Planning'} » (${items.length} binôme(s)), ${isChef ? 'confirmé d\'office' : 'en attente du chef de service'}`,
+    entityType: 'replacements', entityId: created.id,
+    metadata: {
+      scheduleId: schedule.id, departmentId: schedule.department_id,
+      scope: period.scope, startDate: period.startDate, endDate: period.endDate,
+      pairs: items.map((it) => ({ absentUserId: it.absentUserId, replacementUserId: it.replacementUserId })),
+      confirmationStatus, warnings: warnings.length,
+    },
+    ipAddress: getIp(req), userAgent: req.headers['user-agent'],
+  });
+
   return res.status(201).json({
     success: true,
     data: created,
@@ -582,7 +792,22 @@ const confirmOverlayReplacement = async (req, res) => {
     type: 'replacement_confirmed', title, titleAr: 'تم تأكيد الاستبدال',
     message, entityType: 'replacements', entityId: item.id, priority: 'normal',
   });
-  emitToUser(req, item.requested_by, 'notification', { type: 'replacement_confirmed', title, message, entityId: item.id });
+  emitToUser(req, item.requested_by, 'notification:new', { type: 'replacement_confirmed', title, message, entityId: item.id });
+  // Le remplacement s'applique désormais par-dessus le tableur : tout le service
+  // doit le voir sans rechargement, pas seulement l'auteur de la proposition.
+  emitToDept(req, item.department_id, 'replacement:confirmed', {
+    replacementId: item.id, scheduleId: item.schedule_id, departmentId: item.department_id,
+  });
+
+  log({
+    userId: req.user.id,
+    action: 'replacement_overlay_confirmed',
+    category: 'replacement',
+    description: `Remplacement confirmé sur « ${item.schedule_name || 'Planning'} »`,
+    entityType: 'replacements', entityId: item.id,
+    metadata: { scheduleId: item.schedule_id, departmentId: item.department_id, requestedBy: item.requested_by },
+    ipAddress: getIp(req), userAgent: req.headers['user-agent'],
+  });
 
   return res.json({ success: true, data: updated, message: 'Remplacement confirmé.' });
 };
@@ -618,10 +843,41 @@ const rejectOverlayReplacement = async (req, res) => {
     type: 'replacement_rejected', title, titleAr: 'تم رفض الاستبدال',
     message, entityType: 'replacements', entityId: null, priority: 'high',
   });
-  emitToUser(req, item.requested_by, 'notification', { type: 'replacement_rejected', title, message });
+  emitToUser(req, item.requested_by, 'notification:new', { type: 'replacement_rejected', title, message });
+
+  // Relevé des binômes AVANT la suppression : c'est la seule occasion de savoir
+  // qui devait remplacer qui. La cascade sur `replacement_items` emporte tout.
+  const doomed = await query(
+    'SELECT absent_user_id, replacement_user_id FROM replacement_items WHERE replacement_id = $1',
+    [req.params.id]
+  );
 
   // Suppression automatique (replacement_items part en cascade).
   await query('DELETE FROM replacements WHERE id = $1', [req.params.id]);
+
+  // Le refus efface la demande : sans cette ligne de journal, il ne resterait
+  // aucune trace de ce qui a été proposé ni du motif du refus.
+  log({
+    userId: req.user.id,
+    action: 'replacement_overlay_rejected',
+    category: 'replacement',
+    description: `Remplacement refusé et supprimé sur « ${item.schedule_name || 'Planning'} »${reason ? ` : ${reason}` : ''}`,
+    entityType: 'replacements', entityId: item.id,
+    metadata: {
+      scheduleId: item.schedule_id, departmentId: item.department_id,
+      requestedBy: item.requested_by, reason: reason || null,
+      scope: item.scope, startDate: item.start_date, endDate: item.end_date,
+      pairs: doomed.rows.map((r) => ({ absentUserId: r.absent_user_id, replacementUserId: r.replacement_user_id })),
+    },
+    severity: 'warning',
+    ipAddress: getIp(req), userAgent: req.headers['user-agent'],
+  });
+
+  // Émis APRÈS la suppression : la ligne doit disparaître des panneaux du
+  // service, et la file « à confirmer » du chef retomber d'un cran.
+  emitToDept(req, item.department_id, 'replacement:rejected', {
+    replacementId: item.id, scheduleId: item.schedule_id, departmentId: item.department_id,
+  });
 
   return res.json({ success: true, message: 'Remplacement refusé et supprimé.' });
 };
@@ -644,7 +900,38 @@ const deleteOverlayReplacement = async (req, res) => {
     return res.status(403).json({ success: false, message: 'Vous ne pouvez pas supprimer ce remplacement.' });
   }
 
+  // Même raison que pour le refus : la ligne va disparaître, on relève d'abord.
+  const doomed = await query(
+    'SELECT absent_user_id, replacement_user_id FROM replacement_items WHERE replacement_id = $1',
+    [req.params.id]
+  );
+
   await query('DELETE FROM replacements WHERE id = $1', [req.params.id]);
+
+  log({
+    userId: req.user.id,
+    action: 'replacement_overlay_deleted',
+    category: 'replacement',
+    description: isAuthorPending && !isChef
+      ? 'Proposition de remplacement retirée par son auteur'
+      : `Remplacement ${item.confirmation_status === 'confirmed' ? 'confirmé ' : ''}supprimé par le chef de service`,
+    entityType: 'replacements', entityId: item.id,
+    metadata: {
+      scheduleId: item.schedule_id, departmentId: item.department_id,
+      requestedBy: item.requested_by, confirmationStatus: item.confirmation_status,
+      scope: item.scope, startDate: item.start_date, endDate: item.end_date,
+      pairs: doomed.rows.map((r) => ({ absentUserId: r.absent_user_id, replacementUserId: r.replacement_user_id })),
+    },
+    severity: 'warning',
+    ipAddress: getIp(req), userAgent: req.headers['user-agent'],
+  });
+
+  // Un remplacement confirmé qui disparaît change la garde effective : le
+  // service doit le voir immédiatement, comme pour un refus.
+  emitToDept(req, item.department_id, 'replacement:rejected', {
+    replacementId: item.id, scheduleId: item.schedule_id, departmentId: item.department_id,
+  });
+
   return res.json({ success: true, message: 'Remplacement supprimé.' });
 };
 
